@@ -1,0 +1,9 @@
+ignore-empty-password
+show-failed-attempts
+disable-caps-lock-text
+indicator-caps-lock
+clock
+indicator
+indicator-radius=400
+indicator-idle-visible
+daemonize

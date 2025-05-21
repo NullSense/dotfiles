@@ -1,0 +1,47 @@
+#!/bin/bash
+
+percentage=$(< /sys/class/power_supply/BAT0/capacity)
+charging_status=$(< /sys/class/power_supply/BAT0/status)
+
+case $charging_status in
+    Full)
+        icon="󰁹"
+        ;;
+    Charging)
+        if (( percentage >= 95)); then
+            icon="󰂅"
+        elif (( percentage >= 80)); then
+            icon="󰂊"
+        elif (( percentage >= 60)); then
+            icon="󰂉"
+        elif (( percentage >= 40)); then
+            icon="󰂈"
+        elif (( percentage >= 30)); then
+            icon="󰂇"
+        elif (( percentage >= 20)); then
+            icon="󰂆"
+        elif (( percentage >= 0)); then
+            icon="󰢟"
+        fi
+        ;;
+    Discharging)
+        if (( percentage >= 93)); then
+            icon="󰂂"
+        elif (( percentage >= 80)); then
+            icon="󰂁"
+        elif (( percentage >= 60)); then
+            icon="󰁿"
+        elif (( percentage >= 40)); then
+            icon="󰁽"
+        elif (( percentage >= 20)); then
+            icon="󰁻"
+        elif (( percentage >= 0)); then
+            icon="󰂎"
+        fi
+        ;;
+    *) # Unknown status
+        icon=""
+esac
+
+echo "$icon: $percentage%"
+

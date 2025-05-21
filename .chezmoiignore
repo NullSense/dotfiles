@@ -1,0 +1,7 @@
+{{- if ne .chezmoi.hostname "orbiter" -}}
+.config/i3
+.config/i3blocks
+.xinitrc
+.Xresources
+bin/resize.py
+{{- end -}}

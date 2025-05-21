@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+# Aliases
+# Pacman
+alias psyu="sudo pacman -Syu"
+
+# yay
+# search through all available packages, install selected
+alias tss="paru -Slq | fzf --multi --preview 'paru -Si {1}' | xargs -ro paru -S"
+
+alias se="sudoedit"
+
+alias vim="nvim"
+# Docker
+alias dcu="docker-compose up"
+alias dcd="docker-compose down"
+alias dcr="docker-compose restart"
+
+# git aliases
+alias gs='git st'
+alias gl="git log master..HEAD --graph --pretty=format:'%Cred%h%Creset %Cgreen(%<(10,trunc)%cr) %C(bold blue)%<(16,trunc)<%an>%Creset %s %C(yellow)%d%Creset' --abbrev-commit --date=relative"
+alias gll="git log master --graph --pretty=format:'%Cred%h%Creset %Cgreen(%<(10,trunc)%cr) %C(bold blue)%<(16,trunc)<%an>%Creset %s %C(yellow)%d%Creset' --abbrev-commit --date=relative"
+alias gri='git rebase -i'
+alias grc='git rebase --continue'
+alias grm="git rebase master"
+alias gc="git checkout"
+
+alias rsync='rsync --info=progress2'
+alias l='ls -Fh --color=auto --group-directories-first'
+alias ll='ls -alF --color=auto --group-directories-first'
+alias dropdown='nohup alacritty -t dropdown_term > /dev/null 2>&1 &|'
+alias isso='ssh irc -NLvv 8080:localhost:8080'
+alias ls="exa"
+alias cat="bat"
+alias find="fd"
+alias pytest="pytest --reuse-db --reruns 0 -n auto"
+alias pyl="pytest --reuse-db --lf -n0 -fsvv"
+alias back="cd ~/work/mx-backend/src && poetry shell"
+alias front="cd ~/work/mx-webapp && nvm use"
+
+alias wayrestart="killall -SIGUSR2 waybar"

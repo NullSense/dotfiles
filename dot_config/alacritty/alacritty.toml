@@ -1,0 +1,96 @@
+[general]
+import = ["themes/gruvbox_dark.toml"]
+
+live_config_reload = true
+
+[window]
+# Window dimensions (in character cells)
+dimensions = { columns = 120, lines = 30 }
+
+padding = { x = 10, y = 10 }
+
+decorations = "Full"
+
+startup_mode = "Windowed"
+
+title = "Alacritty"
+
+dynamic_title = true
+
+
+[scrolling]
+history = 10000
+
+# Scroll multiplier
+
+multiplier = 3
+
+[font]
+normal = { family = "Hack Nerd Font", style = "Regular" }
+bold = { family = "Hack Nerd Font", style = "Bold" }
+italic = { family = "Hack Nerd Font", style = "Italic" }
+bold_italic = { family = "Hack Nerd Font", style = "Bold Italic" }
+
+# Font size (in points)
+size = 12.0
+
+builtin_box_drawing = true
+
+[bell]
+animation = "EaseOutExpo"
+duration = 0 # Set to 0 to disable the bell animation/flash
+color = "#ebdbb2" # Gruvbox foreground for bell color (if duration > 0)
+
+[selection]
+save_to_clipboard = true
+
+
+[cursor]
+style = { shape = "Block", blinking = "On" }
+blink_interval = 750
+unfocused_hollow = true
+
+[mouse]
+# Hide mouse cursor when typing
+hide_when_typing = true
+
+[keyboard]
+# Key bindings
+bindings = [
+
+    { key = "V", mods = "Control|Shift", action = "Paste" },
+    { key = "C", mods = "Control|Shift", action = "Copy" },
+    { key = "Insert", mods = "Shift", action = "PasteSelection" }, # For compatibility
+
+    # Font size
+    { key = "Equals", mods = "Control", action = "IncreaseFontSize" }, # Ctrl + =
+    { key = "NumpadAdd", mods = "Control", action = "IncreaseFontSize" }, # Ctrl + NumpadPlus
+    { key = "Minus", mods = "Control", action = "DecreaseFontSize" }, # Ctrl + -
+    { key = "NumpadSubtract", mods = "Control", action = "DecreaseFontSize" }, # Ctrl + NumpadMinus
+    { key = "Key0", mods = "Control", action = "ResetFontSize" }, # Ctrl + 0 (main keyboard)
+]
+
+#save_to_clipboard = true
+[colors.bright]
+black = "#928374"
+blue = "#83a598"
+cyan = "#8ec07c"
+green = "#b8bb26"
+magenta = "#d3869b"
+red = "#fb4934"
+white = "#ebdbb2"
+yellow = "#fabd2f"
+
+[colors.normal]
+black = "#282828"
+blue = "#458588"
+cyan = "#689d6a"
+green = "#98971a"
+magenta = "#b16286"
+red = "#cc241d"
+white = "#a89984"
+yellow = "#d79921"
+
+[colors.primary]
+background = "#282828"
+foreground = "#ebdbb2"

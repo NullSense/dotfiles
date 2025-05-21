@@ -1,0 +1,104 @@
+#! /usr/bin/env bash
+
+usage() {
+    cat <<EOF
+git st:
+    Colorful, compact git status
+
+USAGE
+    git st [-h]
+
+DESCRIPTION
+    One-line status for each file with lines added and removed.
+EOF
+}
+
+while getopts ":h" opt; do
+  case $opt in
+    h)
+      usage
+      exit 0
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+# IFS= before command substitution is a common pattern, though not strictly
+# necessary for `var="$(command)"` which captures output verbatim.
+# It primarily affects unquoted expansions later or commands like `read`.
+IFS=
+status_output="$(git -c color.status=always status -sb)"
+
+# Check if git status command failed (e.g. not a git repository)
+if [ $? -ne 0 ]; then
+    # Error message from git status should have already printed to stderr
+    exit 1
+fi
+
+# Get diff stats.
+# 2>/dev/null suppresses errors from `git diff` (e.g. if HEAD doesn't exist).
+# If `git diff` produces no output or only errors, raw_diff_stats will be empty.
+# The sed command:
+#  -e '$d': deletes the last line (summary line like "1 file changed...").
+#  -e 's/^\(.*\)\s*|\s*\(.*\)$/\2/': For other lines, extracts the part after " | ".
+#    This handles filenames with '|' correctly. \1 is filename part, \2 is stat part.
+raw_diff_stats="$(git diff --color --stat HEAD 2>/dev/null | \
+    sed -e '$d' -e 's/^\(.*\)\s*|\s*\(.*\)$/\2/')"
+
+# Split status_output and raw_diff_stats into arrays, using newline as delimiter.
+IFS=$'\n' status_lines=($status_output)
+IFS=$'\n' diff_lines=($raw_diff_stats)
+
+# Calculate the maximum length of file status lines for alignment.
+# status_lines[0] is the branch information.
+# File status lines start from status_lines[1].
+max_len_status_part=-1
+# Loop from i=1 (second element) up to the last element index.
+# If status_lines has only 1 element (branch line), loop `seq 1 0` is empty,
+# and max_len_status_part remains -1.
+for i in $(seq 1 $(( ${#status_lines[@]} - 1 )) ); do
+    current_line_len=${#status_lines[i]}
+    # If max_len_status_part is -1, any positive length will be greater.
+    if [ $current_line_len -gt $max_len_status_part ]; then
+        max_len_status_part=$current_line_len
+    fi
+done
+
+# For printf %*s, a negative width means left-justify in a field of abs(width).
+# If max_len_status_part remained -1 (no file lines), it becomes 1 after multiplication.
+# If it was a positive max length, it becomes -max_length.
+(( max_len_status_part *= -1 ))
+
+# Iterate through all status lines (branch + files)
+for i in $(seq 0 $(( ${#status_lines[@]} - 1 ))) ; do
+    current_status_part="${status_lines[i]}"
+    if [ $i -eq 0 ]; then
+        # First line is branch status (e.g., "## main...origin/main")
+        # Remove "## " prefix using cut as in the original script.
+        echo "${current_status_part}" | cut -d ' ' -f 2-
+    else
+        # File status line
+        current_diff_part=""
+        # diff_lines is 0-indexed. It corresponds to status_lines[1], status_lines[2], ...
+        # So for status_lines[i] (where i > 0), we need diff_lines[i-1].
+        # Check if diff_lines[i-1] exists and is non-empty.
+        # Accessing a potentially unset array index ${diff_lines[i-1]} (if i-1 is out of bounds)
+        # expands to an empty string if `set -u` is not active.
+        if [ -n "${diff_lines[i-1]}" ]; then
+            current_diff_part="|${diff_lines[i-1]}"
+        fi
+        # Print formatted: status part (left-aligned) then diff part.
+        printf "%*s  %s\n" $max_len_status_part "${current_status_part}" "${current_diff_part}"
+    fi
+done
+
+# If status_lines array has only one element (the branch line),
+# it means no files were listed by `git status -sb` (no modified, staged, or untracked files).
+# Also check that the branch line itself is not empty (paranoid check).
+if [ ${#status_lines[@]} -eq 1 ] && [ -n "${status_lines[0]}" ]; then
+    printf "\033[93mNothing to commit, working tree clean\033[0m\n"
+fi

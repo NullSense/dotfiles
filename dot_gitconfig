@@ -1,0 +1,24 @@
+[user]
+    email = matas234@gmail.com
+    name = NullSense
+    signingkey = CB5590199041EB914A80D18196154ED6A2543B48
+[credential]
+	helper = cache --timeout=3600
+[core]
+	excludesfile = /home/ongo/.gitignore
+	pager = delta --dark
+[interactive]
+    diffFilter = delta --color-only
+[delta]
+    features = line-numbers decorations
+    syntax-theme = gruvbox-dark
+[delta "decorations"]
+    file-style = bold blue ul
+[rebase]
+	autosquash = true
+[commit]
+	verbose = true
+[init]
+	defaultBranch = master
+[pull]
+	rebase = false

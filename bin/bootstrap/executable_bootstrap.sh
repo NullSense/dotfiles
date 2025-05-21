@@ -21,6 +21,10 @@ fi
 echo "Initializing Chezmoi from $CHEZMOI_REPO..."
 chezmoi init --apply "$CHEZMOI_REPO"
 
-echo "Chezmoi initialized. Further setup will be handled by Chezmoi scripts."
+echo "Chezmoi initialized."
+echo "Installing packages"
+$HOME/bin/bootstrap/install_packages.sh
+echo "Configuring system"
+$HOME/bin/bootstrap/system_cfg.sh
 echo "You might need to log out and log back in or reboot for all changes to take effect."
 echo "🎉 Bootstrap complete!"

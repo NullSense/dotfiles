@@ -10,8 +10,8 @@ echo "INFO: Updating pacman mirrorlist with reflector..."
 # Adjust --country and other parameters as needed.
 # This assumes reflector is installed.
 if command -v reflector &> /dev/null; then
-    reflector --country "Germany" --latest 10 --age 10 --protocol https --sort rate --save /etc/pacman.d/mirrorlist
-    pacman -Syu --noconfirm # Sync with new mirrors
+    sudo reflector --country "Germany" --latest 10 --age 10 --protocol https --sort rate --save /etc/pacman.d/mirrorlist
+    sudo pacman -Syu --noconfirm # Sync with new mirrors
 else
     echo "WARNING: reflector command not found. Skipping mirrorlist update."
 fi
@@ -99,6 +99,8 @@ echo "      Consider enabling Color, VerbosePkgLists, and ParallelDownloads in i
 # else
 #   echo "INFO: Hostname is already ${NEW_HOSTNAME}."
 # fi
+#
+chsh -s $(which zsh)
 
 echo "🎉 Generic System Configuration script finished."
 echo "A reboot might be required for all changes (like locale) to take full effect system-wide."

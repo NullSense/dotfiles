@@ -1,43 +1,82 @@
 #!/usr/bin/env bash
 
-HISTSIZE=10000
-SAVEHIST=10000
-HISTFILE=~/.zsh_history
+# ============================================================================
+# ZSH OPTIONS & CORE SETTINGS
+# ============================================================================
 
-# 10ms timeout instead of 40ms
+# History Configuration
+HISTSIZE=50000
+SAVEHIST=50000
+HISTFILE=~/.cache/zsh/history
+
+# Create cache directory if it doesn't exist
+[[ ! -d ~/.cache/zsh ]] && mkdir -p ~/.cache/zsh
+
+# History options
+setopt EXTENDED_HISTORY          # Write timestamp to history
+setopt HIST_EXPIRE_DUPS_FIRST    # Expire duplicate entries first
+setopt HIST_IGNORE_DUPS          # Don't record duplicates
+setopt HIST_IGNORE_ALL_DUPS      # Delete old duplicates
+setopt HIST_FIND_NO_DUPS         # Don't display duplicates during search
+setopt HIST_IGNORE_SPACE         # Don't record commands starting with space
+setopt HIST_SAVE_NO_DUPS         # Don't write duplicates to history file
+setopt HIST_REDUCE_BLANKS        # Remove extra blanks
+setopt HIST_VERIFY               # Show command with history expansion
+setopt SHARE_HISTORY             # Share history between sessions
+setopt APPEND_HISTORY            # Append to history file
+setopt INC_APPEND_HISTORY        # Add commands immediately
+
+# General options
+setopt AUTO_PUSHD                # Push directories to stack
+setopt PUSHD_IGNORE_DUPS         # Don't push duplicates
+setopt PUSHD_SILENT              # Don't print directory stack
+setopt CORRECT                   # Spelling correction
+setopt COMPLETE_IN_WORD          # Complete from cursor position
+setopt ALWAYS_TO_END             # Move cursor to end after completion
+setopt PROMPT_SUBST              # Enable parameter expansion in prompt
+
+# Key timeout (10ms for better vi-mode responsiveness)
 KEYTIMEOUT=1
 
-# Check if zplug is installed
+# ============================================================================
+# PLUGIN MANAGER SETUP
+# ============================================================================
+
+# Initialize completion system
+autoload -Uz compinit && compinit
+
+# Install zplug if not present
 if [[ ! -d ~/.zplug ]]; then
-  git clone https://github.com/zplug/zplug ~/.zplug
-  source ~/.zplug/init.zsh && zplug update --self
+  echo "Installing zplug..."
+  curl -sL --proto-redir -all,https https://raw.githubusercontent.com/zplug/installer/master/installer.zsh | zsh
 fi
 
-# Essential
+# Initialize zplug
 source ~/.zplug/init.zsh
 
-autoload -U compinit && compinit
-
+# ============================================================================
+# PLUGIN DECLARATIONS
+# ============================================================================
 zplug 'zplug/zplug', hook-build:'zplug --self-manage'
-zplug 'zdharma-continuum/fast-syntax-highlighting', \
-      hook-load:'FAST_HIGHLIGHT=()', defer:2
-zplug "b4b4r07/zsh-vimode-visual", defer:3
-zplug "zsh-users/zsh-autosuggestions"
 zplug "zsh-users/zsh-completions"
-zplug "plugins/fzf", from:oh-my-zsh
-zplug "Aloxaf/fzf-tab"
+zplug "zsh-users/zsh-autosuggestions"
+zplug "hlissner/zsh-autopair"
 zplug "MichaelAquilina/zsh-you-should-use"
 zplug "wfxr/forgit"
 zplug "NullSense/fuzzy-sys"
+zplug "Aloxaf/fzf-tab", defer:1
+zplug "b4b4r07/zsh-vimode-visual", defer:2
+zplug "zsh-users/zsh-syntax-highlighting", defer:3
+# Syntax highlighting (must be loaded after other plugins)
+#zplug 'zdharma-continuum/fast-syntax-highlighting', defer:3
 
-# theme
-eval "$(starship init zsh)"
+# ============================================================================
+# PLUGIN INSTALLATION & LOADING
+# ============================================================================
 
-starship preset gruvbox-rainbow -o ~/.config/starship.toml
-
-# Install packages that have not been installed yet
+# Install missing plugins
 if ! zplug check --verbose; then
-    printf "Install? [y/N]: "
+    printf "Install missing plugins? [y/N]: "
     if read -q; then
         echo; zplug install
     else
@@ -45,18 +84,32 @@ if ! zplug check --verbose; then
     fi
 fi
 
+# Load all plugins
 zplug load
 
-setopt hist_ignore_dups
-setopt hist_reduce_blanks
-setopt hist_ignore_space
-setopt extended_history
-setopt hist_expand
-setopt share_history
-setopt prompt_subst
+# ============================================================================
+# THEME SETUP
+# ============================================================================
 
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="bold,underline"
+# Initialize starship
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init zsh)"
+fi
+
+# ============================================================================
+# COMPLETIONS & STYLING
+# ============================================================================
+
+# Autosuggestions styling
+#ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=#888888,bold,underline"
+#ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+ZSH_AUTOSUGGEST_USE_ASYNC=true
+
+# ============================================================================
+# KEY BINDINGS
+# ============================================================================
+
+# Accept autosuggestion
 zstyle ':completion:*' menu select
-#bindkey '^ ' autosuggest-accept
-bindkey '^@' autosuggest-accept
-# <<< THIS IS THE NEW BINDING
+bindkey '^ ' autosuggest-accept     # Ctrl+Space (alternative)

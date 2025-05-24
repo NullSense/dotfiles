@@ -1,2 +1,7 @@
 [flavor]
 dark = "gruvbox-dark"
+light = "gruvbox-light"
+
+[theme]
+path = "~/.config/yazi/themes/gruvbox-dark/theme.toml"
+

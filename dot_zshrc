@@ -1,4 +1,10 @@
 export PATH=$HOME/bin/:$HOME/.cargo/bin:$HOME/.local/share/gem/ruby/3.0.0/bin:$HOME/.pyenv/bin:$HOME/.poetry/bin:$HOME/.local/bin:$PATH
+
+export ROCM_PATH=/opt/rocm
+export HIP_PATH=$ROCM_PATH/hip
+export PATH="$ROCM_PATH/bin:$HIP_PATH/bin:$PATH"
+export LD_LIBRARY_PATH="$ROCM_PATH/lib:$HIP_PATH/lib:$LD_LIBRARY_PATH"
+
 export XDG_CURRENT_DESKTOP=sway
 export MANPAGER='nvim +Man!'
 export NVM_LAZY_LOAD=true
@@ -19,10 +25,18 @@ export COLORTERM=truecolor
 export TERM_PROGRAM="alacritty"
 export TERM_PROGRAM_VERSION=$(alacritty --version | awk '{print $2}')
 
-source ~/bin/zshaliases # aliases
 source ~/bin/zshzplug # zplug plugin manager
+
+# Essential for Alt+C, Ctrl+R, Ctrl+T functionality
+if [[ -f /usr/share/fzf/key-bindings.zsh ]]; then
+  source /usr/share/fzf/key-bindings.zsh
+fi
+
+if [[ -f /usr/share/fzf/completion.zsh ]]; then
+  source /usr/share/fzf/completion.zsh
+fi
+source ~/bin/zshaliases # aliases
 source ~/bin/zshfzfrc # fzf functions
-#source ~/bin/zshlfrc # lf file manager config
 
 source /usr/share/nvm/init-nvm.sh
 
@@ -47,3 +61,19 @@ export LC_ALL=en_US.UTF-8
 # add do-ls to chpwd hook
 add-zsh-hook chpwd do-ls
 eval "$(atuin init zsh)"
+
+# >>> conda initialize >>>
+# !! Contents within this block are managed by 'conda init' !!
+__conda_setup="$('/opt/miniconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
+        . "/opt/miniconda3/etc/profile.d/conda.sh"
+    else
+        export PATH="/opt/miniconda3/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+# <<< conda initialize <<<
+

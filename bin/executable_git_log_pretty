@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+
+# Define markers for the raw timestamp. Use something very unlikely to
+# appear in commit messages or other log output.
+ts_marker_start="@@GIT_LOG_TS_START@@"
+ts_marker_end="@@GIT_LOG_TS_END@@"
+
+# Get the target branch/commits. Defaults to 'master' if no args given.
+git_log_target="${1:-master}" # Default to master if no argument
+
+# MODIFICATION: Added --color=always
+git log "${git_log_target}" --graph --color=always \
+  --pretty="format:%Cred%h%Creset %Cgreen(${ts_marker_start}%ct${ts_marker_end}) %C(bold blue)<%an>%Creset %s %C(yellow)%d%Creset" \
+  --abbrev-commit \
+| awk -v ts_start="${ts_marker_start}" -v ts_end="${ts_marker_end}" '
+  # awk function to convert UNIX timestamp to short relative date string
+  # Local variables for gawk are declared after formal parameters
+  function get_short_date(timestamp,   current_ts, diff, d, h, m, s) {
+      current_ts = systime(); # Get current UNIX timestamp
+      diff = current_ts - timestamp;
+
+      if (diff < 0) { # Handle minor clock skew or future commit dates
+          diff = 0;
+      }
+
+      d = int(diff / 86400); # Days
+      if (d > 0) {
+          return sprintf("%dd", d);
+      }
+
+      h = int(diff / 3600); # Hours
+      if (h > 0) {
+          return sprintf("%dh", h);
+      }
+
+      m = int(diff / 60); # Minutes
+      if (m > 0) {
+          return sprintf("%dm", m);
+      }
+
+      s = diff % 60; # Seconds
+      return sprintf("%ds", s);
+  }
+
+  {
+      line = $0; # Current line of git log output
+
+      # Regex to find: MARKER_START, then digits (timestamp), then MARKER_END
+      if (match(line, "(" ts_start ")([0-9]+)(" ts_end ")", arr)) {
+          unix_ts_str = arr[2]; # The extracted timestamp string
+          
+          short_date_str = get_short_date(unix_ts_str + 0); 
+          
+          # Replace the entire matched segment (markers + raw timestamp)
+          # with the new short_date_str.
+          # The color codes %Cgreen(...) are outside this matched segment
+          # and will be preserved.
+          sub(arr[0], short_date_str, line);
+      }
+      print line; # Print the (potentially modified) line
+  }
+'

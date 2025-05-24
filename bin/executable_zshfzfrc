@@ -3,60 +3,67 @@
 export FORGIT_COPY_CMD='wl-copy'
 
 # pacman helper
+# Unified package manager with source and mode switching
 psf() {
-  mode='install'
+    mode='install'
+    source='pacman'
 
-  while true; do
-    list_cmd="pacman -Slq"
+    while true; do
+        # Determine list command based on source and mode
+        case "$source-$mode" in
+            pacman-install)   list_cmd="pacman -Slq" ;;
+            pacman-uninstall) list_cmd="pacman -Qq" ;;
+            aur-install)      list_cmd="paru -Slq --aur" ;;
+            aur-uninstall)    list_cmd="paru -Qq --aur" ;;
+        esac
 
-    [ "$mode" = 'uninstall' ] && list_cmd="pacman -Qq"
+        # Determine preview command based on source
+        case "$source" in
+            pacman) preview_cmd="pacman --color=always -Si {1}" ;;
+            aur)    preview_cmd="paru --color=always -Si {1}" ;;
+        esac
 
-    result=$(sh -c "$list_cmd" | fzf --multi --preview "pacman --color=always -Si {1}" --expect=ctrl-space --header="$(echo $mode | tr '[:lower:]' '[:upper:]') packages (Ctrl-Space to switch)")
+        # Create header with current state
+        header="$(echo $mode | tr '[:lower:]' '[:upper:]') $(echo $source | tr '[:lower:]' '[:upper:]') packages | Ctrl-Space: Add/Remove pkg | Ctrl-A: AUR/Pacman"
 
-    key=$(head -1 <<< "$result")
-    pkgs=($(tail -n +2 <<< "$result"))
+        result=$(sh -c "$list_cmd" | fzf \
+            --multi \
+            --preview "$preview_cmd" \
+            --expect=ctrl-space,ctrl-a \
+            --header="$header")
 
-    if [ "$key" = 'ctrl-space' ]; then
-      mode=$( [ "$mode" = 'install' ] && echo 'uninstall' || echo 'install' )
-    elif [ "${#pkgs[@]}" -gt 0 ]; then
-      if [ "$mode" = 'install' ]; then
-        sudo pacman -S "${pkgs[@]}" && break
-      else
-        sudo pacman -Rns "${pkgs[@]}" && break
-      fi
-    else
-      break
-    fi
-  done
-}
+        key=$(head -1 <<< "$result")
+        pkgs=($(tail -n +2 <<< "$result"))
 
-# connect to wifi or vpn
-wl(){
-  local wifi
-  local ssid
-  local conn
-  local vpn
-
-  nmcli device wifi rescan > /dev/null
-  wifi=$(nmcli -c yes device wifi list | tail -n +2)
-  vpn=$(nmcli -c yes connection show | grep vpn)
-  ssid=$({echo $vpn && echo $wifi} | fzf --ansi | awk '{print $1}')
-
-  echo $ssid
-
-  if [ "x$ssid" != "x" ]; then
-    # check if the SSID has already a connection setup
-    conn=$(nmcli con | grep "$ssid" | awk '{print $1}' | uniq)
-    if [ "x$conn" = "x$ssid" ]; then
-      echo "Please wait while switching to known network $ssid…"
-      # if yes, bring up that connection
-      nmcli con up id "$conn"
-    else
-      echo "Please wait while connecting to new network $ssid…"
-      # if not connect to it and ask for the password
-      nmcli device wifi connect "$ssid"
-    fi
-  fi
+        case "$key" in
+            ctrl-space)
+                mode=$( [ "$mode" = 'install' ] && echo 'uninstall' || echo 'install' )
+                ;;
+            ctrl-a)
+                source=$( [ "$source" = 'pacman' ] && echo 'aur' || echo 'pacman' )
+                ;;
+            *)
+                if [ "${#pkgs[@]}" -gt 0 ]; then
+                    case "$source-$mode" in
+                        pacman-install)
+                            sudo pacman -S "${pkgs[@]}" && break
+                            ;;
+                        pacman-uninstall)
+                            sudo pacman -Rns "${pkgs[@]}" && break
+                            ;;
+                        aur-install)
+                            paru -S "${pkgs[@]}" && break
+                            ;;
+                        aur-uninstall)
+                            paru -Rns "${pkgs[@]}" && break
+                            ;;
+                    esac
+                else
+                    break
+                fi
+                ;;
+        esac
+    done
 }
 
 # fkill - kill processes - list only the ones you can kill. Modified the earlier script.
@@ -90,15 +97,117 @@ gcbb() {
 }
 
 # open file in vim with preview
-fe() (
-  exec < /dev/tty
-  IFS=$'\n' files=($(fzf --preview 'bat --style=numbers --color=always --line-range :90 {}' --query="$1" --multi --select-1 --exit-0))
-  [[ -n "$files" ]] && ${EDITOR:-nvim} "${files[@]}"
-)
+fe() {
+    local files_to_edit
+    exec < /dev/tty
+
+    IFS=$'\n' files_to_edit=($(
+        fd --type f --hidden --follow \
+            --exclude ".git" \
+            --exclude ".config/nvim/undodir/" \
+            --exclude "node_modules" \
+            --exclude "target" \
+            --exclude "dist" \
+            --exclude "build" \
+            --exclude "*cache*" \
+            --exclude "*Cache*" \
+            --exclude ".mozilla" \
+            --exclude ".wine" \
+            --exclude ".conda" \
+            --exclude ".local/share/Steam" \
+            --exclude ".steam" \
+            . "$HOME" | \
+            fzf --preview 'bat --style=numbers,changes --color=always --line-range :100 --wrap never {} 2>/dev/null || cat {}' \
+            --preview-window='right:60%:wrap' \
+            --query="$1" \
+            --multi \
+            --select-1 \
+            --exit-0 \
+            --height=80% \
+            --border
+        ))
+
+        if [[ -n "$files_to_edit" ]]; then
+            ${EDITOR:-nvim} "${files_to_edit[@]}"
+        fi
+    }
 zle -N fe
 bindkey "^p" fe
 
-export FZF_DEFAULT_COMMAND='rg --column --line-number --no-heading --smart-case --files --hidden --follow -g "!{.mozilla,.wine,*cache*,*Cache*,.node*,.electron*,.steam,.cache,.git,Steam,Music,Videos,.vscode*,.gradle,.nvm,.zplug,.forgit,.cargo,.m2,.pyenv}" 2> /dev/null'
+
+export FZF_DEFAULT_COMMAND='
+fd --type f --hidden --follow \
+  --exclude ".git" \
+  --exclude ".mozilla" \
+  --exclude ".wine" \
+  --exclude "*cache*" \
+  --exclude "*Cache*" \
+  --exclude "node_modules" \
+  --exclude ".npm" \
+  --exclude ".yarn" \
+  --exclude ".pnpm-store" \
+  --exclude ".electron*" \
+  --exclude ".steam" \
+  --exclude ".conda" \
+  --exclude "Steam" \
+  --exclude "Music" \
+  --exclude "Videos" \
+  --exclude ".vscode*" \
+  --exclude ".gradle" \
+  --exclude ".nvm" \
+  --exclude ".zplug" \
+  --exclude ".forgit" \
+  --exclude ".cargo/registry" \
+  --exclude ".cargo/git" \
+  --exclude ".m2" \
+  --exclude ".pyenv" \
+  --exclude "target" \
+  --exclude "dist" \
+  --exclude "build" \
+  --exclude ".config/nvim/undodir" \
+  . 2>/dev/null'
+
+
+#export FZF_DEFAULT_COMMAND='rg --column --line-number --no-heading --smart-case --files --hidden --follow -g "!{.mozilla,.wine,*cache*,*Cache*,.node*,.electron*,.steam,.cache,.git,Steam,Music,Videos,.vscode*,.gradle,.nvm,.zplug,.forgit,.cargo,.m2,.pyenv}" 2> /dev/null'
+#export FZF_DEFAULT_COMMAND='
+  #( \
+    #fd --type f --hidden --follow \
+      #--exclude "nvim/undodir/" \ # Exclude undodir relative to $HOME/.config search
+      #. "$HOME/.config"; \
+    #fd --type f --hidden --follow \
+      #--exclude "$HOME/.config" \ # Exclude the entire .config dir from this $HOME search
+      #--exclude ".config/nvim/undodir/" \ # Specific exclusion for undodir in $HOME search
+      #--exclude ".git" \
+      #--exclude ".mozilla" \
+      #--exclude ".wine" \
+      #--exclude "*cache*" \
+      #--exclude "*Cache*" \
+      #--exclude ".node_modules" \
+      #--exclude "node_modules" \
+      #--exclude ".npm" \
+      #--exclude ".yarn" \
+      #--exclude ".pnpm-store" \
+      #--exclude ".electron*" \
+      #--exclude ".steam" \
+      #--exclude ".conda" \
+      #--exclude "Steam" \
+      #--exclude "Music" \
+      #--exclude "Videos" \
+      #--exclude ".vscode*" \
+      #--exclude ".gradle" \
+      #--exclude ".nvm" \
+      #--exclude ".zplug" \
+      #--exclude ".forgit" \
+      #--exclude ".cargo/registry" \
+      #--exclude ".cargo/git" \
+      #--exclude ".m2" \
+      #--exclude ".pyenv" \
+      #--exclude "target" \
+      #--exclude "dist" \
+      #--exclude "build" \
+      #. "$HOME" \
+  #) | awk "!seen[\$0]++" 2>/dev/null
+#'
 
 export FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'
 --border
@@ -108,7 +217,6 @@ export FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'
 
 export FZF_ALT_C_OPTS="--header='Jump to directory' --preview 'tree -C {} | head -200'"
 export FZF_CTRL_R_OPTS="--header='Run command from history' --sort --preview 'echo {}' --preview-window down:3:hidden:wrap --bind '?:toggle-preview'"
-
 
 hgr() {
   if [ -z "$1" ]; then

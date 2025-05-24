@@ -297,11 +297,7 @@ require("lazy").setup({
     },
     {
         'echasnovski/mini.icons',
-        -- Ensure mini.icons loads and sets up before lualine,
-        -- or at least its config runs before lualine tries to get icons.
-        -- `lazy = false` is one way, or using `priority` or `dependencies` in lazy.nvim.
-        -- A common pattern is to have a core module that sets up things like this early.
-        lazy = false, -- Or manage via dependencies/priority
+        lazy = false,
         config = function()
             require('mini.icons').setup()
             -- This is the crucial part:
@@ -311,19 +307,35 @@ require("lazy").setup({
     },
     {
         'nvim-lualine/lualine.nvim',
-        -- Explicitly depend on mini.icons to ensure it's loaded and configured first
-        -- if you are not using lazy=false for mini.icons.
         dependencies = { 'echasnovski/mini.icons' }, -- 'nvim-tree/nvim-web-devicons' can often be omitted here
-        -- if mini.icons is doing the mocking.
+        options = { theme = 'gruvbox' },
         config = function()
-            -- At this point, nvim-web-devicons' functions should be mocked by mini.icons
             require('lualine').setup {
                 options = {
-                    theme = 'auto',
+                    theme = 'gruvbox',
                     icons_enabled = true,
-                    -- Add other lualine options here
                 },
-                -- Add your lualine sections and other configurations
+                sections = {
+                    lualine_a = { { 'mode', fmt = function(str) return str:sub(1, 1) end } },
+                    lualine_b = { { 'branch', fmt = function(str) return str:sub(1, 7) end }, 'diff', 'diagnostics' },
+                    lualine_c = { 'filename' },
+                    lualine_x = { 'filetype' },
+                    lualine_y = { 'progress' },
+                    lualine_z = { 'location' }
+                },
+                inactive_sections = {
+                    lualine_c = { 'filename' },
+                    lualine_x = { 'location' },
+                },
+                tabline = {
+                    lualine_a = {
+                        {
+                            'buffers',
+                            show_filename_only = true,   -- Shows shortened relative path when set to false.
+                            show_modified_status = true, -- Shows indicator when the buffer is modified.
+                        }
+                    }
+                },
             }
             print("lualine setup complete.") -- For debugging
         end,

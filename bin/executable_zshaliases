@@ -14,7 +14,6 @@ alias dcr="docker-compose restart"
 
 # git aliases
 alias gs='git st'
-#alias gl='_my_custom_git_log "$@"'
 alias gl='git_log_pretty'
 alias gri='git rebase -i'
 alias grc='git rebase --continue'

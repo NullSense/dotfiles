@@ -134,7 +134,6 @@ fe() {
 zle -N fe
 bindkey "^p" fe
 
-
 export FZF_DEFAULT_COMMAND='
 fd --type f --hidden --follow \
   --exclude ".git" \
@@ -167,77 +166,11 @@ fd --type f --hidden --follow \
   --exclude ".config/nvim/undodir" \
   . 2>/dev/null'
 
-
-#export FZF_DEFAULT_COMMAND='rg --column --line-number --no-heading --smart-case --files --hidden --follow -g "!{.mozilla,.wine,*cache*,*Cache*,.node*,.electron*,.steam,.cache,.git,Steam,Music,Videos,.vscode*,.gradle,.nvm,.zplug,.forgit,.cargo,.m2,.pyenv}" 2> /dev/null'
-#export FZF_DEFAULT_COMMAND='
-  #( \
-    #fd --type f --hidden --follow \
-      #--exclude "nvim/undodir/" \ # Exclude undodir relative to $HOME/.config search
-      #. "$HOME/.config"; \
-    #fd --type f --hidden --follow \
-      #--exclude "$HOME/.config" \ # Exclude the entire .config dir from this $HOME search
-      #--exclude ".config/nvim/undodir/" \ # Specific exclusion for undodir in $HOME search
-      #--exclude ".git" \
-      #--exclude ".mozilla" \
-      #--exclude ".wine" \
-      #--exclude "*cache*" \
-      #--exclude "*Cache*" \
-      #--exclude ".node_modules" \
-      #--exclude "node_modules" \
-      #--exclude ".npm" \
-      #--exclude ".yarn" \
-      #--exclude ".pnpm-store" \
-      #--exclude ".electron*" \
-      #--exclude ".steam" \
-      #--exclude ".conda" \
-      #--exclude "Steam" \
-      #--exclude "Music" \
-      #--exclude "Videos" \
-      #--exclude ".vscode*" \
-      #--exclude ".gradle" \
-      #--exclude ".nvm" \
-      #--exclude ".zplug" \
-      #--exclude ".forgit" \
-      #--exclude ".cargo/registry" \
-      #--exclude ".cargo/git" \
-      #--exclude ".m2" \
-      #--exclude ".pyenv" \
-      #--exclude "target" \
-      #--exclude "dist" \
-      #--exclude "build" \
-      #. "$HOME" \
-  #) | awk "!seen[\$0]++" 2>/dev/null
-#'
-
 export FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'
 --border
+--style minimal
 --bind='alt-k:preview-up,alt-p:preview-up'
 --bind='alt-j:preview-down,alt-n:preview-down'
 --color='bg+:#3c3836,bg:#32302f,spinner:#fb4934,hl:#928374,fg:#ebdbb2,header:#928374,info:#8ec07c,pointer:#fb4934,marker:#fb4934,fg+:#ebdbb2,prompt:#fb4934,hl+:#fb4934''
 
 export FZF_ALT_C_OPTS="--header='Jump to directory' --preview 'tree -C {} | head -200'"
-export FZF_CTRL_R_OPTS="--header='Run command from history' --sort --preview 'echo {}' --preview-window down:3:hidden:wrap --bind '?:toggle-preview'"
-
-hgr() {
-  if [ -z "$1" ]; then
-    echo "Usage: hgr <pattern>"
-    return 1
-  fi
-  # Option 1: Search raw history lines (includes timestamps)
-  # rg --color=always --line-number --context=2 -- "$@" "$HISTFILE"
-
-  # Option 2: Search only the command part of history lines
-  # The `sed` command below is a bit more robust than `cut` if there are commands with semicolons
-  # It removes everything up to and including the first ';'.
-  # If your commands don't have semicolons, `cut -d ';' -f 2-` is simpler.
-  sed 's/^[^;]*;//' "$HISTFILE" | rg --color=always --line-number --context=2 -- "$@"
-}
-
-# If you want to pipe the results to fzf for interactive filtering:
-hgrf() {
-  if [ -z "$1" ]; then
-    echo "Usage: hgrf <pattern>"
-    return 1
-  fi
-  sed 's/^[^;]*;//' "$HISTFILE" | rg --color=always --line-number --context=2 -- "$@" | fzf --ansi --multi
-}

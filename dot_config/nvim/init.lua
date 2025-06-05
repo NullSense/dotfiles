@@ -20,4 +20,28 @@ require("config.autocmds")
 require("lazy").setup("plugins")
 
 -- Post-plugin setup
-vim.cmd([[colorscheme gruvbox]])
+vim.o.background = "dark"
+vim.cmd("colorscheme gruvbox")
+
+vim.diagnostic.config({
+	signs = {
+		text = {
+			[vim.diagnostic.severity.ERROR] = "󰅚",
+			[vim.diagnostic.severity.WARN] = "󰀪",
+			[vim.diagnostic.severity.INFO] = "",
+			[vim.diagnostic.severity.HINT] = "󰌶",
+		},
+	},
+	virtual_text = false,
+	update_in_insert = false,
+	underline = true,
+	severity_sort = true,
+	float = {
+		focusable = true,
+		style = "minimal",
+		border = "rounded",
+		source = "always",
+		header = "",
+		prefix = "",
+	},
+})

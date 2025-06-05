@@ -1,2 +1,7 @@
-[manager]
+[mgr]
 show_hidden = true
+
+[preview]
+image = "chafa-rs -f sixel --size 1920x1080 --color=full --symbols all -s 1.0 {}"
+width = 75
+height = 85

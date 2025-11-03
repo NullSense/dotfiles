@@ -100,34 +100,6 @@ keymap("n", "<leader>k", "k", { noremap = true, silent = true, desc = "Keyword l
 keymap("n", "<leader>fx", "<cmd>!chmod +x %<CR>", { desc = "Make file executable" })
 
 -- ================================
--- UFO FOLDING KEYMAPS
--- ================================
-
--- Open all folds
-keymap("n", "zO", function()
-	pcall(function()
-		require("ufo").openAllFolds()
-	end)
-end, { desc = "Open all folds" })
-
--- Close current fold (using native Vim command)
-keymap("n", "zc", function()
-	pcall(function()
-		vim.cmd("normal! zc")
-	end)
-end, { desc = "Close current fold" })
-
--- Close all folds
-keymap("n", "zC", function()
-	pcall(function()
-		require("ufo").closeAllFolds()
-	end)
-end, { desc = "Close all folds" })
-
--- Toggle fold recursively
-keymap("n", "zo", "zA", { desc = "Toggle fold recursively" })
-
--- ================================
 -- FZF-LUA KEYMAPS
 -- ================================
 
@@ -189,26 +161,9 @@ keymap("n", "<leader>o", "<cmd>Outline<CR>", { desc = "Toggle outline" })
 -- Maximizer
 keymap("n", "<leader>z", "<cmd>MaximizerToggle<cr>", { desc = "Toggle window maximizer" })
 
----- ================================
----- LSP KEYMAPS (to be set in LSP on_attach)
----- ================================
------ Add to lsp.lua after mason-lspconfig setup
---vim.api.nvim_create_autocmd("LspAttach", {
---group = vim.api.nvim_create_augroup("UserLspConfig", {}),
---callback = function(ev)
---local opts = { buffer = ev.buf, silent = true }
-
---keymap("n", "gd", vim.lsp.buf.definition, vim.tbl_extend("force", opts, { desc = "Go to definition" }))
---keymap("n", "gr", vim.lsp.buf.references, vim.tbl_extend("force", opts, { desc = "Go to references" }))
---keymap("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("force", opts, { desc = "Go to implementation" }))
---keymap("n", "K", vim.lsp.buf.hover, vim.tbl_extend("force", opts, { desc = "Hover documentation" }))
---keymap("n", "<leader>rn", vim.lsp.buf.rename, vim.tbl_extend("force", opts, { desc = "Rename symbol" }))
-
---keymap("n", "<leader>ca", vim.lsp.buf.code_action, vim.tbl_extend("force", opts, { desc = "Code actions" }))
---end,
---})
-
--- Replace the commented LSP keymaps section with this
+-- ================================
+-- LSP KEYMAPS
+-- ================================
 vim.api.nvim_create_autocmd("LspAttach", {
 	group = vim.api.nvim_create_augroup("UserLspConfig", {}),
 	callback = function(ev)

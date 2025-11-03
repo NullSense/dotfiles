@@ -3,7 +3,10 @@ return {
 		"ellisonleao/gruvbox.nvim",
 		priority = 1000,
 		config = function()
-			require("gruvbox").setup()
+			require("gruvbox").setup({
+				transparent_mode = true,
+			})
+			vim.o.background = "dark" -- or "light" for light mode
 			vim.cmd([[colorscheme gruvbox]])
 		end,
 	},
@@ -65,6 +68,39 @@ return {
 		end,
 	},
 	{
+		"folke/snacks.nvim",
+		priority = 1000,
+		lazy = false,
+		opts = {
+			image = { enabled = false },
+			bigfile = { enabled = true },
+			dashboard = { enabled = true },
+			explorer = { enabled = true },
+			indent = { enabled = false },
+			input = { enabled = true },
+			picker = { enabled = true },
+			notifier = {
+				enabled = true,
+				style = "minimal",
+				timeout = 4500,
+				lsp_progress = {
+					enabled = true,
+					throttle = 100, -- Update frequency in ms
+					view = "mini", -- or "notify" for larger notifications
+				},
+			},
+			quickfile = { enabled = true },
+			scope = { enabled = true },
+			statuscolumn = { enabled = true },
+			words = { enabled = true },
+			styles = {
+				notification = {
+					wo = { wrap = true }, -- Wrap notifications
+				},
+			},
+		},
+	},
+	{
 		"folke/noice.nvim",
 		event = "VeryLazy",
 		config = function()
@@ -85,7 +121,7 @@ return {
 
 		dependencies = {
 			"MunifTanjim/nui.nvim",
-			"folke/snacks.nvim", -- Use snacks instead of inc-rename
+			"folke/snacks.nvim",
 		},
 	},
 	{
@@ -96,33 +132,6 @@ return {
 		config = function()
 			require("tiny-inline-diagnostic").setup()
 			vim.diagnostic.config({ virtual_text = false }) -- Only if needed in your configuration, if you already have native LSP diagnostics
-		end,
-	},
-	{
-		"kevinhwang91/nvim-ufo",
-		dependencies = "kevinhwang91/promise-async",
-		config = function()
-			require("ufo").setup({
-				provider_selector = function(bufnr, filetype, buftype)
-					return { "treesitter", "indent" }
-				end,
-				preview = {
-					win_config = {
-						border = { "", "─", "", "", "", "─", "", "" },
-						winhighlight = "Normal:Folded",
-					},
-					mappings = {
-						scrollU = "<C-u>",
-						scrollD = "<C-d>",
-						jumpTop = "[",
-						jumpBot = "]",
-					},
-				},
-				-- Enable fold preview on hover
-				enable_get_fold_virt_text = true,
-				open_fold_hl_timeout = 10,
-				close_fold_kinds = { "imports", "comment" },
-			})
 		end,
 	},
 }

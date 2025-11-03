@@ -4,11 +4,14 @@ return {
 		"williamboman/mason.nvim",
 		opts = {
 			ensure_installed = {
-				"prettierd",
+				"biome",
 				"marksman",
 				"markdownlint-cli2",
 				"selene",
+				"lua-language-server",
+				"stylua",
 				"clippy",
+				"ruff",
 			},
 		},
 	},
@@ -22,9 +25,17 @@ return {
 				"basedpyright",
 				"html",
 				"cssls",
-				"tsserver",
 			},
 		},
+		config = function(_, opts)
+			require("mason-lspconfig").setup(opts)
+
+			-- Enable all installed LSP servers using modern Neovim 0.11+ API
+			local servers = opts.ensure_installed
+			for _, server in ipairs(servers) do
+				vim.lsp.enable(server)
+			end
+		end,
 		dependencies = {
 			"williamboman/mason.nvim",
 			"neovim/nvim-lspconfig",
@@ -38,44 +49,48 @@ return {
 					lua = { "stylua" },
 					python = { "ruff" },
 					rust = { "rustfmt", lsp_format = "fallback" },
-					javascript = { "prettierd", "prettier", stop_after_first = true },
-					typescript = { "prettierd", "prettier", stop_after_first = true },
+					javascript = { "biome", "prettierd", "prettier", stop_after_first = true },
+					typescript = { "biome", "prettierd", "prettier", stop_after_first = true },
+					javascriptreact = { "biome", "prettierd", "prettier", stop_after_first = true },
+					typescriptreact = { "biome", "prettierd", "prettier", stop_after_first = true },
+					json = { "biome", "prettierd", "prettier", stop_after_first = true },
 					html = { "prettierd" },
 					css = { "prettierd" },
 					markdown = { "prettierd" },
 				},
+				formatters = {
+					biome = {
+						require_cwd = true, -- Only use biome if biome.json exists
+					},
+				},
 				format_on_save = {
-					timeout_ms = 100,
+					timeout_ms = 500,
 					lsp_format = "fallback",
 				},
 			})
 		end,
 	},
+
 	{
 		"mfussenegger/nvim-lint",
-		event = { "BufWritePost", "InsertLeave", "BufEnter" }, -- lazy-load on relevant events
-
+		event = { "BufWritePost", "InsertLeave", "BufEnter" },
 		config = function()
 			require("lint").linters_by_ft = {
 				python = { "ruff" },
 				rust = { "clippy" },
 				lua = { "selene" },
-				javascript = { "eslint_d" },
-				typescript = { "eslint_d" },
+				javascript = { "biomejs", "eslint_d" },
+				typescript = { "biomejs", "eslint_d" },
+				javascriptreact = { "biomejs", "eslint_d" },
+				typescriptreact = { "biomejs", "eslint_d" },
 				html = { "htmlhint" },
 				css = { "stylelint" },
 				markdown = { "markdownlint-cli2" },
 			}
-			-- Auto-lint on save, insert leave, or buffer enter,
-			local lint_augroup = vim.api.nvim_create_augroup("lint", { clear = true })
-			vim.api.nvim_create_autocmd({ "BufWritePost", "InsertLeave", "BufEnter" }, {
-				group = lint_augroup,
-				callback = function()
-					require("lint").try_lint()
-				end,
-			})
+			-- Note: AutoLint autocmd is configured in config/autocmds.lua to avoid duplication
 		end,
 	},
+
 	{
 		"saghen/blink.cmp",
 		dependencies = { "rafamadriz/friendly-snippets" },

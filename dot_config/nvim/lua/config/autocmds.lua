@@ -2,31 +2,6 @@ local augroup = vim.api.nvim_create_augroup
 local autocmd = vim.api.nvim_create_autocmd
 
 -- ================================
--- UFO FOLD PREVIEW AUTOCMDS
--- ================================
-
-local ufo_preview_group = augroup("UFOPreview", { clear = true })
-
--- Auto-preview folds on cursor hold
-autocmd("CursorHold", {
-	group = ufo_preview_group,
-	pattern = "*",
-	callback = function()
-		local line = vim.fn.line(".")
-		local foldclosed = vim.fn.foldclosed(line)
-
-		if foldclosed ~= -1 then
-			vim.defer_fn(function()
-				pcall(function()
-					require("ufo").peekFoldedLinesUnderCursor()
-				end)
-			end, 200)
-		end
-	end,
-	desc = "Show fold preview on cursor hold",
-})
-
--- ================================
 -- COMPLETION & PREVIEW MANAGEMENT
 -- ================================
 
@@ -208,7 +183,8 @@ autocmd({ "VimLeavePre" }, {
 	pattern = "*",
 	callback = function()
 		-- Clean up any temporary files or perform cleanup tasks
-		vim.cmd("mksession! ~/.config/nvim/session.vim")
+		local session_file = vim.fn.stdpath("config") .. "/session.vim"
+		vim.cmd("mksession! " .. session_file)
 	end,
 	desc = "Save session on exit",
 })

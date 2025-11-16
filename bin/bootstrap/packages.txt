@@ -42,6 +42,7 @@ rsync
 slurp
 starship
 sway
+swaybg
 sway-contrib
 sway-launcher-desktop
 swayidle

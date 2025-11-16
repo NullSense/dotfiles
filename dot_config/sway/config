@@ -76,6 +76,7 @@ for_window [title="dropdown_term"] move scratchpad, border pixel 3, resize set 4
 for_window [class="Spotify"] move scratchpad, fullscreen enable
 for_window [class="mpv"] floating enable, sticky enable
 for_window [app_id="^sway-launcher-desktop$"] floating enable, border pixel 5, resize set width 30 ppt height 30 ppt
+for_window [app_id="^clipboard-picker$"] floating enable, border pixel 5, resize set width 50 ppt height 40 ppt
 
 ## Problematic windows
 for_window [app_id="electrum"] floating enable, resize set 1280 720
@@ -119,8 +120,7 @@ mode "$screenshot_mode" {
 ## Show clipboard contents
 bindsym $mod+Insert exec --no-startup-id notify-send -t 2000 "$(wl-paste)"
 ## Clipboard history (Mod+c for clipboard)
-bindsym $mod+c exec alacritty --class 'clipboard-picker' -e sh -c 'cliphist list | fzf | cliphist decode | wl-copy'
-for_window [app_id="clipboard-picker"] floating enable, resize set 800 600, move position center
+bindsym $mod+c exec $term --class 'clipboard-picker' -e sh -c 'cliphist list | fzf --prompt="📋 Clipboard: " --height=100% --reverse --border | cliphist decode | wl-copy'
 ## Upload clipboard contents
 bindsym $mod+Shift+Insert exec wl-paste | 0x0
 ## Escape quotes and backslashes and notify-send

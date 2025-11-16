@@ -7,8 +7,10 @@ base-devel
 bat
 blueman
 brightnessctl
+btop
 chafa
 chezmoi
+clipman
 eza
 fd
 ffmpeg
@@ -41,6 +43,10 @@ ripgrep
 rsync
 slurp
 starship
+tealdeer
+wget
+wl-gammactl
+zoxide
 sway
 swaybg
 sway-contrib

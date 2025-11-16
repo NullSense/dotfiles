@@ -18,6 +18,7 @@
     autosquash = true
 [commit]
     verbose = true
+    # gpgsign = true  # Uncomment after importing GPG key
 [init]
     defaultBranch = master
 [pull]

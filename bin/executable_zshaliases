@@ -24,7 +24,7 @@ alias rsync='rsync --info=progress2'
 alias l='ls -Fh --color=auto --group-directories-first'
 alias ll='ls -alF --color=auto --group-directories-first'
 alias dropdown='nohup alacritty -t dropdown_term > /dev/null 2>&1 &|' # dropdown terminal
-alias ls="exa"
+alias ls="eza"
 alias cat="bat"
 alias find="fd"
 alias pytest="pytest --reuse-db --reruns 0 -n auto"

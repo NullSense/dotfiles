@@ -42,7 +42,7 @@ source /usr/share/nvm/init-nvm.sh
 
 autoload -U add-zsh-hook
 
-do-ls() {emulate -L zsh; exa -ah --icons=always --group-directories-first;}
+do-ls() {emulate -L zsh; eza -ah --icons=always --group-directories-first;}
 
 function yy() {
 	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
@@ -61,6 +61,7 @@ export LC_ALL=en_US.UTF-8
 # add do-ls to chpwd hook
 add-zsh-hook chpwd do-ls
 eval "$(atuin init zsh)"
+eval "$(zoxide init zsh)"
 
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!

@@ -99,8 +99,21 @@ echo "      Consider enabling Color, VerbosePkgLists, and ParallelDownloads in i
 # else
 #   echo "INFO: Hostname is already ${NEW_HOSTNAME}."
 # fi
-#
-chsh -s $(which zsh)
+
+# --- 6. Set default shell to zsh ---
+if command -v zsh &> /dev/null; then
+    CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
+    ZSH_PATH=$(which zsh)
+    if [ "$CURRENT_SHELL" != "$ZSH_PATH" ]; then
+        echo "INFO: Changing default shell to zsh..."
+        chsh -s "$ZSH_PATH"
+        echo "Default shell changed to zsh. Please log out and log back in for changes to take effect."
+    else
+        echo "INFO: Default shell is already zsh."
+    fi
+else
+    echo "WARNING: zsh not found. Skipping shell change."
+fi
 
 echo "🎉 Generic System Configuration script finished."
 echo "A reboot might be required for all changes (like locale) to take full effect system-wide."

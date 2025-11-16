@@ -13,7 +13,7 @@ echo "Installing packages from $PACKAGE_LIST_FILE..."
 PACKAGES_TO_INSTALL=$(grep -vE '^\s*#|^\s*$' "$PACKAGE_LIST_FILE")
 
 if [ -n "$PACKAGES_TO_INSTALL" ]; then
-    sudo pacman -S --needed $PACKAGES_TO_INSTALL
+    sudo pacman -S --needed --noconfirm $PACKAGES_TO_INSTALL
 else
     echo "No packages to install."
 fi
@@ -25,4 +25,7 @@ if ! command -v paru &> /dev/null; then
     git clone https://aur.archlinux.org/paru-bin.git /tmp/paru-bin
     (cd /tmp/paru-bin && makepkg -si --noconfirm)
     rm -rf /tmp/paru-bin
+    echo "paru installed successfully."
+else
+    echo "paru already installed."
 fi

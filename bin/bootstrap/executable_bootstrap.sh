@@ -12,7 +12,7 @@ echo "Updating mirrorlist with Reflector..."
 sudo reflector --country "Germany" --latest 7 --protocol https --age 10 --sort rate --save /etc/pacman.d/mirrorlist
 sudo pacman -Syu --noconfirm # Sync again with new mirrors
 
-CHEZMOI_REPO="https://github.com/NullSense/dots.git"
+CHEZMOI_REPO="https://github.com/NullSense/dotfiles.git"
 if [ -z "$CHEZMOI_REPO" ]; then
     echo "Error: CHEZMOI_REPO variable is not set. Please edit bootstrap.sh."
     exit 1
@@ -23,8 +23,8 @@ chezmoi init --apply "$CHEZMOI_REPO"
 
 echo "Chezmoi initialized."
 echo "Installing packages"
-$HOME/bin/bootstrap/install_packages.sh
+$HOME/bin/bootstrap/executable_install_packages.sh
 echo "Configuring system"
-$HOME/bin/bootstrap/system_cfg.sh
+$HOME/bin/bootstrap/executable_system_cfg.sh
 echo "You might need to log out and log back in or reboot for all changes to take effect."
 echo "🎉 Bootstrap complete!"

@@ -127,6 +127,26 @@ bindsym XF86AudioPrev exec "playerctl previous"
 bindsym XF86AudioNext exec "playerctl next"
 
 ##########################################################################################################################################
+# TOUCHPAD GESTURES (macOS-style) ########################################################################################################
+##########################################################################################################################################
+
+# 3-finger swipe left/right: switch workspaces (like macOS Mission Control)
+bindgesture swipe:3:right workspace prev
+bindgesture swipe:3:left workspace next
+
+# 4-finger swipe left/right: switch between windows in current workspace
+bindgesture swipe:4:right focus left
+bindgesture swipe:4:left focus right
+
+# 3-finger swipe up/down: move to numbered workspaces
+bindgesture swipe:3:up workspace prev_on_output
+bindgesture swipe:3:down workspace next_on_output
+
+# Pinch gestures (optional - for future use)
+# bindgesture pinch:inward fullscreen toggle
+# bindgesture pinch:outward fullscreen toggle
+
+##########################################################################################################################################
 # SYSTEM BINDS############################################################################################################################
 ##########################################################################################################################################
 
@@ -315,9 +335,24 @@ exec_always {
 # Inputs #
 ##########
 
-input 1739:52620:SYNA8005:00_06CB:CD8C_Touchpad {
+# macOS-like touchpad configuration (applies to all touchpads)
+input type:touchpad {
     tap enabled
+    tap_button_map lrm
     natural_scroll enabled
+    dwt enabled
+    dwtp enabled
+    accel_profile adaptive
+    pointer_accel 0.3
+    click_method clickfinger
+    scroll_factor 1.0
+    middle_emulation disabled
+}
+
+# Device-specific overrides (if needed for orientation fix)
+input 1739:52620:SYNA8005:00_06CB:CD8C_Touchpad {
+    # Invert Y-axis (fix upside-down orientation)
+    calibration_matrix 1 0 0 0 -1 1
 }
 
 exec "systemctl --user import-environment"

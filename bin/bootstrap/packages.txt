@@ -10,7 +10,7 @@ brightnessctl
 btop
 chafa
 chezmoi
-clipman
+cliphist
 eza
 fd
 ffmpeg

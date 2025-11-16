@@ -29,3 +29,12 @@ if ! command -v paru &> /dev/null; then
 else
     echo "paru already installed."
 fi
+
+# Install AUR packages
+echo "Installing AUR packages..."
+if command -v paru &> /dev/null; then
+    paru -S --needed --noconfirm swaylock-effects
+else
+    echo "WARNING: paru not available. Please install AUR packages manually:"
+    echo "  - swaylock-effects (for blur effects on lock screen)"
+fi

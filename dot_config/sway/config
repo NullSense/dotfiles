@@ -22,6 +22,9 @@ exec xset -b # Turns off annoying loud beep
 exec 'nm-applet --indicator'
 exec blueman-applet
 exec mako --margin 16 --padding 8 --border-color "#ebdbb2" --text-color "#ebdbb2" --background-color "#32302f" --border-size 4 --default-timeout 10000 # notification daemon
+exec wl-paste -t text --watch clipman store --max-items=100 # clipboard history
+exec wl-gammactl watch # auto adjust color temperature
+exec udiskie -t # auto-mount USB drives
 exec seat * hide_cursor 3
 exec spotify
 exec $term --title 'dropdown_term'
@@ -39,10 +42,10 @@ exec swaymsg 'workspace $ws3; exec discord --enable-features=UseOzonePlatform --
 
 ### Idle configuration
 exec swayidle -w \
-         timeout 300 'swaylock -f -c 000000' \
+         timeout 300 'swaylock -f --screenshots --effect-blur 7x5 --clock --indicator' \
          timeout 2600 'swaymsg "output * dpms off"' \
          resume 'swaymsg "output * dpms on"' \
-         before-sleep 'swaylock -f -c 000000' \
+         before-sleep 'swaylock -f --screenshots --effect-blur 7x5 --clock --indicator' \
 
 # This will lock your screen after 300 seconds of inactivity, then turn off
 # your displays after another 300 seconds, and turn your screens back on when
@@ -115,6 +118,8 @@ mode "$screenshot_mode" {
 
 ## Show clipboard contents
 bindsym $mod+Insert exec --no-startup-id notify-send -t 2000 "$(wl-paste)"
+## Clipboard history
+bindsym $mod+v exec clipman pick --tool=CUSTOM --tool-args="fzf --prompt 'Pick clipboard: '"
 ## Upload clipboard contents
 bindsym $mod+Shift+Insert exec wl-paste | 0x0
 ## Escape quotes and backslashes and notify-send
@@ -163,11 +168,11 @@ bindsym --locked XF86MonBrightnessDown exec /usr/bin/light -U 5
 
 
 # Shutdown, reboot, lock screen
-bindsym Control+Alt+Delete exec swaylock
+bindsym Control+Alt+Delete exec swaylock -f --screenshots --effect-blur 7x5 --clock --indicator
 
 set $mode_system System (l) lock, (e) logout, (s) suspend, (r) reboot, (Shift+s) shutdown
 mode "$mode_system" {
-    bindsym l exec swaylock, mode "default"
+    bindsym l exec swaylock -f --screenshots --effect-blur 7x5 --clock --indicator, mode "default"
     bindsym e exec swaymsg exit, mode "default"
     bindsym s exec systemctl suspend, mode "default"
     bindsym r exec reboot, mode "default"

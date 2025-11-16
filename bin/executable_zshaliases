@@ -30,4 +30,37 @@ alias find="fd"
 alias pytest="pytest --reuse-db --reruns 0 -n auto"
 alias pyl="pytest --reuse-db --lf -n0 -fsvv"
 
+# Modern CLI tools
+alias top="btop"
+alias help='tldr'
+alias z='zoxide'
+alias zi='zoxide query -i'
+
+# Handy shortcuts
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias mk='mkdir -p'
+alias h='history'
+alias path='echo -e ${PATH//:/\\n}'
+alias ports='ss -tulanp'
+
+# Safety nets
+alias rm='rm -i'
+alias cp='cp -i'
+alias mv='mv -i'
+
+# Sway/Wayland
 alias wayrestart="killall -SIGUSR2 waybar"
+alias wayreload="swaymsg reload"
+
+# Git shortcuts (additional to git aliases in gitconfig)
+alias gd='git diff'
+alias ga='git add'
+alias gaa='git add --all'
+alias gp='git push'
+alias gpl='git pull'
+
+# System info
+alias cleanup='sudo pacman -Sc && paru -Sc'
+alias orphans='sudo pacman -Qtdq | sudo pacman -Rns -'

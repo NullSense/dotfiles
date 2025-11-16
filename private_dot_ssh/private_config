@@ -1,0 +1,40 @@
+# SSH Client Configuration
+# Security hardening for all hosts
+Host *
+    HashKnownHosts yes
+    IdentitiesOnly yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    Compression yes
+    ForwardAgent no
+    ForwardX11 no
+
+    # Prefer modern key algorithms
+    HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
+    KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
+    Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+    MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
+
+# Project hosts
+Host core
+    HostName 116.203.176.179
+    Port 2222
+
+Host purgatory
+    HostName 116.203.176.179
+    Port 8529
+
+Host toodoo
+    HostName 159.69.195.170
+    Port 2237
+
+Host seedhost
+    HostName spot.seedhost.eu
+    Port 22
+
+# GitHub
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_rsa
+    PreferredAuthentications publickey

@@ -23,3 +23,15 @@
     defaultBranch = master
 [pull]
     rebase = false
+[alias]
+    co = checkout
+    br = branch
+    ci = commit
+    st = status
+    unstage = reset HEAD --
+    last = log -1 HEAD
+    visual = log --graph --oneline --all
+    amend = commit --amend --no-edit
+    pushf = push --force-with-lease
+    undo = reset --soft HEAD^
+    aliases = config --get-regexp alias

@@ -100,7 +100,30 @@ echo "      Consider enabling Color, VerbosePkgLists, and ParallelDownloads in i
 #   echo "INFO: Hostname is already ${NEW_HOSTNAME}."
 # fi
 
-# --- 6. Set default shell to zsh ---
+# --- 6. Enable user systemd services ---
+echo "INFO: Enabling user systemd services..."
+systemctl --user enable --now pipewire pipewire-pulse wireplumber 2>/dev/null || echo "Pipewire services may already be running"
+
+# --- 7. Enable firewall ---
+if pacman -Qs ufw &> /dev/null; then
+    echo "INFO: Enabling and configuring UFW firewall..."
+    sudo systemctl enable --now ufw
+    sudo ufw default deny incoming
+    sudo ufw default allow outgoing
+    sudo ufw enable
+else
+    echo "WARNING: ufw not installed. Skipping firewall setup."
+fi
+
+# --- 8. Enable preload for faster app launches ---
+if pacman -Qs preload &> /dev/null; then
+    echo "INFO: Enabling preload service..."
+    sudo systemctl enable --now preload
+else
+    echo "WARNING: preload not installed. Skipping."
+fi
+
+# --- 9. Set default shell to zsh ---
 if command -v zsh &> /dev/null; then
     CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
     ZSH_PATH=$(which zsh)
@@ -113,6 +136,17 @@ if command -v zsh &> /dev/null; then
     fi
 else
     echo "WARNING: zsh not found. Skipping shell change."
+fi
+
+# --- 10. Install udev rules for I/O scheduler ---
+echo "INFO: Installing I/O scheduler udev rules..."
+if [ -f "$HOME/.local/share/chezmoi/root/etc/udev/rules.d/60-ioschedulers.rules" ]; then
+    sudo cp "$HOME/.local/share/chezmoi/root/etc/udev/rules.d/60-ioschedulers.rules" /etc/udev/rules.d/
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+    echo "I/O scheduler rules installed and activated."
+else
+    echo "WARNING: I/O scheduler rules file not found."
 fi
 
 echo "🎉 Generic System Configuration script finished."

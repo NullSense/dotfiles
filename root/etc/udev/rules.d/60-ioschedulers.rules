@@ -1,0 +1,12 @@
+# Set I/O scheduler for NVMe and SSD drives
+# 'none' scheduler is best for NVMe drives
+# 'mq-deadline' or 'bfq' is good for SATA SSDs
+
+# NVMe drives
+ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/scheduler}="none"
+
+# SATA SSDs (assumed to be sd[a-z] on modern systems)
+ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
+
+# HDDs (traditional spinning disks)
+ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", ATTR{queue/scheduler}="bfq"

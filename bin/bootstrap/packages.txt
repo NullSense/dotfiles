@@ -37,7 +37,11 @@ pipewire
 playerctl
 plocate
 poppler
+preload
+pyenv
 python
+python-pip
+python-pipx
 reflector
 ripgrep
 rsync
@@ -52,7 +56,10 @@ swaybg
 sway-contrib
 sway-launcher-desktop
 swayidle
-swaylock
+swaylock-effects
+udisks2
+udiskie
+ufw
 tree
 ttf-hack
 ttf-hack-nerd

@@ -37,7 +37,6 @@ pipewire
 playerctl
 plocate
 poppler
-preload
 pyenv
 python
 python-pip
@@ -56,11 +55,11 @@ swaybg
 sway-contrib
 sway-launcher-desktop
 swayidle
-swaylock-effects
+swaylock
 udisks2
 udiskie
-ufw
 tree
+# ufw  # Optional: Uncomment if you want a firewall (useful for public WiFi)
 ttf-hack
 ttf-hack-nerd
 vi

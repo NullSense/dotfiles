@@ -104,26 +104,24 @@ echo "      Consider enabling Color, VerbosePkgLists, and ParallelDownloads in i
 echo "INFO: Enabling user systemd services..."
 systemctl --user enable --now pipewire pipewire-pulse wireplumber 2>/dev/null || echo "Pipewire services may already be running"
 
-# --- 7. Enable firewall ---
+# --- 7. Enable firewall (optional) ---
 if pacman -Qs ufw &> /dev/null; then
-    echo "INFO: Enabling and configuring UFW firewall..."
+    echo "INFO: UFW firewall detected. Enabling and configuring..."
     sudo systemctl enable --now ufw
     sudo ufw default deny incoming
     sudo ufw default allow outgoing
-    sudo ufw enable
+    sudo ufw --force enable
+    echo "UFW firewall is now active (deny incoming, allow outgoing)."
 else
-    echo "WARNING: ufw not installed. Skipping firewall setup."
+    echo "INFO: UFW not installed. Skipping firewall setup."
+    echo "      Note: A firewall is optional on desktop Linux but recommended if you:"
+    echo "      - Connect to public WiFi frequently"
+    echo "      - Run local servers (web, SSH, etc.)"
+    echo "      - Want extra security layer"
+    echo "      Install with: sudo pacman -S ufw"
 fi
 
-# --- 8. Enable preload for faster app launches ---
-if pacman -Qs preload &> /dev/null; then
-    echo "INFO: Enabling preload service..."
-    sudo systemctl enable --now preload
-else
-    echo "WARNING: preload not installed. Skipping."
-fi
-
-# --- 9. Set default shell to zsh ---
+# --- 8. Set default shell to zsh ---
 if command -v zsh &> /dev/null; then
     CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
     ZSH_PATH=$(which zsh)
@@ -138,7 +136,7 @@ else
     echo "WARNING: zsh not found. Skipping shell change."
 fi
 
-# --- 10. Install udev rules for I/O scheduler ---
+# --- 9. Install udev rules for I/O scheduler ---
 echo "INFO: Installing I/O scheduler udev rules..."
 if [ -f "$HOME/.local/share/chezmoi/root/etc/udev/rules.d/60-ioschedulers.rules" ]; then
     sudo cp "$HOME/.local/share/chezmoi/root/etc/udev/rules.d/60-ioschedulers.rules" /etc/udev/rules.d/

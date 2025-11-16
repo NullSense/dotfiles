@@ -23,14 +23,32 @@ psf() {
             aur)    preview_cmd="paru --color=always -Si {1}" ;;
         esac
 
+        # Visual indicators for current state
+        if [ "$source" = "pacman" ]; then
+            source_display="📦 PACMAN"
+        else
+            source_display="🌟 AUR"
+        fi
+
+        if [ "$mode" = "install" ]; then
+            mode_display="⬇️  INSTALL"
+        else
+            mode_display="🗑️  REMOVE"
+        fi
+
         # Create header with current state
-        header="$(echo $mode | tr '[:lower:]' '[:upper:]') $(echo $source | tr '[:lower:]' '[:upper:]') packages | Ctrl-Space: Add/Remove pkg | Ctrl-A: AUR/Pacman"
+        header="Mode: ${mode_display} | Source: ${source_display} | Ctrl-Space: Toggle Mode | Ctrl-A: Toggle AUR/Pacman | Tab: Multi-select"
 
         result=$(sh -c "$list_cmd" | fzf \
             --multi \
             --preview "$preview_cmd" \
+            --preview-window='right:60%:wrap' \
             --expect=ctrl-space,ctrl-a \
-            --header="$header")
+            --header="$header" \
+            --prompt="🔍 " \
+            --pointer="▶" \
+            --marker="✓" \
+            --border=rounded)
 
         key=$(head -1 <<< "$result")
         pkgs=($(tail -n +2 <<< "$result"))

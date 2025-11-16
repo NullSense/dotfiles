@@ -25,19 +25,19 @@ psf() {
 
         # Visual indicators for current state
         if [ "$source" = "pacman" ]; then
-            source_display="📦"
+            source_display="📦 Pacman"
         else
-            source_display="🌟"
+            source_display="🌟 AUR"
         fi
 
         if [ "$mode" = "install" ]; then
-            mode_display="⬇️"
+            mode_display="⬇️ Install"
         else
-            mode_display="🗑️"
+            mode_display="🗑️ Remove"
         fi
 
         # Create compact header with current state
-        header="${mode_display} ${source_display} | ^Space:mode ^A:source Tab:multi"
+        header="${mode_display} ${source_display} | ^Space:toggle ^A:switch"
 
         # Fetch package list with error handling
         pkg_list=$(sh -c "$list_cmd" 2>&1)

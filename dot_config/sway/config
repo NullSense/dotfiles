@@ -119,7 +119,8 @@ mode "$screenshot_mode" {
 ## Show clipboard contents
 bindsym $mod+Insert exec --no-startup-id notify-send -t 2000 "$(wl-paste)"
 ## Clipboard history (Mod+c for clipboard)
-bindsym $mod+c exec cliphist list | fzf | cliphist decode | wl-copy
+bindsym $mod+c exec alacritty --class 'clipboard-picker' -e sh -c 'cliphist list | fzf | cliphist decode | wl-copy'
+for_window [app_id="clipboard-picker"] floating enable, resize set 800 600, move position center
 ## Upload clipboard contents
 bindsym $mod+Shift+Insert exec wl-paste | 0x0
 ## Escape quotes and backslashes and notify-send

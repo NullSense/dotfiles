@@ -25,21 +25,32 @@ psf() {
 
         # Visual indicators for current state
         if [ "$source" = "pacman" ]; then
-            source_display="📦 PACMAN"
+            source_display="📦"
         else
-            source_display="🌟 AUR"
+            source_display="🌟"
         fi
 
         if [ "$mode" = "install" ]; then
-            mode_display="⬇️  INSTALL"
+            mode_display="⬇️"
         else
-            mode_display="🗑️  REMOVE"
+            mode_display="🗑️"
         fi
 
-        # Create header with current state
-        header="Mode: ${mode_display} | Source: ${source_display} | Ctrl-Space: Toggle Mode | Ctrl-A: Toggle AUR/Pacman | Tab: Multi-select"
+        # Create compact header with current state
+        header="${mode_display} ${source_display} | ^Space:mode ^A:source Tab:multi"
 
-        result=$(sh -c "$list_cmd" | fzf \
+        # Fetch package list with error handling
+        pkg_list=$(sh -c "$list_cmd" 2>&1)
+        if [ $? -ne 0 ]; then
+            echo "Error: Failed to fetch package list from $source"
+            echo "Command: $list_cmd"
+            echo "Error output:"
+            echo "$pkg_list"
+            read -p "Press Enter to retry or Ctrl-C to exit..."
+            continue
+        fi
+
+        result=$(echo "$pkg_list" | fzf \
             --multi \
             --preview "$preview_cmd" \
             --preview-window='right:60%:wrap' \

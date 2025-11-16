@@ -12,7 +12,7 @@ default_floating_border normal
 hide_edge_borders smart
 
 # wallpaper
-output "*" bg ~/Downloads/pillars.jpg fill
+output "*" bg ~/Pictures/Aesthetic/aesthetic.png fill
 
 ##########################################################################################################################################
 # Startup ################################################################################################################################

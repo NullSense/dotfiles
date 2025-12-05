@@ -33,6 +33,7 @@ output DP-1 {
 ##########################################################################################################################################
 
 exec xset -b # Turns off annoying loud beep
+exec ~/bin/load-icc-profile # Load DisplayCAL color profile for MAG274QRF-QD
 exec 'nm-applet --indicator'
 exec blueman-applet
 exec mako --margin 16 --padding 8 --border-color "#ebdbb2" --text-color "#ebdbb2" --background-color "#32302f" --border-size 4 --default-timeout 10000 # notification daemon

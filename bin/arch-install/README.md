@@ -389,42 +389,46 @@ npx create-expo-app .
 
 ## Color Calibration (DisplayCAL / ICC Profiles)
 
-**Important**: Sway currently **does not have native ICC color management**. This is a known limitation.
+Sway 1.10+ supports **native ICC color profiles** with Vulkan renderer.
 
-### Options for MAG274QRF-QD
+### Setup (Already Configured)
 
-1. **Monitor's built-in calibration**: Use the OSD to load sRGB or Adobe RGB presets
-2. **Hardware LUT loading** (partial): Use `dispwin` from ArgyllCMS
-3. **Wait for Sway 2.0**: Color management is in development (wlroots has merged support)
-4. **Alternative**: Use KDE Plasma Wayland for color-critical work (has full ICC support)
+1. **Vulkan renderer** enabled in `~/.profile`:
+   ```bash
+   export WLR_RENDERER=vulkan
+   ```
 
-### Using dispwin (Workaround)
+2. **ICC profile** in sway config (`~/.config/sway/config`):
+   ```bash
+   output DP-1 {
+       color_profile icc ~/.local/share/color/icc/MAG274QRF-QD.icm
+   }
+   ```
 
-```bash
-# Install ArgyllCMS
-sudo pacman -S argyllcms
+3. **Your DisplayCAL profile** is at:
+   `~/.local/share/color/icc/MAG274QRF-QD.icm`
+   - Calibrated to sRGB
+   - 119.5 cd/m² brightness
+   - D65 white point (0.3127x, 0.329y)
 
-# Load your existing ICC profile to GPU LUT
-# Copy your .icm/.icc file from Windows first
-dispwin -d 1 ~/path/to/MAG274QRF-QD.icm
+### What You Get
 
-# Add to sway startup (partial effect only)
-# exec dispwin -d 1 ~/path/to/MAG274QRF-QD.icm
-```
-
-**Limitations**: This only loads 1D LUT curves to the GPU. Full ICC support (3D LUT, per-app profiles) is not available in Sway yet.
+- **1D LUT curves** (gamma, white point) ✓
+- **Tone response calibration** ✓
+- **3D LUT** (33³ resolution) ✓
 
 ### Creating New Profile on Linux
 
 ```bash
-# Install DisplayCAL (fork that works on Wayland)
+# Install DisplayCAL
 paru -S displaycal
 
 # Run calibration (will create ICC profile)
 displaycal
-```
 
-**Note**: DisplayCAL on Wayland has some bugs. For best results, calibrate on Windows and copy the .icm file.
+# Copy to profile location
+cp ~/path/to/new-profile.icm ~/.local/share/color/icc/MAG274QRF-QD.icm
+```
 
 ## Mouse Sensitivity (Logitech)
 

@@ -1,0 +1,90 @@
+# Sway Display Configuration for 165Hz / 10-bit Color Monitor
+# Add these lines to your ~/.config/sway/config
+#
+# First, find your output name:
+#   swaymsg -t get_outputs
+#
+# Common names: DP-1, DP-2, HDMI-A-1, etc.
+
+##########################################################################
+# Display Output Configuration
+##########################################################################
+
+# Example for a 165Hz monitor on DP-1
+# Adjust the output name and resolution to match your setup
+
+# Option 1: 165Hz at 8-bit (standard)
+output DP-1 {
+    mode 2560x1440@165Hz
+    render_bit_depth 8
+    adaptive_sync off
+}
+
+# Option 2: 120Hz at 10-bit color (better gradients)
+output DP-1 {
+    mode 2560x1440@120Hz
+    render_bit_depth 10
+    adaptive_sync off
+}
+
+# Option 3: Gaming mode - 165Hz with FreeSync
+# NOTE: FreeSync causes flickering on desktop! Only use for gaming.
+# Consider using a keybind to toggle this on/off
+output DP-1 {
+    mode 2560x1440@165Hz
+    render_bit_depth 8
+    adaptive_sync on
+}
+
+##########################################################################
+# Recommended: Toggle FreeSync for Gaming Only
+##########################################################################
+
+# Add this to your keybindings section
+# Toggles adaptive sync on/off with Mod+Shift+F
+bindsym $mod+Shift+f exec swaymsg output DP-1 adaptive_sync toggle && \
+    notify-send "Adaptive Sync" "$(swaymsg -t get_outputs | jq -r '.[] | select(.name==\"DP-1\") | .adaptive_sync_status')"
+
+# Or use separate on/off binds
+bindsym $mod+F9 exec swaymsg output DP-1 adaptive_sync on && notify-send "FreeSync ON"
+bindsym $mod+F10 exec swaymsg output DP-1 adaptive_sync off && notify-send "FreeSync OFF"
+
+##########################################################################
+# Quick Reference Commands
+##########################################################################
+
+# Check current output settings
+#   swaymsg -t get_outputs | jq
+
+# Check current refresh rate
+#   swaymsg -t get_outputs | jq '.[].current_mode.refresh'
+
+# Set refresh rate on the fly
+#   swaymsg output DP-1 mode 2560x1440@165Hz
+
+# Set 10-bit on the fly
+#   swaymsg output DP-1 render_bit_depth 10
+
+# Toggle adaptive sync
+#   swaymsg output DP-1 adaptive_sync toggle
+
+##########################################################################
+# Notes
+##########################################################################
+
+# 10-bit color (render_bit_depth 10):
+# - Works great for photo/video work, smoother gradients
+# - Requires monitor support (yours does at 120Hz)
+# - Safe to leave on all the time
+# - May limit max refresh rate (your monitor: 120Hz max with 10-bit)
+
+# Adaptive Sync (FreeSync):
+# - Reduces tearing in games
+# - CAUSES FLICKERING on desktop! Monitor switches between 48Hz-165Hz
+# - Only enable for fullscreen gaming, then disable
+# - Use the toggle keybind above
+
+# HDR Support (experimental):
+# - Requires sway 1.12+ or sway-git from AUR
+# - wlroots merged color-management-v1 in Feb 2025
+# - Not fully stable yet, use at your own risk

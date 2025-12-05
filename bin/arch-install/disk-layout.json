@@ -1,0 +1,62 @@
+{
+  "config_type": "default_layout",
+  "device_modifications": [
+    {
+      "device": "/dev/nvme0n1",
+      "wipe": true,
+      "partitions": [
+        {
+          "type": "primary",
+          "start": "1MiB",
+          "size": "1GiB",
+          "boot": true,
+          "flag": "boot",
+          "fs_type": "fat32",
+          "mountpoint": "/boot"
+        },
+        {
+          "type": "primary",
+          "start": "1GiB",
+          "size": "100%",
+          "fs_type": "btrfs",
+          "mountpoint": null,
+          "btrfs": {
+            "subvolumes": [
+              {
+                "name": "@",
+                "mountpoint": "/"
+              },
+              {
+                "name": "@home",
+                "mountpoint": "/home"
+              },
+              {
+                "name": "@snapshots",
+                "mountpoint": "/.snapshots"
+              },
+              {
+                "name": "@log",
+                "mountpoint": "/var/log"
+              },
+              {
+                "name": "@pkg",
+                "mountpoint": "/var/cache/pacman/pkg"
+              },
+              {
+                "name": "@swap",
+                "mountpoint": "/swap"
+              }
+            ]
+          },
+          "mount_options": [
+            "compress=zstd:3",
+            "noatime",
+            "ssd",
+            "discard=async",
+            "space_cache=v2"
+          ]
+        }
+      ]
+    }
+  ]
+}

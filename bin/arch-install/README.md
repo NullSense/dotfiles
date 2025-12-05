@@ -387,6 +387,70 @@ npx create-expo-app .
 # 3. Reboot for all changes
 ```
 
+## Color Calibration (DisplayCAL / ICC Profiles)
+
+**Important**: Sway currently **does not have native ICC color management**. This is a known limitation.
+
+### Options for MAG274QRF-QD
+
+1. **Monitor's built-in calibration**: Use the OSD to load sRGB or Adobe RGB presets
+2. **Hardware LUT loading** (partial): Use `dispwin` from ArgyllCMS
+3. **Wait for Sway 2.0**: Color management is in development (wlroots has merged support)
+4. **Alternative**: Use KDE Plasma Wayland for color-critical work (has full ICC support)
+
+### Using dispwin (Workaround)
+
+```bash
+# Install ArgyllCMS
+sudo pacman -S argyllcms
+
+# Load your existing ICC profile to GPU LUT
+# Copy your .icm/.icc file from Windows first
+dispwin -d 1 ~/path/to/MAG274QRF-QD.icm
+
+# Add to sway startup (partial effect only)
+# exec dispwin -d 1 ~/path/to/MAG274QRF-QD.icm
+```
+
+**Limitations**: This only loads 1D LUT curves to the GPU. Full ICC support (3D LUT, per-app profiles) is not available in Sway yet.
+
+### Creating New Profile on Linux
+
+```bash
+# Install DisplayCAL (fork that works on Wayland)
+paru -S displaycal
+
+# Run calibration (will create ICC profile)
+displaycal
+```
+
+**Note**: DisplayCAL on Wayland has some bugs. For best results, calibrate on Windows and copy the .icm file.
+
+## Mouse Sensitivity (Logitech)
+
+The sway config is set up to match Windows:
+
+- **Acceleration**: Flat (no acceleration = Windows "Enhance pointer precision" OFF)
+- **Sensitivity**: 0.0 (equivalent to Windows 6th tick)
+
+To adjust sensitivity:
+```bash
+# Edit ~/.config/sway/config
+# Find "input type:pointer" section
+# Change pointer_accel value: -1.0 (slowest) to 1.0 (fastest)
+```
+
+Your Logitech mouse DPI is stored in the mouse itself, so it will be the same as Windows.
+
+## Font Rendering (1440p)
+
+Fontconfig is set up for 27" 1440p (109 PPI):
+- Subpixel rendering (RGB)
+- Slight hinting
+- LCD filter (lcdlight)
+
+Located at: `~/.config/fontconfig/fonts.conf`
+
 ## Sources
 
 - [Arch Installation Guide](https://wiki.archlinux.org/title/Installation_guide)

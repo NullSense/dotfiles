@@ -14,6 +14,20 @@ hide_edge_borders smart
 # wallpaper
 output "*" bg ~/Pictures/Aesthetic/aesthetic.png fill
 
+# Monitor configuration (MSI MAG274QRF-QD - 27" 1440p 165Hz)
+# Find output name with: swaymsg -t get_outputs
+# Options: 165Hz@8bit OR 120Hz@10bit
+output DP-1 {
+    mode 2560x1440@165Hz
+    # For 10-bit color (at 120Hz): uncomment below and comment above
+    # mode 2560x1440@120Hz
+    # render_bit_depth 10
+
+    # Adaptive sync toggle: Mod+Shift+F (see keybindings)
+    # Keep OFF for desktop, toggle ON for gaming
+    adaptive_sync off
+}
+
 ##########################################################################################################################################
 # Startup ################################################################################################################################
 ##########################################################################################################################################
@@ -125,6 +139,9 @@ bindsym $mod+c exec $term --class 'clipboard-picker' -e sh -c 'cliphist list | f
 bindsym $mod+Shift+Insert exec wl-paste | 0x0
 ## Escape quotes and backslashes and notify-send
 bindsym $mod+Control+Insert exec escaper
+
+## FreeSync toggle (for gaming - causes flicker on desktop!)
+bindsym $mod+Shift+f exec swaymsg output DP-1 adaptive_sync toggle && notify-send "Adaptive Sync Toggled"
 
 ## Music player
 bindsym --locked $mod+p exec "playerctl play-pause"
@@ -340,6 +357,15 @@ exec_always {
 ##########
 # Inputs #
 ##########
+
+# Mouse configuration (Logitech - no acceleration, Windows-like)
+input type:pointer {
+    # Flat profile = no acceleration (like Windows "Enhance pointer precision" OFF)
+    accel_profile flat
+    # Sensitivity: 0.0 = Windows 6th tick (default), adjust if needed
+    pointer_accel 0.0
+    natural_scroll disabled
+}
 
 # macOS-like touchpad configuration (applies to all touchpads)
 input type:touchpad {

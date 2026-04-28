@@ -2,7 +2,7 @@
 # Definitions ############################################################################################################################
 ##########################################################################################################################################
 
-font pango:Hack 8
+font pango:Maple Mono NF 10
 set $mod Mod4
 set $term alacritty
 focus_follows_mouse no
@@ -343,7 +343,7 @@ set $orange     #d65d0e
 # finds out, if available)
 bar {
         swaybar_command waybar
-        font pango:Hack 8
+        font pango:Maple Mono NF 10
 }
 
 # class border          |border |backgr |text   |indicator  |child_border

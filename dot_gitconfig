@@ -2,36 +2,91 @@
     email = matas234@gmail.com
     name = NullSense
     signingkey = CB5590199041EB914A80D18196154ED6A2543B48
+
+[init]
+    defaultBranch = main
+
+[core]
+    excludesfile = ~/.gitignore
+    pager = delta --dark
+    fsmonitor = true
+    untrackedCache = true
+    autocrlf = input
+
 [credential]
     helper = store
-[core]
-    excludesfile = /home/ongo/.gitignore
-    pager = delta --dark
+
 [interactive]
     diffFilter = delta --color-only
+
 [delta]
     features = line-numbers decorations
     syntax-theme = gruvbox-dark
+    navigate = true
+    line-numbers = true
+    side-by-side = false
+
 [delta "decorations"]
     file-style = bold blue ul
+
+[diff]
+    algorithm = histogram
+    colorMoved = default
+    renames = copies
+
+[merge]
+    conflictStyle = zdiff3
+    autoStash = true
+
 [rebase]
     autosquash = true
+    autoStash = true
+    updateRefs = true
+
+[pull]
+    rebase = true
+
+[push]
+    autoSetupRemote = true
+    default = simple
+    followTags = true
+
+[fetch]
+    prune = true
+    pruneTags = true
+    parallel = 0
+
+[rerere]
+    enabled = true
+    autoUpdate = true
+
+[branch]
+    sort = -committerdate
+
+[tag]
+    sort = version:refname
+    gpgSign = true
+
+[column]
+    ui = auto
+
 [commit]
     verbose = true
-    # gpgsign = true  # Uncomment after importing GPG key
-[init]
-    defaultBranch = master
-[pull]
-    rebase = false
-[alias]
-    co = checkout
-    br = branch
-    ci = commit
-    st = status
-    unstage = reset HEAD --
-    last = log -1 HEAD
-    visual = log --graph --oneline --all
-    amend = commit --amend --no-edit
-    pushf = push --force-with-lease
-    undo = reset --soft HEAD^
-    aliases = config --get-regexp alias
+    gpgSign = true
+
+[log]
+    date = iso
+    decorate = full
+
+[help]
+    autocorrect = prompt
+
+[advice]
+    detachedHead = false
+    skippedCherryPicks = false
+
+[filter "lfs"]
+    smudge = git-lfs smudge -- %f
+    process = git-lfs filter-process
+    required = true
+    clean = git-lfs clean -- %f

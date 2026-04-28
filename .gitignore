@@ -1,0 +1,5 @@
+# secrets — never commit
+.secrets
+*.secret
+*_credentials.json
+user_credentials.json

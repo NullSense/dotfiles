@@ -1,92 +1,149 @@
-export PATH=$HOME/bin/:$HOME/.cargo/bin:$HOME/.local/share/gem/ruby/3.0.0/bin:$HOME/.pyenv/bin:$HOME/.poetry/bin:$HOME/.local/bin:$PATH
+# ============================================================================
+# zshrc — modern stack: zinit + mise + atuin + starship
+# Secrets: never committed. Sourced from ~/.secrets (gitignored, encrypted).
+# ============================================================================
 
-export ROCM_PATH=/opt/rocm
-export HIP_PATH=$ROCM_PATH/hip
-export PATH="$ROCM_PATH/bin:$HIP_PATH/bin:$PATH"
-export LD_LIBRARY_PATH="$ROCM_PATH/lib:$HIP_PATH/lib:$LD_LIBRARY_PATH"
+# ---------- PATH ----------------------------------------------------------
+typeset -U path PATH
+path=(
+  $HOME/bin
+  $HOME/.local/bin
+  $HOME/.cargo/bin
+  $path
+)
 
-export XDG_CURRENT_DESKTOP=sway
-export MANPAGER='nvim +Man!'
-export NVM_LAZY_LOAD=true
-export NVM_COMPLETION=true
-export XDG_SESSION_TYPE=wayland
-#export GDK_BACKEND=wayland
-export EDITOR=nvim
-export MOZ_ENABLE_WAYLAND=1
-export MOZ_DBUS_REMOTE=1
-export QT_FONT_DPI=96
-export QT_QPA_PLATFORM=wayland
-export QT_WAYLAND_FORCE_DPI=physical
-export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
-export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
-#export SDL_VIDEODRIVER=x11
-export QT_DEBUG_PLUGINS=1
-export COLORTERM=truecolor
-export TERM_PROGRAM="alacritty"
-export TERM_PROGRAM_VERSION=$(alacritty --version | awk '{print $2}')
-
-source ~/bin/zshzplug # zplug plugin manager
-
-# Essential for Alt+C, Ctrl+R, Ctrl+T functionality
-if [[ -f /usr/share/fzf/key-bindings.zsh ]]; then
-  source /usr/share/fzf/key-bindings.zsh
-fi
-
-if [[ -f /usr/share/fzf/completion.zsh ]]; then
-  source /usr/share/fzf/completion.zsh
-fi
-source ~/bin/zshaliases # aliases
-source ~/bin/zshfzfrc # fzf functions
-
-source /usr/share/nvm/init-nvm.sh
-
-autoload -U add-zsh-hook
-
-# Auto-load .nvmrc when changing directories
-load-nvmrc() {
-  if [[ -f .nvmrc && -r .nvmrc ]]; then
-    nvm use
-  elif [[ $(nvm version) != $(nvm version default) ]]; then
-    echo "Reverting to nvm default version"
-    nvm use default
-  fi
-}
-add-zsh-hook chpwd load-nvmrc
-load-nvmrc # Load on shell start
-
-do-ls() {emulate -L zsh; eza -ah --icons=always --group-directories-first;}
-
-function yy() {
-	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
-	yazi "$@" --cwd-file="$tmp"
-	if cwd="$(bat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-		builtin cd -- "$cwd"
-	fi
-	rm -f -- "$tmp"
-}
-
-bindkey -s "^\\" 'yy\n'
-
+# ---------- Locale & editor ----------------------------------------------
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
+export EDITOR=nvim
+export VISUAL=nvim
+export MANPAGER='nvim +Man!'
+export COLORTERM=truecolor
 
-# add do-ls to chpwd hook
-add-zsh-hook chpwd do-ls
-eval "$(atuin init zsh)"
-eval "$(zoxide init zsh)"
+# ---------- Wayland / Qt / Moz hints -------------------------------------
+export XDG_CURRENT_DESKTOP=sway
+export XDG_SESSION_TYPE=wayland
+export MOZ_ENABLE_WAYLAND=1
+export MOZ_DBUS_REMOTE=1
+export QT_QPA_PLATFORM=wayland
+export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 
-# >>> conda initialize >>>
-# !! Contents within this block are managed by 'conda init' !!
-__conda_setup="$('/opt/miniconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
-if [ $? -eq 0 ]; then
-    eval "$__conda_setup"
-else
-    if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
-        . "/opt/miniconda3/etc/profile.d/conda.sh"
-    else
-        export PATH="/opt/miniconda3/bin:$PATH"
-    fi
+# ---------- AMD ROCm (RX 6750 XT) ----------------------------------------
+export ROCM_PATH=/opt/rocm
+export HIP_PATH=$ROCM_PATH/hip
+path=($ROCM_PATH/bin $HIP_PATH/bin $path)
+export LD_LIBRARY_PATH="$ROCM_PATH/lib:$HIP_PATH/lib:${LD_LIBRARY_PATH:-}"
+export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
+
+# ---------- Terminal awareness -------------------------------------------
+case "$TERM_PROGRAM" in
+  ghostty) ;;
+  *) export TERM_PROGRAM="${TERM_PROGRAM:-alacritty}" ;;
+esac
+
+# ============================================================================
+# Plugin manager: zinit (turbo mode for fast startup)
+# Install: bash -c "$(curl -fsSL https://git.io/zinit-install)"
+# ============================================================================
+ZINIT_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/zinit/zinit.git"
+if [[ -f "$ZINIT_HOME/zinit.zsh" ]]; then
+  source "$ZINIT_HOME/zinit.zsh"
+
+  # Core: lazy-loaded heavy plugins
+  zinit ice depth=1
+  zinit light zsh-users/zsh-completions
+
+  zinit wait lucid for \
+    atinit"zicompinit; zicdreplay" \
+      zdharma-continuum/fast-syntax-highlighting \
+    atload"_zsh_autosuggest_start" \
+      zsh-users/zsh-autosuggestions \
+    blockf \
+      zsh-users/zsh-completions
+
+  # OMZ snippets we actually use
+  zinit wait lucid for \
+    OMZP::git \
+    OMZP::sudo \
+    OMZP::command-not-found
 fi
-unset __conda_setup
-# <<< conda initialize <<<
+
+# ---------- Completion (fallback if zinit not yet installed) -------------
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit
+compinit -C
+
+# ============================================================================
+# Version managers — mise replaces pyenv + nvm + asdf + (mostly) conda
+# Install: curl https://mise.run | sh
+# ============================================================================
+if command -v mise &>/dev/null; then
+  eval "$(mise activate zsh)"
+fi
+
+# ---------- uv (Python) — install: curl -LsSf https://astral.sh/uv/install.sh | sh
+# uv adds itself to PATH automatically; nothing to source.
+
+# ---------- bun ----------------------------------------------------------
+export BUN_INSTALL="$HOME/.bun"
+[[ -d "$BUN_INSTALL/bin" ]] && path=("$BUN_INSTALL/bin" $path)
+
+# ---------- pnpm ---------------------------------------------------------
+export PNPM_HOME="$HOME/.local/share/pnpm"
+[[ -d "$PNPM_HOME" ]] && path=("$PNPM_HOME" $path)
+
+# ============================================================================
+# Shell goodies
+# ============================================================================
+
+# fzf
+[[ -f /usr/share/fzf/key-bindings.zsh ]] && source /usr/share/fzf/key-bindings.zsh
+[[ -f /usr/share/fzf/completion.zsh ]] && source /usr/share/fzf/completion.zsh
+
+# atuin (history sync + better Ctrl-R)
+command -v atuin &>/dev/null && eval "$(atuin init zsh)"
+
+# zoxide (smart cd)
+command -v zoxide &>/dev/null && eval "$(zoxide init zsh --cmd cd)"
+
+# starship
+command -v starship &>/dev/null && eval "$(starship init zsh)"
+
+# Aliases & fzf functions
+[[ -f ~/bin/zshaliases ]] && source ~/bin/zshaliases
+[[ -f ~/bin/zshfzfrc ]] && source ~/bin/zshfzfrc
+
+# yazi launcher (cwd-on-exit)
+function yy() {
+  local tmp; tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+  yazi "$@" --cwd-file="$tmp"
+  if cwd="$(command cat -- "$tmp")" && [[ -n "$cwd" && "$cwd" != "$PWD" ]]; then
+    builtin cd -- "$cwd"
+  fi
+  command rm -f -- "$tmp"
+}
+bindkey -s "^\\" 'yy\n'
+
+# eza-on-cd hook
+autoload -U add-zsh-hook
+do-ls() { emulate -L zsh; eza -ah --icons=always --group-directories-first }
+add-zsh-hook chpwd do-ls
+
+# ============================================================================
+# Secrets — fetched at shell start, never committed.
+# Pick ONE strategy (see ~/dotfiles/SECRETS.md):
+#   1) Plain ~/.secrets (gitignored)        - simplest
+#   2) Infisical CLI                        - if your team uses it
+#   3) Bitwarden Secrets Manager (bws)      - if you prefer Bitwarden
+#   4) chezmoi templates with age           - dotfile-native
+# ============================================================================
+
+# Strategy 1 (default fallback): plain file, gitignored
+[[ -f ~/.secrets ]] && source ~/.secrets
+
+# Strategy 2 (uncomment if using Infisical):
+# command -v infisical &>/dev/null && eval "$(infisical export --format=dotenv-export 2>/dev/null)"
+
+# Strategy 3 (uncomment if using BWS):
+# command -v bws &>/dev/null && [[ -n "$BWS_ACCESS_TOKEN" ]] && eval "$(bws secret list --output env 2>/dev/null)"
 

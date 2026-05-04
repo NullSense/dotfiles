@@ -1,0 +1,7 @@
+# Don't track credentials (filled-in is sensitive; placeholder is fine but conservative)
+user_credentials.json
+# Local artifacts
+install.log
+*.bak
+*.bak.*
+.cache/

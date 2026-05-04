@@ -52,6 +52,14 @@ reinstall_bootloader() {
     # Chroot and reinstall
     arch-chroot /mnt bootctl install
 
+    # Re-sign for Secure Boot if sbctl is set up — otherwise the freshly-copied
+    # systemd-bootx64.efi won't be trusted by enrolled keys and you'll boot fail.
+    if arch-chroot /mnt test -d /var/lib/sbctl/keys; then
+        echo "Re-signing bootloader for Secure Boot..."
+        arch-chroot /mnt sbctl sign -s /boot/EFI/systemd/systemd-bootx64.efi || true
+        arch-chroot /mnt sbctl sign-all || true
+    fi
+
     echo "Reinstalled systemd-boot"
 
     umount -R /mnt
@@ -74,6 +82,20 @@ setup_fallback() {
     # Copy systemd-boot to fallback location
     mkdir -p /mnt/EFI/BOOT
     cp /mnt/EFI/systemd/systemd-bootx64.efi /mnt/EFI/BOOT/BOOTX64.EFI
+
+    # Re-sign for Secure Boot. The fallback EFI binary needs signing too —
+    # if Secure Boot is enrolled and the fallback isn't signed, UEFI rejects it.
+    # This requires booting from the installed system (with sbctl + keys) rather
+    # than the live USB. If running from live USB, follow up with sbctl sign once
+    # you've booted into the recovered system.
+    if [ -d /var/lib/sbctl/keys ]; then
+        echo "Signing fallback BOOTX64.EFI for Secure Boot..."
+        sbctl sign -s /mnt/EFI/BOOT/BOOTX64.EFI || true
+    else
+        echo "NOTE: sbctl keys not found at /var/lib/sbctl/keys."
+        echo "If you have Secure Boot enrolled, run after boot:"
+        echo "  sudo sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI"
+    fi
 
     echo "Fallback bootloader set up."
     echo "If Windows overwrites boot order, UEFI will fall back to systemd-boot."

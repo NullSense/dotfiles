@@ -8,7 +8,7 @@
         {
           "type": "primary",
           "start": "1MiB",
-          "size": "1GiB",
+          "size": "2GiB",
           "boot": true,
           "flag": "boot",
           "fs_type": "fat32",
@@ -16,7 +16,7 @@
         },
         {
           "type": "primary",
-          "start": "1GiB",
+          "start": "2GiB",
           "size": "100%",
           "fs_type": "btrfs",
           "mountpoint": null,

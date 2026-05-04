@@ -18,12 +18,12 @@ NC='\033[0m' # No Color
 
 error() {
     echo -e "${RED}ERROR:${NC} $1"
-    ((ERRORS++))
+    ((++ERRORS))   # pre-increment: returns new value (always non-zero), safe under set -e
 }
 
 warn() {
     echo -e "${YELLOW}WARNING:${NC} $1"
-    ((WARNINGS++))
+    ((++WARNINGS))
 }
 
 ok() {
@@ -35,7 +35,7 @@ ok() {
 # ============================================================================
 echo "[1/6] Validating JSON syntax..."
 
-for file in disk-layout.json user_configuration.json user_credentials.json; do
+for file in user_configuration.json user_credentials.json; do
     if [ -f "$file" ]; then
         if python3 -m json.tool "$file" > /dev/null 2>&1; then
             ok "$file is valid JSON"
@@ -70,13 +70,15 @@ echo "[3/6] Checking bootloader configuration..."
 
 if [ -f "user_configuration.json" ]; then
     BOOTLOADER=$(grep -o '"bootloader"[[:space:]]*:[[:space:]]*"[^"]*"' user_configuration.json | cut -d'"' -f4)
-    if [ "$BOOTLOADER" = "systemd" ]; then
-        ok "Bootloader is correctly set to 'systemd'"
-    elif [ "$BOOTLOADER" = "systemd-bootctl" ]; then
-        error "Bootloader is set to 'systemd-bootctl' - should be 'systemd'"
-    else
-        warn "Bootloader is set to '$BOOTLOADER' - expected 'systemd'"
-    fi
+    # archinstall accepts (case-insensitive via from_arg): Systemd-boot, Grub, Efistub, Limine, Refind, "No bootloader"
+    case "$BOOTLOADER" in
+        Systemd-boot|systemd-boot|Grub|grub|Efistub|efistub|Limine|limine|Refind|refind)
+            ok "Bootloader '$BOOTLOADER' is a valid archinstall value" ;;
+        systemd|systemd-bootctl)
+            error "Bootloader '$BOOTLOADER' is invalid — use 'Systemd-boot'" ;;
+        *)
+            warn "Bootloader '$BOOTLOADER' — verify it's a valid archinstall enum value" ;;
+    esac
 fi
 
 # ============================================================================
@@ -85,8 +87,20 @@ fi
 echo ""
 echo "[4/6] Checking disk configuration..."
 
-if [ -f "disk-layout.json" ]; then
-    DEVICE=$(grep -o '"device"[[:space:]]*:[[:space:]]*"[^"]*"' disk-layout.json | head -1 | cut -d'"' -f4)
+if [ -f "user_configuration.json" ]; then
+    DEVICE=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('user_configuration.json'))
+    dc = d.get('disk_config', {})
+    devs = dc.get('device_modifications') or []
+    if devs and isinstance(devs, list):
+        print(devs[0].get('device', ''))
+    else:
+        print('')
+except Exception:
+    print('')
+" 2>/dev/null)
     echo "Target device: $DEVICE"
 
     if [ -b "$DEVICE" ]; then
@@ -140,12 +154,12 @@ elif [ $WARNINGS -gt 0 ]; then
     echo "$WARNINGS warning(s)"
     echo ""
     echo "Review the warnings above, then run:"
-    echo "  archinstall --config user_configuration.json --disk-layout disk-layout.json --creds user_credentials.json"
+    echo "  archinstall --config user_configuration.json --creds user_credentials.json"
     exit 0
 else
     echo -e "${GREEN}VALIDATION PASSED${NC}"
     echo ""
     echo "Ready to install! Run:"
-    echo "  archinstall --config user_configuration.json --disk-layout disk-layout.json --creds user_credentials.json"
+    echo "  archinstall --config user_configuration.json --creds user_credentials.json"
     exit 0
 fi

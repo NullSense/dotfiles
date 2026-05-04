@@ -1,0 +1,338 @@
+{
+    "version": "3.0.5",
+    "additional-repositories": [
+        "multilib"
+    ],
+    "archinstall-language": "English",
+    "audio_config": {
+        "audio": "pipewire"
+    },
+    "bootloader": "Systemd-boot",
+    "hostname": "archbox",
+    "kernels": [
+        "linux-zen",
+        "linux",
+        "linux-lts"
+    ],
+    "locale_config": {
+        "kb_layout": "us",
+        "sys_enc": "UTF-8",
+        "sys_lang": "en_US.UTF-8"
+    },
+    "mirror_config": {
+        "mirror_regions": {
+            "Germany": [],
+            "Netherlands": [],
+            "France": []
+        },
+        "custom_mirrors": [],
+        "optional_repositories": []
+    },
+    "network_config": {
+        "type": "nm"
+    },
+    "ntp": true,
+    "parallel_downloads": 8,
+    "profile_config": {
+        "gfx_driver": "All open-source",
+        "profile": {
+            "main": "Desktop",
+            "details": [
+                "Sway"
+            ]
+        }
+    },
+    "timezone": "Europe/Berlin",
+    "uki": true,
+    "swap": false,
+    "packages": [
+        "base",
+        "base-devel",
+        "linux-firmware",
+        "amd-ucode",
+        "sof-firmware",
+        "efibootmgr",
+        "git",
+        "git-delta",
+        "git-lfs",
+        "github-cli",
+        "lazygit",
+        "neovim",
+        "zsh",
+        "bash-completion",
+        "tmux",
+        "chezmoi",
+        "openssh",
+        "reflector",
+        "pacman-contrib",
+        "pkgfile",
+        "fwupd",
+        "man-db",
+        "man-pages",
+        "plocate",
+        "logrotate",
+        "sudo",
+        "polkit",
+        "polkit-gnome",
+        "btrfs-progs",
+        "snapper",
+        "snap-pac",
+        "zram-generator",
+        "power-profiles-daemon",
+        "cpupower",
+        "lm_sensors",
+        "sbctl",
+        "systemd-ukify",
+        "kanshi",
+        "nwg-displays",
+        "wlr-randr",
+        "firewalld",
+        "pass",
+        "keychain",
+        "gnupg",
+        "bitwarden",
+        "bitwarden-cli",
+        "thunar",
+        "thunar-volman",
+        "thunar-archive-plugin",
+        "tumbler",
+        "ffmpegthumbnailer",
+        "file-roller",
+        "ddcutil",
+        "gammastep",
+        "tailscale",
+        "direnv",
+        "signal-desktop",
+        "telegram-desktop",
+        "transmission-qt",
+        "discord",
+        "fzf",
+        "ripgrep",
+        "fd",
+        "bat",
+        "eza",
+        "zoxide",
+        "starship",
+        "atuin",
+        "yazi",
+        "ghostty",
+        "swappy",
+        "rbw",
+        "rofi-rbw",
+        "sway-contrib",
+        "chafa",
+        "htop",
+        "btop",
+        "jq",
+        "yq",
+        "httpie",
+        "wget",
+        "curl",
+        "unzip",
+        "7zip",
+        "rsync",
+        "tree",
+        "sway",
+        "swaybg",
+        "swayidle",
+        "swaylock",
+        "waybar",
+        "wofi",
+        "mako",
+        "libnotify",
+        "grim",
+        "slurp",
+        "wl-clipboard",
+        "cliphist",
+        "xdg-desktop-portal",
+        "xdg-desktop-portal-wlr",
+        "xdg-desktop-portal-gtk",
+        "xdg-utils",
+        "qt5-wayland",
+        "qt6-wayland",
+        "xorg-xwayland",
+        "gvfs",
+        "udisks2",
+        "udiskie",
+        "adwaita-icon-theme",
+        "adwaita-cursors",
+        "pipewire",
+        "pipewire-pulse",
+        "pipewire-alsa",
+        "pipewire-jack",
+        "wireplumber",
+        "pavucontrol",
+        "playerctl",
+        "firefox",
+        "imv",
+        "mpv",
+        "zathura",
+        "zathura-pdf-mupdf",
+        "bluez",
+        "bluez-utils",
+        "blueman",
+        "networkmanager",
+        "network-manager-applet",
+        "mesa",
+        "lib32-mesa",
+        "vulkan-radeon",
+        "lib32-vulkan-radeon",
+        "vulkan-icd-loader",
+        "lib32-vulkan-icd-loader",
+        "vulkan-tools",
+        "libva-mesa-driver",
+        "lib32-libva-mesa-driver",
+        "mesa-utils",
+        "steam",
+        "gamemode",
+        "lib32-gamemode",
+        "mangohud",
+        "lib32-mangohud",
+        "gamescope",
+        "docker",
+        "docker-compose",
+        "openssl",
+        "sqlite",
+        "mise",
+        "sccache",
+        "ttf-nerd-fonts-symbols",
+        "otf-font-awesome",
+        "noto-fonts",
+        "noto-fonts-emoji",
+        "noto-fonts-cjk",
+        "ffmpeg",
+        "imagemagick",
+        "libheif",
+        "libraw",
+        "poppler",
+        "mailcap"
+    ],
+    "disk_config": {
+        "config_type": "manual_partitioning",
+        "btrfs_options": {
+            "snapshot_config": {
+                "type": "snapper"
+            }
+        },
+        "device_modifications": [
+            {
+                "device": "/dev/nvme0n1",
+                "wipe": true,
+                "partitions": [
+                    {
+                        "obj_id": "14a3dfc0-e210-4fcd-ad7d-e5585a3315e7",
+                        "status": "create",
+                        "type": "primary",
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "total_size": null,
+                            "unit": "MiB",
+                            "value": 1
+                        },
+                        "size": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "total_size": null,
+                            "unit": "GiB",
+                            "value": 2
+                        },
+                        "fs_type": "fat32",
+                        "mountpoint": "/boot",
+                        "mount_options": [],
+                        "flags": [
+                            "boot",
+                            "esp"
+                        ],
+                        "btrfs": [],
+                        "dev_path": null
+                    },
+                    {
+                        "obj_id": "ba3b68d6-bc75-4f5e-8905-07d7398b7bbf",
+                        "status": "create",
+                        "type": "primary",
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "total_size": null,
+                            "unit": "GiB",
+                            "value": 2
+                        },
+                        "size": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "total_size": null,
+                            "unit": "GiB",
+                            "value": 1860
+                        },
+                        "fs_type": "btrfs",
+                        "mountpoint": null,
+                        "mount_options": [
+                            "compress=zstd:3",
+                            "noatime",
+                            "ssd",
+                            "discard=async",
+                            "space_cache=v2"
+                        ],
+                        "flags": [],
+                        "btrfs": [
+                            {
+                                "name": "@",
+                                "mountpoint": "/"
+                            },
+                            {
+                                "name": "@home",
+                                "mountpoint": "/home"
+                            },
+                            {
+                                "name": "@snapshots",
+                                "mountpoint": "/.snapshots"
+                            },
+                            {
+                                "name": "@log",
+                                "mountpoint": "/var/log"
+                            },
+                            {
+                                "name": "@pkg",
+                                "mountpoint": "/var/cache/pacman/pkg"
+                            },
+                            {
+                                "name": "@swap",
+                                "mountpoint": "/swap"
+                            }
+                        ],
+                        "dev_path": null
+                    }
+                ]
+            }
+        ]
+    },
+    "custom_commands": [
+        "systemctl enable bluetooth.service",
+        "systemctl enable NetworkManager.service",
+        "systemctl enable docker.service",
+        "systemctl enable systemd-oomd.service",
+        "systemctl enable firewalld.service",
+        "systemctl enable tailscaled.service",
+        "echo i2c-dev > /etc/modules-load.d/i2c-dev.conf",
+        "groupadd -f i2c",
+        "printf 'KERNEL==\"i2c-[0-9]*\", GROUP=\"i2c\", MODE=\"0660\"\\n' > /etc/udev/rules.d/45-ddcutil-i2c.rules",
+        "systemctl enable fstrim.timer",
+        "systemctl enable paccache.timer",
+        "systemctl enable reflector.timer",
+        "systemctl enable fwupd-refresh.timer",
+        "mkdir -p /etc/docker && printf '{\\n  \"log-driver\": \"local\",\\n  \"log-opts\": {\"max-size\": \"10m\", \"max-file\": \"3\"},\\n  \"storage-driver\": \"overlay2\"\\n}\\n' > /etc/docker/daemon.json",
+        "sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 8/' /etc/pacman.conf",
+        "sed -i 's/^#Color/Color/' /etc/pacman.conf",
+        "grep -q '^ILoveCandy' /etc/pacman.conf || sed -i '/^Color/a ILoveCandy' /etc/pacman.conf",
+        "mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\\nSystemMaxUse=500M\\nSystemMaxFileSize=50M\\nMaxRetentionSec=1month\\n' > /etc/systemd/journald.conf.d/00-size.conf"
+    ]
+}

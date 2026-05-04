@@ -1,0 +1,99 @@
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+tool_output_token_limit = 25000
+model_auto_compact_token_limit = 233000
+personality = "pragmatic"
+web_search = "live"
+suppress_unstable_features_warning = true
+
+[projects."/home/nullsense/Programming/Tensil"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/tensil-log"]
+trust_level = "trusted"
+
+[projects."/mnt/c/Users/matas/Programming/Tensil"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/Tensil-Calendar-demo"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming"]
+trust_level = "trusted"
+
+[projects."/mnt/c/Users/matas/OneDrive/Documents/job center"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/kinetic-input"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/dream-slate-landing"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/dream-slate-projections"]
+trust_level = "trusted"
+
+[projects."/mnt/c/Users/matas"]
+trust_level = "trusted"
+
+[projects."/mnt/c/Windows/System32"]
+trust_level = "trusted"
+
+[projects."/home/nullsense"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/panopticon"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/sift"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/teaferrari-portfolio"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/Lucide Similarity Explorer"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/oracle"]
+trust_level = "trusted"
+
+[notice]
+hide_full_access_warning = true
+hide_gpt5_1_migration_prompt = true
+"hide_gpt-5.1-codex-max_migration_prompt" = true
+
+[notice.model_migrations]
+"gpt-5.1-codex-max" = "gpt-5.2-codex"
+
+[features]
+unified_exec = true
+apply_patch_freeform = true
+shell_snapshot = true
+
+[mcp_servers.react-grab-mcp]
+command = "npx"
+args = ["-y", "@react-grab/mcp", "--stdio"]
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp@latest"]
+
+[mcp_servers.exa]
+command = "npx"
+args = ["-y", "exa-mcp-server"]
+
+[mcp_servers.exa.env]
+EXA_API_KEY = "${EXA_API_KEY}"
+
+[mcp_servers.claude-mem-search]
+command = "node"
+args = ["/home/nullsense/.claude/plugins/cache/thedotmack/claude-mem/12.4.8/scripts/mcp-server.cjs"]
+
+[mcp_servers.claude-mem-search.env]
+CLAUDE_PLUGIN_ROOT = "/home/nullsense/.claude/plugins/cache/thedotmack/claude-mem/12.4.8"
+
+[plugins."github@openai-curated"]
+enabled = true
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4

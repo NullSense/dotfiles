@@ -16,6 +16,9 @@ path=(
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 export EDITOR=nvim
+
+# Force emacs keybindings (zsh auto-picks vi when $EDITOR contains "vi")
+bindkey -e
 export VISUAL=nvim
 export MANPAGER='nvim +Man!'
 export COLORTERM=truecolor

@@ -26,12 +26,17 @@ vm.vfs_cache_pressure = 50
 SYSCTL
 sudo sysctl --system
 
-echo "=== [3/11] btrfs swapfile on @swap (16GB, low priority — overflow only) ==="
-# @swap is excluded from snapshots. Btrfs >=6.1 mkswapfile handles NOCOW + alloc atomically.
+echo "=== [3/11] btrfs swapfile on @swap (12GB, low priority — overflow only) ==="
+# @swap subvolume is excluded from snapper snapshots (swap can't be snapshotted).
+# `btrfs filesystem mkswapfile` (btrfs-progs >=6.1) atomically does:
+#   - chattr +C (NODATACOW, mandatory for btrfs swapfiles)
+#   - fallocate (preallocated, no holes — also mandatory)
+#   - mkswap
+# Priority 10 < zram priority 100, so zram fills first and the disk swapfile
+# is overflow only. With 64GB RAM + 16GB zram, 12GB on-disk is plenty.
 if ! swapon --show | grep -q '/swap/swapfile'; then
-  sudo btrfs filesystem mkswapfile --size 16g --uuid clear /swap/swapfile
+  sudo btrfs filesystem mkswapfile --size 12g --uuid clear /swap/swapfile
   sudo swapon --priority 10 /swap/swapfile
-  # fstab entry (lower priority than zram=100, so zram fills first)
   if ! grep -q '/swap/swapfile' /etc/fstab; then
     echo '/swap/swapfile none swap defaults,pri=10 0 0' | sudo tee -a /etc/fstab
   fi

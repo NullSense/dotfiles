@@ -293,9 +293,7 @@
                         "mount_options": [
                             "compress=zstd:3",
                             "noatime",
-                            "ssd",
-                            "discard=async",
-                            "space_cache=v2"
+                            "nodiscard"
                         ],
                         "flags": [],
                         "btrfs": [

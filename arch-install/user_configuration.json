@@ -276,8 +276,8 @@
                                 "value": 512
                             },
                             "total_size": null,
-                            "unit": "GiB",
-                            "value": 2
+                            "unit": "MiB",
+                            "value": 2049
                         },
                         "size": {
                             "sector_size": {
@@ -286,7 +286,7 @@
                             },
                             "total_size": null,
                             "unit": "GiB",
-                            "value": 1860
+                            "value": 1858
                         },
                         "fs_type": "btrfs",
                         "mountpoint": null,

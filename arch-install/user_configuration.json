@@ -89,6 +89,7 @@
         "systemd-ukify",
         "tpm2-tss",
         "tpm2-tools",
+        "fuse2",
         "kanshi",
         "nwg-displays",
         "wlr-randr",

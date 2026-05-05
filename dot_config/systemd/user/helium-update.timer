@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly Helium AppImage update check
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1w
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

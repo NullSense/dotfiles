@@ -1,0 +1,10 @@
+[Unit]
+Description=Update Helium browser AppImage from GitHub releases
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/helium-update
+Nice=10
+IOSchedulingClass=idle

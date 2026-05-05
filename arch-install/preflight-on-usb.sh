@@ -23,15 +23,35 @@ if ping -c1 -W3 archlinux.org &>/dev/null; then ok "Internet reachable"; else fa
 # Time
 if timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -q yes; then ok "Time synced"; else warn "Time not synced — run: timedatectl set-ntp true"; fi
 
-# Disk presence + size match (disk_config hardcodes 1860 GiB btrfs partition)
+# Disk presence + size match (disk_config hardcodes /dev/nvme0n1 as target)
 TARGET="/dev/nvme0n1"
 EXPECTED_GB=1860       # btrfs partition size from user_configuration.json
+
+# Enumerate all NVMe devices and show identification — critical when multiple
+# drives are installed. archinstall WILL wipe whatever sits at $TARGET.
+echo "── NVMe inventory ──"
+lsblk -d -o NAME,SIZE,MODEL,SERIAL --noheadings | awk '/^nvme/{print "  /dev/" $0}'
+NVME_COUNT=$(lsblk -d -n -o NAME | grep -c '^nvme' || true)
+if [[ "$NVME_COUNT" -gt 1 ]]; then
+  warn "Multiple NVMe drives detected. archinstall will WIPE /dev/nvme0n1."
+  warn "Verify above that nvme0n1 is the BLANK target drive (not your existing data drive)."
+  warn "If wrong, power off, swap M.2 slots, and re-run this script."
+fi
+
 if [[ -b "$TARGET" ]]; then
   SIZE_GB=$(($(blockdev --getsize64 "$TARGET") / 1024 / 1024 / 1024))
+  TARGET_MODEL=$(lsblk -d -n -o MODEL "$TARGET" | xargs)
+  TARGET_SERIAL=$(lsblk -d -n -o SERIAL "$TARGET" | xargs)
+  HAS_PARTITIONS=$(lsblk -n "$TARGET" | wc -l)
   if [[ "$SIZE_GB" -ge "$EXPECTED_GB" ]]; then
-    ok "Target disk $TARGET present (${SIZE_GB} GiB ≥ ${EXPECTED_GB} GiB needed)"
+    ok "Target $TARGET ($TARGET_MODEL, sn=$TARGET_SERIAL, ${SIZE_GB} GiB)"
   else
     fail "$TARGET is ${SIZE_GB} GiB but disk_config needs ≥${EXPECTED_GB} GiB. Regenerate disk_config for this drive."
+  fi
+  if [[ "$HAS_PARTITIONS" -gt 1 ]]; then
+    warn "$TARGET already has partitions:"
+    lsblk "$TARGET" | sed 's/^/    /'
+    warn "archinstall will wipe ALL of these. Confirm this is the right drive."
   fi
 else
   fail "$TARGET missing — check the disk_config block inside user_configuration.json"

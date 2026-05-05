@@ -3,3 +3,8 @@
 *.secret
 *_credentials.json
 user_credentials.json
+# arch-install: don't track credentials placeholder (and any user-filled-in version)
+arch-install/user_credentials.json
+arch-install/install.log
+arch-install/*.bak
+arch-install/*.bak.*

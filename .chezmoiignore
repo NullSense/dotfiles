@@ -5,3 +5,7 @@
 .Xresources
 bin/resize.py
 {{- end -}}
+
+# Repo-only contents — tracked in git, NOT deployed to home by chezmoi.
+arch-install
+arch-install/**

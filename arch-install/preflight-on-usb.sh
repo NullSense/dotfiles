@@ -75,6 +75,14 @@ dmidecode -t memory 2>/dev/null | grep -E "Speed:|Configured Memory Speed:" | so
 
 # Resizable BAR check (target GPU)
 echo
+echo "── TPM 2.0 ──"
+if [[ -e /dev/tpm0 || -e /dev/tpmrm0 ]]; then
+  ok "TPM device present (TPM2 auto-unlock available post-install)"
+else
+  warn "No TPM device — disk encryption still works but you'll type passphrase at every boot. Enable TPM/fTPM in BIOS to skip that."
+fi
+
+echo
 echo "── Resizable BAR ──"
 GPU_BAR=$(lspci -vvv -d ::0300 2>/dev/null | grep "prefetchable" | head -1)
 if echo "$GPU_BAR" | grep -qE 'size=(8G|16G|32G)'; then

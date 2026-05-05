@@ -87,6 +87,8 @@
         "lm_sensors",
         "sbctl",
         "systemd-ukify",
+        "tpm2-tss",
+        "tpm2-tools",
         "kanshi",
         "nwg-displays",
         "wlr-randr",
@@ -212,6 +214,12 @@
         "poppler",
         "mailcap"
     ],
+    "disk_encryption": {
+        "encryption_type": "luks",
+        "partitions": [
+            "ba3b68d6-bc75-4f5e-8905-07d7398b7bbf"
+        ]
+    },
     "disk_config": {
         "config_type": "manual_partitioning",
         "btrfs_options": {

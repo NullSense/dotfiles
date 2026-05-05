@@ -74,6 +74,26 @@ REG ADD "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /V Hiberbo
 
 `hiberfil.sys` should disappear from `C:\` either way.
 
+### Generate three passphrases and store them in Bitwarden NOW
+
+You'll need three separate strong passphrases for the install. Create them on Windows (or your phone) and put them into Bitwarden so they survive the install:
+
+| Slot | Used for | Suggested length |
+|---|---|---|
+| `root-password` | Account locked after install (`passwd -l root`); only used in emergencies | 6+ diceware words |
+| User `nullsense` password | Daily login, sudo | 6+ diceware words |
+| **LUKS encryption passphrase** | Decrypts the disk before TPM is enrolled (Phases 1.5 → 3.5). Also your fallback if TPM ever fails. | 8+ diceware words — this is the one that must survive forever |
+
+**Generate via Bitwarden:**
+```
+bw generate --passphrase --words 8 --separator -
+```
+Or `Settings → Generator → Passphrase` in the Bitwarden Desktop GUI.
+
+Then on the live USB, paste them into `user_credentials.json` to replace the `CHANGE_ME` placeholders before running archinstall.
+
+Memory tip: the LUKS passphrase you'll only type at first boot (before Phase 3.5 enrolls TPM); after that it's a recovery-only secret. Don't pick something painful to type just because it's "rare" — you'll type it half a dozen times during install/post-install.
+
 ## Phase 1 — BIOS/UEFI checklist
 
 These can ONLY be verified inside the BIOS itself. Boot to UEFI setup (`systemctl reboot --firmware-setup` from Linux, or mash F2/Del at POST):
@@ -88,7 +108,7 @@ These can ONLY be verified inside the BIOS itself. Boot to UEFI setup (`systemct
 | Resizable BAR (or "Smart Access Memory") | **Enabled** | You said this is on ✓ |
 | EXPO / DOCP / XMP for DDR5 | **Enabled** | Without this, RAM runs at JEDEC base (4800 MT/s) |
 | SVM / AMD-V | Enabled | If you ever run KVM/QEMU |
-| TPM (fTPM) | Enabled | Future-proof; required if you later TPM-bind LUKS |
+| TPM (fTPM) | **Enabled** | Required for TPM2 LUKS auto-unlock (Phase 3.5) |
 | Fast Boot (motherboard, NOT Windows) | Disabled | Sometimes skips POST init Linux needs |
 
 After install, run `./verify-system.sh` — it reports back what's actually live (ReBAR, AGESA, BIOS version) so you can spot-check.
@@ -170,6 +190,47 @@ Already documented in `setup-secure-boot.sh` header. TL;DR:
 5. `sudo sbctl status` should now say "Secure Boot: Enabled".
 
 After that: zero maintenance. `sbctl` pacman hook auto-signs every kernel/UKI/bootloader update.
+
+## Phase 3.5 — TPM2 auto-unlock for LUKS (after Secure Boot is active)
+
+**This step requires Secure Boot to already be Enabled.** PCR 7 (the register we bind to) only carries meaningful state when Secure Boot is in user mode — without it, anyone could swap your bootloader and still get the disk key released.
+
+The full disk encryption stack is already in place from archinstall:
+```
+/dev/nvme0n1p2  →  LUKS2 (Argon2id KDF)  →  btrfs  →  @, @home, @snapshots, @log, @pkg, @swap
+```
+At this point you've been typing your LUKS passphrase at every boot. To switch to transparent TPM2 unlock:
+
+```bash
+cd ~/.local/share/chezmoi/arch-install
+./setup-tpm-unlock.sh
+```
+
+What the script does:
+1. **Enrolls a recovery key first.** Non-negotiable — write it down and store it in Bitwarden. If the TPM ever forgets (BIOS reset, mobo replacement, dead CMOS battery), this is the only way back into your data.
+2. **Binds the LUKS volume to TPM2 against PCR 7 + PCR 11.**
+   - PCR 7 = Secure Boot policy + enrolled keys. Changes if SB is disabled or your sbctl keys change.
+   - PCR 11 = UKI hash, measured by `systemd-stub`. Changes if anyone tampers with the kernel/cmdline/initramfs.
+   - **PCR 0/2 binding is obsolete** — it breaks on every firmware update. PCR 7+11 is the modern recipe (ArchWiki + systemd v259 docs).
+3. Lists your keyslots. You'll see: slot 0 (your passphrase), slot 1 (recovery key), slot 2 (`systemd-tpm2`).
+
+After reboot, the box should boot straight into the login prompt with no LUKS dialog. If it ever does prompt: passphrase still works as fallback.
+
+### When TPM auto-unlock will fail (and it's fine)
+
+| Event | Result | Recovery |
+|---|---|---|
+| Major BIOS update | PCR 7 shifts, TPM refuses to release | Enter recovery key, rerun `setup-tpm-unlock.sh` |
+| Disable Secure Boot | PCR 7 shifts | Re-enable SB, or rerun script |
+| Replace motherboard | New TPM, no enrollment | Recovery key, then re-enroll |
+| Kernel update with new UKI hash | PCR 11 shifts, but signature-based policy lets it through | Usually transparent; rerun script if not |
+| `sbctl reset; sbctl create-keys; sbctl enroll-keys` (re-roll SB keys) | PCR 7 shifts | Recovery key, rerun script |
+
+### Optional hardening: PIN at boot
+
+If you want a second factor at boot (TPM PCR state correct **and** PIN entered), edit the script and add `--tpm2-with-pin=yes`. You'll be prompted for a PIN at every boot. This defeats the "thief steals the whole laptop" path because TPM alone won't unseal the key.
+
+For a desktop in your home, no PIN is fine — the threat model is "drive pulled, taken elsewhere", which TPM2-PCR7 already defeats.
 
 ## Phase 4 — Sway color management & HDR
 

@@ -1,0 +1,14 @@
+configuration {
+    modi:                       "drun,run,window,ssh";
+    show-icons:                 true;
+    icon-theme:                 "Adwaita";
+    font:                       "Maple Mono NF 12";
+    display-drun:               "  ";
+    display-run:                "  ";
+    display-window:             "  ";
+    display-ssh:                "  ";
+    drun-display-format:        "{name}";
+    window-format:              "{w} · {c} · {t}";
+}
+
+@theme "gruvbox-dark"

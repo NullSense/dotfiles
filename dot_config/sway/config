@@ -11,26 +11,20 @@ default_border pixel 2
 default_floating_border normal
 hide_edge_borders smart
 
-# wallpaper
+# wallpaper (applies to all outputs)
 output "*" bg ~/Pictures/Aesthetic/aesthetic.png fill
 
-# Monitor configuration (MSI MAG274QRF-QD - 27" 1440p 165Hz)
-# Find output name with: swaymsg -t get_outputs
-# Options: 165Hz@8bit OR 120Hz@10bit
-output DP-1 {
-    mode 2560x1440@165Hz
-    # For 10-bit color (at 120Hz): uncomment below and comment above
-    # mode 2560x1440@120Hz
-    # render_bit_depth 10
+# Monitor configuration is delegated to kanshi (~/.config/kanshi/config).
+# kanshi auto-detects connected displays by make/model/serial and applies the
+# matching profile, falling back to a generic enable-all profile otherwise.
+# This keeps the sway config portable across desktop/laptop/docked setups.
+# To list current outputs: swaymsg -t get_outputs
+exec_always pkill kanshi; exec_always kanshi
 
-    # Adaptive sync toggle: Mod+Shift+F (see keybindings)
-    # Keep OFF for desktop, toggle ON for gaming
-    adaptive_sync off
-
-    # ICC color profile (requires WLR_RENDERER=vulkan)
-    # DisplayCAL calibration: sRGB, 119.5cd/m², D65 white point
-    color_profile icc ~/.local/share/color/icc/MAG274QRF-QD.icm
-}
+# Lid switch (laptop): disable the laptop output when lid closes, re-enable on open.
+# Harmless on desktops (no lid switch present, bind is silently inert).
+bindswitch --reload --locked lid:on  output eDP-1 disable
+bindswitch --reload --locked lid:off output eDP-1 enable
 
 ##########################################################################################################################################
 # Startup ################################################################################################################################
@@ -40,28 +34,22 @@ exec nm-applet --indicator
 exec blueman-applet
 exec mako --margin 16 --padding 8 --border-color "#ebdbb2" --text-color "#ebdbb2" --background-color "#32302f" --border-size 4 --default-timeout 10000 # notification daemon
 exec wl-paste -t text --watch cliphist store # clipboard history
-exec wl-gammactl watch # auto adjust color temperature
+exec gammastep -O 4500 # color temperature (gammastep replaces wl-gammactl, Wayland-native)
 exec udiskie -t # auto-mount USB drives
 exec seat * hide_cursor 3
-exec spotify
 exec $term --title 'dropdown_term'
 
 exec swaymsg 'workspace $ws1; exec zen-browser'
-
 exec swaymsg 'workspace $ws2; exec $term'
-
-exec swaymsg 'workspace $ws3; exec slack --enable-features=UseOzonePlatform --ozone-platform=wayland'
 exec swaymsg 'workspace $ws3; exec signal-desktop --enable-features=UseOzonePlatform --ozone-platform=wayland'
 exec swaymsg 'workspace $ws3; exec discord --enable-features=UseOzonePlatform --ozone-platform=wayland'
 
-#exec swaymsg 'workspace $ws9; exec transmission-gtk'
-
-### Idle configuration
+### Idle configuration — hyprlock (GPU-accelerated, ext-session-lock-v1)
 exec swayidle -w \
-         timeout 300 'swaylock -f --screenshots --effect-blur 7x5 --clock --indicator' \
+         timeout 300 'hyprlock' \
          timeout 2600 'swaymsg "output * dpms off"' \
          resume 'swaymsg "output * dpms on"' \
-         before-sleep 'swaylock -f --screenshots --effect-blur 7x5 --clock --indicator'
+         before-sleep 'hyprlock'
 
 # This will lock your screen after 300 seconds of inactivity, then turn off
 # your displays after another 300 seconds, and turn your screens back on when
@@ -98,7 +86,6 @@ for_window [app_id="^clipboard-picker$"] floating enable, border pixel 5, resize
 for_window [app_id="electrum"] floating enable, resize set 1280 720
 for_window [app_id="pavucontrol"] floating enable, resize set 1280 720
 for_window [class="Signal"] move container to workspace $ws3
-for_window [class="Slack"] move container to workspace $ws3
 for_window [class="discord"] move container to workspace $ws3
 for_window [class="Navigator"] move position center, resize set 1080 720
 for_window [title="Sharing Indicator$"] floating enable, sticky enable
@@ -189,11 +176,11 @@ bindsym --locked XF86MonBrightnessDown exec ddcutil setvcp 10 - 10
 
 
 # Shutdown, reboot, lock screen
-bindsym Control+Alt+Delete exec swaylock -f --screenshots --effect-blur 7x5 --clock --indicator
+bindsym Control+Alt+Delete exec hyprlock
 
 set $mode_system System (l) lock, (e) logout, (s) suspend, (r) reboot, (Shift+s) shutdown
 mode "$mode_system" {
-    bindsym l exec swaylock -f --screenshots --effect-blur 7x5 --clock --indicator, mode "default"
+    bindsym l exec hyprlock, mode "default"
     bindsym e exec swaymsg exit, mode "default"
     bindsym s exec systemctl suspend, mode "default"
     bindsym r exec reboot, mode "default"

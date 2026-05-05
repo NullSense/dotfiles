@@ -113,8 +113,7 @@ paru -S --noconfirm --needed \
   sway-launcher-desktop \
   jellyfin-media-player \
   infisical-bin \
-  xpadneo-dkms-git \
-  swaylock-effects
+  xpadneo-dkms-git
 
 echo "=== [8/11] mise as unified runtime/tool manager ==="
 # mise (installed via pacman in user_configuration.json) manages:

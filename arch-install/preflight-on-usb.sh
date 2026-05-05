@@ -26,6 +26,7 @@ if timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -q yes; then o
 # Disk presence + size match (disk_config hardcodes /dev/nvme0n1 as target)
 TARGET="/dev/nvme0n1"
 EXPECTED_GB=1860       # btrfs partition size from user_configuration.json
+HARD_STOP=0            # tracks whether we must block install due to data-loss risk
 
 # Enumerate all NVMe devices and show identification — critical when multiple
 # drives are installed. archinstall WILL wipe whatever sits at $TARGET.
@@ -33,30 +34,51 @@ echo "── NVMe inventory ──"
 lsblk -d -o NAME,SIZE,MODEL,SERIAL --noheadings | awk '/^nvme/{print "  /dev/" $0}'
 NVME_COUNT=$(lsblk -d -n -o NAME | grep -c '^nvme' || true)
 if [[ "$NVME_COUNT" -gt 1 ]]; then
-  warn "Multiple NVMe drives detected. archinstall will WIPE /dev/nvme0n1."
-  warn "Verify above that nvme0n1 is the BLANK target drive (not your existing data drive)."
-  warn "If wrong, power off, swap M.2 slots, and re-run this script."
+  fail "Multiple NVMe drives detected — REFUSING to continue."
+  fail "  archinstall hardcodes /dev/nvme0n1 as the wipe target, but Linux NVMe"
+  fail "  enumeration order is firmware-dependent. The wrong drive could end up"
+  fail "  at nvme0n1 and get wiped."
+  fail "  Power off, physically REMOVE all drives except the blank target, re-run."
+  fail "  Override (DANGEROUS — only if you've verified models above): FORCE_INSTALL=1"
+  HARD_STOP=1
 fi
 
 if [[ -b "$TARGET" ]]; then
   SIZE_GB=$(($(blockdev --getsize64 "$TARGET") / 1024 / 1024 / 1024))
   TARGET_MODEL=$(lsblk -d -n -o MODEL "$TARGET" | xargs)
   TARGET_SERIAL=$(lsblk -d -n -o SERIAL "$TARGET" | xargs)
-  HAS_PARTITIONS=$(lsblk -n "$TARGET" | wc -l)
-  if [[ "$SIZE_GB" -ge "$EXPECTED_GB" ]]; then
-    ok "Target $TARGET ($TARGET_MODEL, sn=$TARGET_SERIAL, ${SIZE_GB} GiB)"
-  else
-    fail "$TARGET is ${SIZE_GB} GiB but disk_config needs ≥${EXPECTED_GB} GiB. Regenerate disk_config for this drive."
+  PART_COUNT=$(lsblk -n -o NAME "$TARGET" | tail -n +2 | wc -l)
+  echo "  → Target /dev/nvme0n1: $TARGET_MODEL (sn=$TARGET_SERIAL, ${SIZE_GB} GiB, $PART_COUNT partition(s))"
+
+  if [[ "$SIZE_GB" -lt "$EXPECTED_GB" ]]; then
+    fail "$TARGET is ${SIZE_GB} GiB but disk_config needs ≥${EXPECTED_GB} GiB."
+    HARD_STOP=1
   fi
-  if [[ "$HAS_PARTITIONS" -gt 1 ]]; then
-    warn "$TARGET already has partitions:"
-    lsblk "$TARGET" | sed 's/^/    /'
-    warn "archinstall will wipe ALL of these. Confirm this is the right drive."
+
+  # Anything other than 0 partitions = potentially-populated drive. Block.
+  if [[ "$PART_COUNT" -gt 0 ]]; then
+    fail "$TARGET has $PART_COUNT existing partition(s) — REFUSING to continue."
+    fail "  This drive is NOT blank. archinstall would wipe it entirely."
+    lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTLABEL "$TARGET" | sed 's/^/    /'
+    # Look for filesystem signatures characteristic of an existing OS install
+    SIGS=$(lsblk -n -o FSTYPE "$TARGET" | sort -u | tr '\n' ' ')
+    if echo "$SIGS" | grep -qE "ntfs|exfat|hfsplus|apfs"; then
+      fail "  Detected non-Linux filesystem(s): $SIGS"
+      fail "  This looks like a Windows / macOS / external data drive."
+    fi
+    fail "  If this is the WRONG drive: power off, swap M.2 slots, re-run preflight."
+    fail "  If this is GENUINELY the right drive (you wiped it earlier and signatures linger):"
+    fail "    sudo wipefs -a $TARGET   # then re-run preflight"
+    fail "  Override (DANGEROUS): FORCE_INSTALL=1 ./preflight-on-usb.sh"
+    HARD_STOP=1
+  else
+    ok "Target $TARGET is BLANK ($TARGET_MODEL, sn=$TARGET_SERIAL, ${SIZE_GB} GiB)"
   fi
 else
   fail "$TARGET missing — check the disk_config block inside user_configuration.json"
   echo "Available disks:"
   lsblk -d -o NAME,SIZE,MODEL
+  HARD_STOP=1
 fi
 
 # CPU + AGESA
@@ -125,6 +147,7 @@ for f in user_configuration.json user_credentials.json; do
 done
 if grep -q CHANGE_ME user_credentials.json 2>/dev/null; then
   fail "user_credentials.json still contains CHANGE_ME — edit before installing"
+  HARD_STOP=1
 fi
 
 # archinstall presence
@@ -136,10 +159,21 @@ else
 fi
 
 echo
-echo "=== Optional: actual archinstall dry-run ==="
+if [[ "$HARD_STOP" -eq 1 ]] && [[ "${FORCE_INSTALL:-0}" != "1" ]]; then
+  echo -e "${RED}=== HARD STOP — install blocked ===${NC}"
+  echo "One or more checks above would risk wiping a populated drive."
+  echo "Resolve the issues, OR (only if you've genuinely verified):"
+  echo "  FORCE_INSTALL=1 ./preflight-on-usb.sh"
+  exit 2
+fi
+if [[ "${FORCE_INSTALL:-0}" == "1" ]] && [[ "$HARD_STOP" -eq 1 ]]; then
+  warn "FORCE_INSTALL=1 set — bypassing safety checks. You're on your own."
+fi
+
+echo "=== Next: dry-run, then real install ==="
 echo "  sudo archinstall --dry-run --silent \\"
 echo "       --config user_configuration.json \\"
 echo "       --creds user_credentials.json"
 echo "  # archinstall 4.x has no --disk-layout flag; the disk plan lives inside user_configuration.json's disk_config block."
 echo
-echo "If everything above is OK and dry-run is clean, run without --dry-run."
+echo "If dry-run is clean, drop --dry-run for the real run."

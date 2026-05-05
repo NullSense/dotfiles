@@ -112,7 +112,8 @@ paru -S --noconfirm --needed \
   zen-browser-bin \
   sway-launcher-desktop \
   jellyfin-media-player \
-  infisical-bin
+  infisical-bin \
+  xpadneo-dkms-git
 
 echo "=== [8/11] mise as unified runtime/tool manager ==="
 # mise (installed via pacman in user_configuration.json) manages:

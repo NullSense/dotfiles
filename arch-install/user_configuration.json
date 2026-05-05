@@ -48,6 +48,10 @@
     "packages": [
         "base",
         "base-devel",
+        "linux-zen-headers",
+        "linux-headers",
+        "linux-lts-headers",
+        "dkms",
         "linux-firmware",
         "amd-ucode",
         "sof-firmware",

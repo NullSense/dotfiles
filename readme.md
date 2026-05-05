@@ -95,12 +95,6 @@ It used to be `github.com/NullSense/arch-install` — that was friction. Both ar
 
 This is the de-facto pattern for "Arch + chezmoi" repos in the wild — see [cogikyo/dotfiles](https://github.com/cogikyo/dotfiles) (`etc/arch.json` + `install.sh` at root), [AnshumanTripathi/dotfiles](https://github.com/AnshumanTripathi/dotfiles) (`.chezmoidata/packages.yaml` + `.chezmoiscripts/`), and [rghamilton3/dotfiles](https://github.com/rghamilton3/dotfiles) (per-platform `run_once_*` scripts).
 
-## `bin/bootstrap/` — legacy, mostly superseded
-
-The repo also contains `bin/bootstrap/{executable_bootstrap.sh, executable_install_packages.sh, executable_system_cfg.sh, packages.txt}`. Those predate the `arch-install/` pipeline and assumed Arch was already installed via the wiki manual procedure.
-
-`arch-install/post-install.sh` does everything they did and more. The legacy scripts can be deleted whenever; they're kept for now in case anything still references them.
-
 ## Secrets
 
 See `SECRETS.md`. TL;DR:

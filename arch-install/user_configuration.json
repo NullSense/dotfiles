@@ -346,6 +346,7 @@
         "sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 8/' /etc/pacman.conf",
         "sed -i 's/^#Color/Color/' /etc/pacman.conf",
         "grep -q '^ILoveCandy' /etc/pacman.conf || sed -i '/^Color/a ILoveCandy' /etc/pacman.conf",
-        "mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\\nSystemMaxUse=500M\\nSystemMaxFileSize=50M\\nMaxRetentionSec=1month\\n' > /etc/systemd/journald.conf.d/00-size.conf"
+        "mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\\nSystemMaxUse=500M\\nSystemMaxFileSize=50M\\nMaxRetentionSec=1month\\n' > /etc/systemd/journald.conf.d/00-size.conf",
+        "passwd -l root"
     ]
 }

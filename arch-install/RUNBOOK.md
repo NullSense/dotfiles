@@ -74,15 +74,14 @@ REG ADD "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /V Hiberbo
 
 `hiberfil.sys` should disappear from `C:\` either way.
 
-### Generate three passphrases and store them in Bitwarden NOW
+### Generate TWO passphrases and store them in Bitwarden NOW
 
-You'll need three separate strong passphrases for the install. Create them on Windows (or your phone) and put them into Bitwarden so they survive the install:
+The root account gets locked at install time (`passwd -l root` runs as a custom_command), so root has no usable password. You only need two:
 
 | Slot | Used for | Suggested length |
 |---|---|---|
-| `root-password` | Account locked after install (`passwd -l root`); only used in emergencies | 6+ diceware words |
-| User `nullsense` password | Daily login, sudo | 6+ diceware words |
-| **LUKS encryption passphrase** | Decrypts the disk before TPM is enrolled (Phases 1.5 → 3.5). Also your fallback if TPM ever fails. | 8+ diceware words — this is the one that must survive forever |
+| User `nullsense` password | Daily login + sudo (this IS the privilege-escalation password since root is locked) | 6+ diceware words |
+| **LUKS encryption passphrase** | Decrypts the disk at boot until TPM2 is enrolled (Phase 3.5). After that, recovery-only. | 8+ diceware words — survives forever |
 
 **Generate via Bitwarden:**
 ```
@@ -90,9 +89,9 @@ bw generate --passphrase --words 8 --separator -
 ```
 Or `Settings → Generator → Passphrase` in the Bitwarden Desktop GUI.
 
-Then on the live USB, paste them into `user_credentials.json` to replace the `CHANGE_ME` placeholders before running archinstall.
+Paste them into `user_credentials.json` on the live USB to replace the `CHANGE_ME` placeholders. The `!root-password` field stays as `""` — archinstall accepts an empty string and the locked-root custom_command finishes the job.
 
-Memory tip: the LUKS passphrase you'll only type at first boot (before Phase 3.5 enrolls TPM); after that it's a recovery-only secret. Don't pick something painful to type just because it's "rare" — you'll type it half a dozen times during install/post-install.
+**Why not share one passphrase across both?** LUKS runs in the bootloader/initramfs against an Argon2id-derived key — there's no `/etc/shadow` at that stage, so it can't share storage with the user password. The two prompts happen in completely different security contexts. Same string is allowed but means a shoulder-surfer at the LUKS prompt also has your login. For a home desktop, your call.
 
 ## Phase 1 — BIOS/UEFI checklist
 

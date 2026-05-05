@@ -1,0 +1,13 @@
+[Unit]
+Description=Assert Linux is first in UEFI BootOrder (self-heal after Windows updates)
+DefaultDependencies=no
+After=local-fs.target
+ConditionPathExists=/sys/firmware/efi/efivars
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/assert-boot-priority
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

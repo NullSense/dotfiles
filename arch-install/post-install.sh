@@ -128,6 +128,20 @@ else
   echo "  helium-update not in PATH — run 'chezmoi apply' first, then re-run this phase"
 fi
 
+echo "=== [7c/11] Boot-order self-heal (resists Windows update boot hijacks) ==="
+# Windows feature/security updates often re-prioritize 'Windows Boot Manager'
+# at position 0 in UEFI BootOrder. Without intervention you'd press F8 at
+# every POST forever. This systemd oneshot runs at boot, checks if
+# 'Linux Boot Manager' is first, and if not, swaps it to first via
+# efibootmgr. Idempotent: silent and no-op when already correct.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+sudo install -m 755 "$SCRIPT_DIR/assert-boot-priority.sh" /usr/local/bin/assert-boot-priority
+sudo install -m 644 "$SCRIPT_DIR/assert-boot-priority.service" /etc/systemd/system/assert-boot-priority.service
+sudo systemctl daemon-reload
+sudo systemctl enable assert-boot-priority.service
+# Run once now so the order is correct before next boot
+sudo /usr/local/bin/assert-boot-priority || true
+
 echo "=== [8/11] mise as unified runtime/tool manager ==="
 # mise (installed via pacman in user_configuration.json) manages:
 #   - node, bun, python, rust toolchains (per-project via .mise.toml)

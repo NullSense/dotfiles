@@ -74,6 +74,27 @@ REG ADD "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /V Hiberbo
 
 `hiberfil.sys` should disappear from `C:\` either way.
 
+### Dual-boot prep (only if you're keeping Windows alongside Arch)
+
+If Arch will replace Windows entirely, skip this block.
+
+**1. Save BitLocker recovery key.** If Windows has BitLocker on:
+```powershell
+manage-bde -status C:                      # is BitLocker active?
+manage-bde -protectors -get C:             # print the 48-digit recovery key
+```
+Store the recovery key in Bitwarden. When Secure Boot keys change (Phase 3) the TPM-bound BitLocker may demand the recovery key on the next Windows boot.
+
+Optional safer prep: `manage-bde -protectors -disable C: -RebootCount 1` suspends BitLocker for one reboot — Windows auto-resumes after.
+
+**2. Fix Windows ↔ Linux RTC clock drift permanently.** Windows defaults to localtime in the RTC; Linux defaults to UTC. Without aligning, every reboot makes one OS think the time is off by your timezone offset. The technically correct fix is to make Windows use UTC (matches Linux convention; systemd docs explicitly warn against the reverse). Run in elevated PowerShell:
+```powershell
+reg add "HKLM\System\CurrentControlSet\Control\TimeZoneInformation" /v RealTimeIsUniversal /t REG_DWORD /d 1 /f
+```
+Reboot Windows once to confirm time is still correct (it should be — Windows now interprets the RTC as UTC and applies your timezone in software). After this, Linux's default UTC behaviour and Windows agree forever; no Linux-side change needed.
+
+**3. Set Windows boot priority defenses.** Already covered by Phase 7c of `post-install.sh` (Arch side): an `assert-boot-priority.service` runs at every boot, re-asserts Linux as `BootOrder[0]` if Windows updates have re-prioritised themselves. Self-healing. You'll never need to dig into BIOS for this again unless the entire EFI variable store gets nuked.
+
 ### Generate TWO passphrases and store them in Bitwarden NOW
 
 The root account gets locked at install time (`passwd -l root` runs as a custom_command), so root has no usable password. You only need two:

@@ -189,7 +189,7 @@ Three layers, all installed via the package list:
 | Tool | Use it for |
 |---|---|
 | **`nwg-displays`** | One-shot GUI to lay out monitors, set resolution/refresh/scale. Saves to `~/.config/sway/outputs`. Run once, include in `~/.config/sway/config`. |
-| **`kanshi`** | Daemon. Auto-applies different output configs based on which monitors are plugged in. Overkill for your single-monitor desktop, but free. |
+| **`kanshi`** | Daemon. Primary monitor manager — auto-applies output profiles based on connected EDID. Profiles live in `~/.config/kanshi/config` (in dotfiles). Replaces hardcoded `output ...` blocks in sway config. |
 | **`wlr-randr`** | CLI for scripts (`wlr-randr --output DP-1 --mode 2560x1440@165Hz`). |
 
 Add this to your sway config to use nwg-displays output:
@@ -356,35 +356,28 @@ sudo firewall-cmd --reload
 
 ## Phase 9.7 — Keys & secrets
 
-Installed: `gnupg`, `pass`, `keychain`.
+Installed: `gnupg`. (Removed `pass` + `keychain` — Bitwarden replaces both.)
 
-**SSH keys**: see [Phase 9.95](#phase-995--ssh-keys-rotate-store-in-bitwarden-use-bitwarden-as-ssh-agent) for the full Bitwarden-SSH-agent-based flow. Bitwarden's desktop SSH agent (built-in since v2025.1.2) replaces the systemd ssh-agent entirely — don't enable both.
+**SSH keys**: see [Phase 9.95](#phase-995--ssh-keys-rotate-store-in-bitwarden-use-bitwarden-as-ssh-agent) for the Bitwarden-SSH-agent flow. Bitwarden Desktop's built-in SSH agent (since v2025.1.2) replaces the systemd ssh-agent entirely — don't enable both.
 
-**GPG (for signing git commits + pass) — alternative to Bitwarden's SSH-signing path:**
+**GPG (only if you want signed git commits with a GPG key instead of SSH-signing via Bitwarden):**
 ```bash
 gpg --full-generate-key   # ed25519 (option 9), 0 = no expiry, real name + email
 gpg --list-secret-keys --keyid-format=long
 git config --global user.signingkey <KEY_ID>
 git config --global commit.gpgsign true
 ```
+Otherwise skip — Bitwarden's SSH agent can sign commits via `gpg.format=ssh` + `user.signingkey=<ssh-pubkey>`.
 
-**Password store:**
-```bash
-pass init <YOUR_GPG_KEY_ID>
-pass insert github/token
-pass insert email/work
-pass git init        # version your password store
-pass git remote add origin git@github.com:youruser/password-store.git
-```
-
-**Secrets in dotfiles:** chezmoi has built-in age/gpg/pass integration. In `~/.local/share/chezmoi/.chezmoi.toml.tmpl`:
+**Secrets in dotfiles:** chezmoi has native Bitwarden integration. In `~/.local/share/chezmoi/.chezmoi.toml.tmpl`:
 ```toml
 [data.secrets]
-github_token = {{ pass "github/token" | quote }}
+github_token = {{ (bitwardenFields "item" "github").token.value | quote }}
 ```
 
 **Don't bother with:**
 - `seahorse` (gnome-keyring GUI) — gnome-keyring is heavy and you're on Sway.
+- `pass` — Bitwarden CLI (`bw`) covers the same use cases without the GPG dance.
 
 ### Browser password storage — why not
 
@@ -478,7 +471,7 @@ Full config is in `sway-display-config.txt`. Highlights:
 
 **OLED burn-in mitigation** (in `swayidle` config):
 - 2 min: DPMS off (screens fully blank, OLED pixels rest).
-- 5 min: `swaylock`.
+- 5 min: `hyprlock` (GPU-accelerated lockscreen, gruvbox-themed config in `~/.config/hypr/hyprlock.conf`).
 - 10 min: `systemctl suspend`.
 - Also turn ON the monitor's OSD pixel-shift / pixel-refresh features.
 - **Don't** use software brightness curves on OLED — set it once in OSD and leave it.
@@ -486,8 +479,8 @@ Full config is in `sway-display-config.txt`. Highlights:
 **Font rendering quirk:** OLED panels use non-standard subpixel arrangements (WOLED is RGBW, QD-OLED is triangle). Standard RGB-stripe LCD subpixel hinting causes color fringing on OLED text. Recommended: **greyscale antialiasing globally** (`rgba=none`, `lcdfilter=lcdnone`, keep `hintstyle=hintslight`). Looks clean on both panels and avoids the OLED fringing. The fonts.conf snippet is in the display-config file.
 
 **Layout management:**
-- Use `nwg-displays` (already installed) for one-shot visual arrangement → saves to `~/.config/sway/outputs`.
-- `kanshi` (already installed) for profile-based auto-switch if you ever go single-monitor (laptop dock scenario).
+- `kanshi` is the primary monitor manager. Config at `~/.config/kanshi/config` (already in dotfiles) defines profiles per-machine; sway autostarts the daemon. After first boot, run `swaymsg -t get_outputs | jq '.[] | {name, make, model, serial}'` and tighten the `*` wildcards in the kanshi profiles to match your actual EDID strings.
+- `nwg-displays` (also installed) is a GUI for one-shot ad-hoc rearrangement.
 
 ## Phase 9.86 — USB auto-mount
 

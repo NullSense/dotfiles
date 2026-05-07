@@ -1,0 +1,48 @@
+#!/bin/sh
+# Reloads everything that benefits from a kick after a config edit:
+#   - Hyprland config (binds, windowrules, monitors)
+#   - waybar (systemd unit reload via SIGUSR2 — in-place reload, no restart)
+#   - mako (makoctl reload — re-reads ~/.config/mako/config)
+#   - walker (omarchy-restart-walker if available)
+#   - dropdown terminal (systemd restart — picks up new ghostty config)
+#   - swaybg (kill + respawn against the current background symlink)
+#
+# Bound to SUPER+SHIFT+R in dot_config/hypr/bindings.conf.
+# Notify on completion so you can see it ran.
+
+set -u
+
+# Hyprland — config reload (also fires `exec` lines like ~/bin/theme-apply).
+hyprctl reload >/dev/null 2>&1
+
+# Catch parse errors on top of the reload and surface them.
+errs=$(hyprctl configerrors 2>&1)
+if [ -n "$errs" ] && [ "$errs" != "no errors" ]; then
+    notify-send -u critical "Hyprland config errors" "$errs"
+fi
+
+# Waybar — SIGUSR2 = in-place reload (preserves systemd unit identity).
+systemctl --user reload waybar.service >/dev/null 2>&1 \
+    || systemctl --user restart waybar.service >/dev/null 2>&1
+
+# Mako — re-reads ~/.config/mako/config.
+makoctl reload >/dev/null 2>&1
+
+# Walker — restart the GTK service so theme/layout changes take effect.
+if command -v omarchy-restart-walker >/dev/null 2>&1; then
+    omarchy-restart-walker >/dev/null 2>&1
+fi
+
+# Dropdown terminal — restart the systemd unit (picks up ghostty config edits).
+systemctl --user restart dropdown-terminal.service >/dev/null 2>&1
+
+# Wallpaper — kill any swaybg and respawn pointing at the current symlink.
+# Belt-and-braces in case the omarchy autostart's swaybg lost its window
+# (rare; happens after monitor hot-plug).
+if [ -e "$HOME/.config/omarchy/current/background" ]; then
+    pkill -x swaybg >/dev/null 2>&1
+    sleep 0.2
+    uwsm app -- swaybg -i "$HOME/.config/omarchy/current/background" -m fill >/dev/null 2>&1 &
+fi
+
+notify-send -u low "Reloaded" "Hyprland · waybar · mako · walker · dropdown · swaybg"

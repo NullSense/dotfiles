@@ -2,98 +2,11 @@
 
 export FORGIT_COPY_CMD='wl-copy'
 
-# pacman helper
-# Unified package manager with source and mode switching
-psf() {
-    mode='install'
-    source='pacman'
-
-    while true; do
-        # Determine list command based on source and mode
-        case "$source-$mode" in
-            pacman-install)   list_cmd="pacman -Slq" ;;
-            pacman-uninstall) list_cmd="pacman -Qq" ;;
-            aur-install)      list_cmd="paru -Slq --aur" ;;
-            aur-uninstall)    list_cmd="paru -Qq --aur" ;;
-        esac
-
-        # Determine preview command based on source
-        case "$source" in
-            pacman) preview_cmd="pacman --color=always -Si {1}" ;;
-            aur)    preview_cmd="paru --color=always -Si {1}" ;;
-        esac
-
-        # Visual indicators for current state
-        if [ "$source" = "pacman" ]; then
-            source_display="📦 Pacman"
-        else
-            source_display="🌟 AUR"
-        fi
-
-        if [ "$mode" = "install" ]; then
-            mode_display="⬇️ Install"
-        else
-            mode_display="🗑️ Remove"
-        fi
-
-        # Create compact header with current state
-        header="${mode_display} ${source_display} | ^Space:toggle ^A:switch"
-
-        # Fetch package list with error handling
-        pkg_list=$(sh -c "$list_cmd" 2>&1)
-        if [ $? -ne 0 ]; then
-            echo "Error: Failed to fetch package list from $source"
-            echo "Command: $list_cmd"
-            echo "Error output:"
-            echo "$pkg_list"
-            read -p "Press Enter to retry or Ctrl-C to exit..."
-            continue
-        fi
-
-        result=$(echo "$pkg_list" | fzf \
-            --multi \
-            --preview "$preview_cmd" \
-            --preview-window='right:60%:wrap' \
-            --expect=ctrl-space,ctrl-a \
-            --header="$header" \
-            --prompt="🔍 " \
-            --pointer="▶" \
-            --marker="✓" \
-            --border=rounded)
-
-        key=$(head -1 <<< "$result")
-        pkgs=($(tail -n +2 <<< "$result"))
-
-        case "$key" in
-            ctrl-space)
-                mode=$( [ "$mode" = 'install' ] && echo 'uninstall' || echo 'install' )
-                ;;
-            ctrl-a)
-                source=$( [ "$source" = 'pacman' ] && echo 'aur' || echo 'pacman' )
-                ;;
-            *)
-                if [ "${#pkgs[@]}" -gt 0 ]; then
-                    case "$source-$mode" in
-                        pacman-install)
-                            sudo pacman -S "${pkgs[@]}" && break
-                            ;;
-                        pacman-uninstall)
-                            sudo pacman -Rns "${pkgs[@]}" && break
-                            ;;
-                        aur-install)
-                            paru -S "${pkgs[@]}" && break
-                            ;;
-                        aur-uninstall)
-                            paru -Rns "${pkgs[@]}" && break
-                            ;;
-                    esac
-                else
-                    break
-                fi
-                ;;
-        esac
-    done
-}
+# psf moved to ~/bin/psf (standalone script, paru-only). The function used
+# to live here so it could be called from interactive zsh, but the omarchy
+# menu invokes it from a non-interactive bash via xdg-terminal-exec, where
+# zsh functions aren't loaded — keeping it as a binary makes it work in
+# both contexts.
 
 # fkill - kill processes - list only the ones you can kill. Modified the earlier script.
 fkill() {

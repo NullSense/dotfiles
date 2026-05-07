@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# psf — paru-backed package install/uninstall fuzzy-finder.
+#
+# Single source: paru is the unified frontend (knows pacman repos AND AUR),
+# so the previous pacman/aur source toggle is gone — paru -Slq lists both,
+# and `paru -S` resolves whichever side a package lives on.
+#
+# Glitch fixes from the prior zsh-function version:
+#   * stdin/stdout for paru pinned to /dev/tty so PKGBUILD-review and
+#     dep-confirmation prompts don't fight with the previous fzf alt-screen.
+#   * mapfile (instead of word-splitting `pkgs=($(...))`) preserves package
+#     names that contain weird chars and avoids globbing.
+#   * paru passed `--skipreview --noupgrademenu` for non-interactive sanity
+#     when the caller is the omarchy menu (floating one-shot terminal).
+#     Override with PSF_INTERACTIVE=1 to get full paru prompts.
+
+set -uo pipefail
+
+paru_install_flags=( --skipreview --noupgrademenu )
+[[ ${PSF_INTERACTIVE:-0} == 1 ]] && paru_install_flags=()
+
+mode=install
+while true; do
+    case "$mode" in
+        install)
+            list_cmd=( paru -Slq )
+            action=( paru -S "${paru_install_flags[@]}" )
+            header="⬇️  Install │ ^Space → uninstall │ Enter installs"
+            ;;
+        uninstall)
+            list_cmd=( paru -Qq )
+            action=( paru -Rns )
+            header="🗑️  Remove │ ^Space → install │ Enter removes"
+            ;;
+    esac
+
+    if ! pkg_list=$("${list_cmd[@]}" 2>&1); then
+        printf 'paru list failed:\n%s\n' "$pkg_list" >&2
+        read -r -p 'Press Enter to retry, Ctrl-C to exit '
+        continue
+    fi
+
+    result=$(printf '%s\n' "$pkg_list" | fzf \
+        --multi \
+        --preview 'paru --color=always -Si {1}' \
+        --preview-window='right:60%:wrap' \
+        --expect=ctrl-space \
+        --header="$header" \
+        --prompt='🔍 ' \
+        --pointer='▶' \
+        --marker='✓' \
+        --border=rounded)
+
+    key=$(head -1 <<<"$result")
+    mapfile -t pkgs < <(tail -n +2 <<<"$result")
+
+    case "$key" in
+        ctrl-space)
+            mode=$([[ $mode == install ]] && echo uninstall || echo install)
+            ;;
+        *)
+            (( ${#pkgs[@]} == 0 )) && break
+            "${action[@]}" "${pkgs[@]}" </dev/tty >/dev/tty 2>&1 && break
+            ;;
+    esac
+done

@@ -31,8 +31,8 @@ bold = { family = "Hack Nerd Font Mono", style = "Bold" }
 italic = { family = "Hack Nerd Font Mono", style = "Italic" }
 bold_italic = { family = "Hack Nerd Font Mono", style = "Bold Italic" }
 
-# Font size (in points)
-size = 12.0
+# Font size (in points) — synced with ghostty
+size = 10.0
 
 builtin_box_drawing = true
 

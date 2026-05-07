@@ -1,0 +1,20 @@
+[Unit]
+Description=Dropdown terminal (ghostty)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+# Spawn ghostty with a known class so the windowrule for class=dropdown_term
+# in monitors.conf places it into the special:dropdown workspace. Restart
+# unconditionally — closing the dropdown is supposed to keep the workspace
+# pre-warmed; without this the next $mod+u summon would lag the cold-start.
+ExecStart=/usr/bin/ghostty --class=dropdown_term
+Restart=always
+RestartSec=1
+# Cap cascading restarts (ghostty crash-loop after a config edit) — fail
+# loud after 5 retries in 60s instead of burning CPU silently.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=graphical-session.target

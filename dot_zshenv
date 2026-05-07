@@ -27,3 +27,12 @@ case ":$PATH:" in
     *":$HOME/bin:"*) ;;
     *) export PATH="$HOME/bin:$PATH" ;;
 esac
+
+# Agent-vault HTTPS_PROXY catches outbound traffic and demands per-domain
+# allowlist auth. AUR endpoints (RPC + git clones) aren't in the vault, so
+# bypass the proxy for them — paru/yay/git AUR ops then go direct.
+# Pattern: $NO_PROXY is comma-separated, prefix-matches host.
+case ",${NO_PROXY:-}," in
+    *,aur.archlinux.org,*) ;;
+    *) export NO_PROXY="${NO_PROXY:+$NO_PROXY,}aur.archlinux.org" ;;
+esac

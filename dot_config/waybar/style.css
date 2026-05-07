@@ -1,178 +1,320 @@
+/*
+ * Waybar — Gruvbox Dark Hard, Omarchy-inspired refresh.
+ *
+ * Layout:
+ *   left   — workspace dots (Omarchy-style numbers, active = filled glyph) +
+ *            current submap + media player (marquee).
+ *   center — clock pill (anchor of the bar).
+ *   right  — pill clusters; system/storage/audio collapse to one icon each
+ *            and slide open on hover (drawer groups in config).
+ *
+ * Sizing:
+ *   bar height       30
+ *   font-size        10px (workspaces, clock 11px bold)
+ *   pill padding     2px 9px
+ *   pill v-margin    3px       (the strip of wallpaper above/below pills)
+ */
+
+@define-color bg0       #1d2021;
+@define-color bg1       #282828;
+@define-color bg2       #3c3836;
+@define-color bg3       #504945;
+@define-color bg4       #665c54;
+@define-color fg0       #fbf1c7;
+@define-color fg1       #ebdbb2;
+@define-color fg2       #d5c4a1;
+@define-color fg3       #bdae93;
+@define-color gray      #928374;
+@define-color red       #fb4934;
+@define-color green     #b8bb26;
+@define-color yellow    #fabd2f;
+@define-color blue      #83a598;
+@define-color purple    #d3869b;
+@define-color aqua      #8ec07c;
+@define-color orange    #fe8019;
+@define-color red_dim   #cc241d;
+@define-color green_dim #98971a;
+@define-color blue_dim  #458588;
+
+/* ------------ Reset ------------ */
 * {
-  border: none;
-  border-radius: 0;
-  /* `otf-font-awesome` is required to be installed for icons */
-  font-family: Roboto, Helvetica, Arial, sans-serif;
-  font-size: 12px;
-  min-height: 0;
+    border: none;
+    border-radius: 0;
+    min-height: 0;
+    font-family: "Hack Nerd Font Mono", "Symbols Nerd Font", monospace;
+    font-size: 10px;
 }
 
+/* ------------ Bar ------------ */
 window#waybar {
-  background-color: #282828;
+    background: transparent;
+    color: @fg1;
+    transition: background-color 200ms ease;
 }
-window#waybar.hidden {
-  opacity: 0.2;
+window#waybar.hidden { opacity: 0.0; }
+
+/* ============================================================
+ * Pills
+ * ============================================================ */
+#submap,
+#cpu,
+#memory,
+#temperature,
+#disk,
+#battery,
+#idle_inhibitor,
+#pulseaudio,
+#tray,
+#custom-media,
+#custom-colortemp,
+#custom-brightness,
+#custom-aiquota {
+    background: @bg0;
+    color: @fg0;
+    padding: 2px 9px;
+    margin: 3px 1px;
+    border: 1px solid @bg3;
+    border-radius: 0;
+    transition: background 120ms ease, border-color 120ms ease;
 }
 
+/* Edge pills sit flush against the screen edge. */
+.modules-left  > widget:first-child > * { margin-left:  6px; }
+.modules-right > widget:last-child  > * { margin-right: 6px; }
+
+/* ============================================================
+ * Workspaces — Omarchy-style.
+ * Inactive workspaces show their number (small, dim). Active workspace
+ * shows the filled-dot glyph in yellow. No pill background — pure typography.
+ * ============================================================ */
+#workspaces {
+    background: transparent;
+    border: none;
+    padding: 0 4px;
+    margin-right: 6px;
+}
 #workspaces button {
-  padding: 0 0.4em;
-  margin: 0 0.2em;
-  background-color: transparent;
-  color: #ebdbb2;
-  border-bottom: 3px solid transparent;
+    all: initial;
+    color: @fg3;
+    font-family: "Hack Nerd Font Mono";
+    font-size: 12px;
+    font-weight: bold;
+    padding: 0 7px;
+    margin: 0 1px;
+    transition: color 120ms ease;
 }
-/* https://github.com/Alexays/Waybar/wiki/FAQ#the-workspace-buttons-have-a-strange-hover-effect */
 #workspaces button:hover {
-  background: rgba(0, 0, 0, 0.2);
-  box-shadow: inherit;
-  border-bottom: 3px solid #83a598;
+    color: @fg0;
+    background: transparent;
+    box-shadow: none;
+    text-shadow: none;
 }
-#workspaces button.focused {
-  background-color: #83a598;
-  color: #282828;
+#workspaces button.empty {
+    color: @bg4;
+}
+#workspaces button.active {
+    color: @yellow;
+    font-size: 14px;
 }
 #workspaces button.urgent {
-  background-color: #cc241d;
+    color: @red;
 }
 
-#mode {
-  background-color: #cc241d;
+/* ============================================================
+ * Submap — visible only when in a submap (resize / system / media)
+ * ============================================================ */
+#submap {
+    background: @red;
+    color: @bg0;
+    border-color: @red;
+    font-style: italic;
+    margin-left: 4px;
 }
 
-#clock,
-#battery,
-#temperature,
-#backlight,
-#pulseaudio,
-#custom-media,
-#custom-weather,
-#custom-crypto,
-#custom-mousebattery,
-#custom-yubikey,
-#tray,
-#disk,
-#idle_inhibitor {
-  padding: 0 0.7em;
-  margin: 0 0.3em;
-  color: #ebdbb2;
-}
-
-#clock {
-  background-color: #689d6a;
-  color: #282828;
-}
-
-#custom-mousebattery {
-  background-color: #b16286;
-  color: #282828;
-}
-
-#battery {
-  background-color: #b8bb26;
-  color: #282828;
-}
-
-#battery.plugged {
-  background-color: #bdae93;
-}
-
-#battery.charging {
-  background-color: #bdae93;
-}
-
-#battery.good {
-  background-color: #b8bb26;
-}
-
-@keyframes blink-warning {
-  to {
-    background-color: #d5c4a1;
-  }
-}
-#battery.warning {
-  background-color: #fe8019;
-  animation-name: blink-warning;
-  animation-duration: 1.5s;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  animation-direction: alternate;
-}
-
-@keyframes blink-critical {
-  to {
-    background-color: #ebdbb2;
-  }
-}
-#battery.critical:not(.charging),
-#custom-yubikey.active {
-  background-color: #cc241d;
-  color: #000000;
-  animation-name: blink-critical;
-  animation-duration: 0.5s;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  animation-direction: alternate;
-}
-
-label:focus {
-  background-color: #000000;
-}
-
-#backlight {
-  background-color: #d79921;
-  color: #282828;
-}
-
-#pulseaudio {
-  background-color: #d65d0e;
-  color: #282828;
-}
-
-#pulseaudio.muted {
-  background-color: #504945;
-  color: #ebdbb2;
-}
-
+/* ============================================================
+ * Media — left side, italic, easy on the eye, expands to fit title
+ * ============================================================ */
 #custom-media {
-  background-color: #b8bb26;
-  color: #2a5c45;
-  min-width: 100px;
+    color: @green;
+    font-style: italic;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 2px 12px;
+    margin: 3px 6px 3px 8px;
+    min-width: 40px;
+}
+#custom-media:hover {
+    background: @bg1;
+    border-color: @bg3;
+    color: @aqua;
+}
+#custom-media.custom-spotify { color: @green; }
+
+/* ============================================================
+ * Clock — center anchor. Bold accent pill.
+ * ============================================================ */
+#clock {
+    background: @green_dim;
+    color: @bg0;
+    border: 1px solid @green;
+    border-radius: 0;
+    padding: 3px 18px;
+    margin: 3px 0;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.4px;
+}
+#clock:hover {
+    background: @green;
+    color: @bg0;
+    border-color: @yellow;
 }
 
-#custom-media.custom-spotify {
-  background-color: #1db954;
+/* ============================================================
+ * Drawer groups — system / storage / audio
+ *
+ * The first child is always visible; the rest slide in on hover.
+ * To make adjacent children look like one widget, we kill internal
+ * margins between them inside a group.
+ * ============================================================ */
+.sys-child,
+.stor-child,
+.aud-child {
+    margin: 3px 0;
+    border-left-width: 0;       /* fuses into the leading pill */
+}
+/* Restore an inner separator line between fused pills */
+.sys-child,
+.stor-child,
+.aud-child {
+    border-left: 1px solid @bg2;
 }
 
-#custom-crypto {
-  background-color: #458588;
-  color: #282828;
+/* The leading (collapsed) pill keeps its margin on the outer side */
+#cpu, #disk, #pulseaudio {
+    margin-right: 0;
+}
+#temperature, #memory {
+    margin-left: 0;
+    margin-right: 0;
+}
+#disk.home, #disk.root,
+#custom-brightness, #custom-colortemp {
+    margin-left: 0;
+    margin-right: 0;
 }
 
-#custom-weather {
-  background-color: #d79921;
-  color: #282828;
-}
-
-#temperature {
-  background-color: #458588;
-  color: #282828;
-}
-
+/* ============================================================
+ * Per-module accents
+ * ============================================================ */
+#cpu          { color: @blue; }
+#memory       { color: @purple; }
+#temperature  { color: @orange; }
 #temperature.critical {
-  background-color: #cc241d;
+    background: @red;
+    color: @bg0;
+    border-color: @red;
+    animation: blink 1s linear infinite alternate;
+}
+#disk         { color: @aqua; }
+
+#battery.mouse              { color: @purple; }
+#battery.mouse.charging     { color: @green; }
+#battery.mouse.full         { color: @aqua; }
+#battery.mouse.plugged      { color: @green; }
+#battery.mouse.warning      { color: @orange; }
+#battery.mouse.critical     {
+    background: @red;
+    color: @bg0;
+    border-color: @red;
+    animation: blink 0.7s linear infinite alternate;
 }
 
+#idle_inhibitor             { color: @gray; }
+#idle_inhibitor.activated   { color: @yellow; }
+
+#custom-colortemp           { color: @orange; }
+#custom-brightness          { color: @yellow; }
+
+#pulseaudio                 { color: @orange; }
+#pulseaudio.muted           { color: @gray; }
+#pulseaudio.bluetooth       { color: @blue; }
+
+/* ============================================================
+ * Tray
+ * ============================================================ */
 #tray {
-  background-color: transparent;
+    margin-left: 6px;
+    padding: 2px 8px;
+}
+#tray > .passive { -gtk-icon-effect: dim; }
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+    background-color: @red;
 }
 
-#idle_inhibitor {
-  margin-left: 1.2em;
-  background-color: #cc241d;
-  color: #282828;
+/* ============================================================
+ * AI quota indicator
+ * ============================================================ */
+#custom-aiquota.ok       { color: @aqua; }
+#custom-aiquota.warning  { color: @yellow; }
+#custom-aiquota.critical {
+    background: @red;
+    color: @bg0;
+    animation: blink 1s linear infinite alternate;
+}
+#custom-aiquota.stale    { color: @gray; }
+
+/* ============================================================
+ * Hover affordance
+ * ============================================================ */
+#cpu:hover,
+#memory:hover,
+#temperature:hover,
+#disk:hover,
+#battery:hover,
+#pulseaudio:hover,
+#custom-colortemp:hover,
+#custom-brightness:hover,
+#custom-aiquota:hover,
+#idle_inhibitor:hover {
+    background: @bg2;
+    border-color: @fg3;
 }
 
-#idle_inhibitor.activated {
-  background-color: #98971a;
-  color: #282828;
+/* ============================================================
+ * Tooltips
+ * ============================================================ */
+tooltip {
+    background: @bg0;
+    border: 1px solid @bg4;
+    border-radius: 0;
+}
+tooltip label {
+    color: @fg1;
+    padding: 8px 12px;
+    font-family: "Hack Nerd Font Mono", monospace;
+}
+
+/* Calendar (clock tooltip) */
+calendar { color: @fg1; padding: 6px; }
+calendar:selected               { color: @red; }
+calendar.header                 { color: @yellow; font-weight: bold; }
+calendar.button {
+    background: @bg1;
+    border: 1px solid @bg3;
+    color: @fg2;
+    padding: 2px 6px;
+}
+calendar.button:hover           { background: @bg2; color: @fg0; }
+calendar:indeterminate          { color: @gray; }
+
+/* ============================================================
+ * Animations
+ * ============================================================ */
+@keyframes blink {
+    to {
+        background: @bg1;
+        color: @red;
+    }
 }

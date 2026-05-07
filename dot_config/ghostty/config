@@ -1,8 +1,12 @@
 # Ghostty — gruvbox dark, Maple Mono
 font-family = "Maple Mono NF"
 font-size = 12
+# QD-OLED panels lose a touch of perceived weight with greyscale AA;
+# font-thicken adds ~0.5px of stroke. Subtle but makes monospace feel
+# "right" again on the AORUS without bringing back subpixel fringing.
+font-thicken = true
 
-theme = "GruvboxDarkHard"
+theme = "Gruvbox Dark Hard"
 
 window-padding-x = 10
 window-padding-y = 10
@@ -12,7 +16,10 @@ cursor-style = block
 cursor-style-blink = true
 
 scrollback-limit = 100000
-copy-on-select = clipboard
+# Ghostty values: `true` writes only to PRIMARY (middle-click paste, doesn't
+# touch the Ctrl+V clipboard); `clipboard` would stomp the system clipboard
+# every time you highlighted text; `false` disables auto-copy entirely.
+copy-on-select = true
 
 shell-integration = zsh
 shell-integration-features = cursor,sudo,title

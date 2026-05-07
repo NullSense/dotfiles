@@ -1,0 +1,39 @@
+# ~/.envrc — direnv root for $HOME. Loads agent-vault session env when an
+# active vault session exists; otherwise no-op. Per Agent Vault docs
+# (arch-install/AGENT-VAULT.md §"Working .envrc"). After editing run:
+#   direnv allow ~
+#
+# This is the CANONICAL setup — env vars only ever live inside shells that
+# cd'd under ~. They MUST NOT bleed into the systemd user manager
+# (otherwise every user service starts trusting the MITM CA, which breaks
+# system HTTPS for browsers, pacman, etc).
+
+__AV_TOKEN="$(agent-vault vault token --vault default 2>/dev/null)"
+if [[ -n "$__AV_TOKEN" ]]; then
+    export AGENT_VAULT_SESSION_TOKEN="$__AV_TOKEN"
+    export AGENT_VAULT_ADDR=http://127.0.0.1:14321
+    export AGENT_VAULT_VAULT=default
+
+    # Proxy is HTTPS (the proxy itself uses TLS), not HTTP.
+    export HTTPS_PROXY="https://${__AV_TOKEN}:default@127.0.0.1:14322"
+    export HTTP_PROXY="https://${__AV_TOKEN}:default@127.0.0.1:14322"
+    export NO_PROXY=localhost,127.0.0.1,aur.archlinux.org
+
+    # MITM CA — different env vars cover different libraries:
+    #   SSL_CERT_FILE         OpenSSL (covers most C-linked HTTPS clients)
+    #   REQUESTS_CA_BUNDLE    Python requests (also urllib3 in some versions)
+    #   CURL_CA_BUNDLE        curl (ignores SSL_CERT_FILE)
+    #   NODE_EXTRA_CA_CERTS   Node — ADDS to system CAs (additive, doesn't replace)
+    #   DENO_CERT             Deno
+    #   GIT_SSL_CAINFO        git
+    export SSL_CERT_FILE="$HOME/.agent-vault/mitm-ca.pem"
+    export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
+    export CURL_CA_BUNDLE="$SSL_CERT_FILE"
+    export NODE_EXTRA_CA_CERTS="$SSL_CERT_FILE"
+    export DENO_CERT="$SSL_CERT_FILE"
+    export GIT_SSL_CAINFO="$SSL_CERT_FILE"
+
+    # Node 24+ requires this to honor HTTPS_PROXY.
+    export NODE_USE_ENV_PROXY=1
+fi
+unset __AV_TOKEN

@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# Screen recording via gpu-screen-recorder — Omarchy's flow, adapted.
+#
+# Behavior:
+#   - First invocation:  pick monitor or region with slurp, start recording.
+#                        Saves to ~/Videos/screenrecording-TIMESTAMP.mp4
+#   - Second invocation: stops the recording, normalizes audio (-14 LUFS),
+#                        trims warmup frame, sends a clickable preview.
+#
+# Args (optional, can combine):
+#   --with-desktop-audio        record system audio
+#   --with-microphone-audio     record mic
+#   --resolution=WxH            cap resolution
+#
+# Indicator:
+#   pkill -RTMIN+8 waybar       toggles a custom/screenrecord pill (if added).
+#
+# Requirements (install via paru if missing):
+#   - gpu-screen-recorder       (AUR; hardware-accelerated capture)
+#   - hyprpicker, slurp, grim   (already on the box)
+#   - ffmpeg, jq                (already on the box)
+
+set -uo pipefail
+
+if ! command -v gpu-screen-recorder >/dev/null 2>&1; then
+    notify-send -u critical "Screen recording" \
+        "gpu-screen-recorder not installed. Run:  paru -S gpu-screen-recorder"
+    exit 1
+fi
+
+[[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
+OUTPUT_DIR="${XDG_VIDEOS_DIR:-$HOME/Videos}"
+mkdir -p "$OUTPUT_DIR"
+
+DESKTOP_AUDIO=false
+MIC_AUDIO=false
+RESOLUTION=""
+STOP=false
+RECORDING_FILE="/tmp/screenrecord-current"
+
+for arg in "$@"; do
+    case "$arg" in
+        --with-desktop-audio)    DESKTOP_AUDIO=true ;;
+        --with-microphone-audio) MIC_AUDIO=true ;;
+        --resolution=*)          RESOLUTION="${arg#--resolution=}" ;;
+        --stop-recording)        STOP=true ;;
+    esac
+done
+
+is_recording() { pgrep -f "^gpu-screen-recorder" >/dev/null; }
+toggle_indicator() { pkill -RTMIN+8 waybar 2>/dev/null || true; }
+
+default_resolution() {
+    read -r w h < <(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | "\(.width) \(.height)"')
+    if (( w > 3840 || h > 2160 )); then echo "3840x2160"; else echo "0x0"; fi
+}
+
+get_rectangles() {
+    local ws=$(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | .activeWorkspace.id')
+    hyprctl monitors -j | jq -r --arg ws "$ws" '.[] | select(.activeWorkspace.id == ($ws | tonumber)) |
+        "\(.x),\(.y) \(.width / .scale | floor)x\(.height / .scale | floor)"'
+    hyprctl clients -j | jq -r --arg ws "$ws" '.[] | select(.workspace.id == ($ws | tonumber)) |
+        "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"'
+}
+
+select_target() {
+    local rects=$(get_rectangles)
+    hyprpicker -r -z >/dev/null 2>&1 &
+    local pid=$!
+    sleep 0.1
+    local sel=$(echo "$rects" | slurp 2>/dev/null)
+    kill "$pid" 2>/dev/null
+
+    [[ $sel =~ ^(-?[0-9]+),(-?[0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]] || return 1
+    local sx=${BASH_REMATCH[1]} sy=${BASH_REMATCH[2]} sw=${BASH_REMATCH[3]} sh=${BASH_REMATCH[4]}
+
+    # Tiny click → snap to underlying rectangle
+    if (( sw * sh < 20 )); then
+        while IFS= read -r r; do
+            [[ $r =~ ^(-?[0-9]+),(-?[0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]] || continue
+            local rx=${BASH_REMATCH[1]} ry=${BASH_REMATCH[2]} rw=${BASH_REMATCH[3]} rh=${BASH_REMATCH[4]}
+            if (( sx >= rx && sx < rx+rw && sy >= ry && sy < ry+rh )); then
+                sx=$rx sy=$ry sw=$rw sh=$rh; break
+            fi
+        done <<<"$rects"
+    fi
+
+    # Exact-monitor match → use -w MONITORNAME for native res, no scaling
+    local mon=$(hyprctl monitors -j | jq -r --argjson x $sx --argjson y $sy --argjson w $sw --argjson h $sh '
+        .[] | select(.x == $x and .y == $y and (.width / .scale | floor) == $w and (.height / .scale | floor) == $h) | .name' | head -1)
+    if [[ -n $mon ]]; then echo "monitor:$mon"; else echo "region:${sw}x${sh}+${sx}+${sy}"; fi
+}
+
+start_recording() {
+    local target
+    target=$(select_target) || return 1
+
+    local capture_args=()
+    case $target in
+        monitor:*) capture_args=(-w "${target#monitor:}" -s "${RESOLUTION:-$(default_resolution)}") ;;
+        region:*)
+            capture_args=(-w "${target#region:}")
+            [[ -n $RESOLUTION ]] && capture_args+=(-s "$RESOLUTION") ;;
+    esac
+
+    local audio_devs=""
+    [[ $DESKTOP_AUDIO == true ]] && audio_devs="default_output"
+    if [[ $MIC_AUDIO == true ]]; then
+        [[ -n $audio_devs ]] && audio_devs+="|"
+        audio_devs+="default_input"
+    fi
+    local audio_args=()
+    [[ -n $audio_devs ]] && audio_args=(-a "$audio_devs" -ac aac)
+
+    local file="$OUTPUT_DIR/screenrecording-$(date +'%Y-%m-%d_%H-%M-%S').mp4"
+    gpu-screen-recorder "${capture_args[@]}" -k auto -f 60 -fm cfr \
+        -fallback-cpu-encoding yes -o "$file" "${audio_args[@]}" 2>/dev/null &
+    local pid=$!
+
+    # Wait until file actually appears (gsr opens it lazily)
+    while kill -0 $pid 2>/dev/null && [[ ! -f $file ]]; do sleep 0.2; done
+    if kill -0 $pid 2>/dev/null; then
+        echo "$file" > "$RECORDING_FILE"
+        toggle_indicator
+        notify-send -t 2000 "Screen recording" "Started · $(basename "$file")"
+    fi
+}
+
+finalize() {
+    local f=$(cat "$RECORDING_FILE" 2>/dev/null)
+    [[ -f $f ]] || return
+
+    # Trim 100ms warmup, normalize audio if present
+    local args=(-y -ss 0.1 -i "$f" -c:v copy)
+    if ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "$f" 2>/dev/null | grep -q audio; then
+        args+=(-af "volume=enable='lt(t,0.4)':volume=0,afade=t=in:st=0.4:d=0.05,loudnorm=I=-14:TP=-1.5:LRA=11")
+    fi
+    local proc="${f%.mp4}-processed.mp4"
+    if ffmpeg "${args[@]}" "$proc" -loglevel quiet 2>/dev/null; then
+        mv "$proc" "$f"
+    else
+        rm -f "$proc"
+    fi
+}
+
+stop_recording() {
+    pkill -SIGINT -f "^gpu-screen-recorder"
+    local n=0
+    while pgrep -f "^gpu-screen-recorder" >/dev/null && (( n < 50 )); do
+        sleep 0.1; n=$((n+1))
+    done
+    pgrep -f "^gpu-screen-recorder" >/dev/null && pkill -9 -f "^gpu-screen-recorder"
+
+    toggle_indicator
+    finalize
+
+    local f=$(cat "$RECORDING_FILE" 2>/dev/null)
+    rm -f "$RECORDING_FILE"
+    [[ -f $f ]] || return
+
+    # Generate first-frame preview thumbnail
+    local prev="${f%.mp4}-preview.png"
+    ffmpeg -y -i "$f" -ss 0.1 -vframes 1 -q:v 2 "$prev" -loglevel quiet 2>/dev/null
+
+    (
+        ACTION=$(notify-send "Recording saved" "Click to play" -t 10000 \
+            -i "${prev:-$f}" -A "default=open")
+        [[ $ACTION == "default" ]] && mpv "$f"
+        rm -f "$prev"
+    ) &
+}
+
+if is_recording; then
+    stop_recording
+elif [[ $STOP == true ]]; then
+    exit 1
+else
+    start_recording
+fi

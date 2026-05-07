@@ -1,0 +1,118 @@
+/*
+ * Walker — Gruvbox Dark Hard.
+ * Sharp corners, single yellow accent (matching waybar + rofi theme).
+ * GTK4 CSS subset; no `border-radius` anywhere on purpose.
+ */
+
+@define-color bg0       #1d2021;
+@define-color bg1       #282828;
+@define-color bg2       #3c3836;
+@define-color bg3       #504945;
+@define-color bg4       #665c54;
+@define-color fg0       #fbf1c7;
+@define-color fg1       #ebdbb2;
+@define-color fg2       #d5c4a1;
+@define-color fg3       #bdae93;
+@define-color gray      #928374;
+@define-color yellow    #fabd2f;
+@define-color orange    #fe8019;
+@define-color red       #fb4934;
+@define-color green     #b8bb26;
+
+* {
+    all: unset;
+    font-family: "Hack Nerd Font Mono", monospace;
+    font-size: 14px;
+    color: @fg1;
+}
+
+scrollbar { opacity: 0; }
+
+.normal-icons { -gtk-icon-size: 16px; }
+.large-icons  { -gtk-icon-size: 28px; }
+
+/* Outer window — solid bg, single 2px gruvbox border, no radius. */
+.box-wrapper {
+    background: @bg0;
+    padding: 10px;
+    border: 2px solid @bg4;
+}
+
+/* Input row */
+.search-container {
+    background: @bg1;
+    border: 1px solid @bg3;
+    padding: 8px 12px;
+}
+.input {
+    color: @fg0;
+}
+.input placeholder {
+    color: @gray;
+}
+.input:focus,
+.input:active {
+    box-shadow: none;
+    outline: none;
+}
+
+/* Content + list */
+.content-container {}
+.placeholder, .elephant-hint {
+    color: @gray;
+    padding: 14px;
+}
+
+.list {
+    background: transparent;
+}
+
+/* Each row */
+child .item-box {
+    padding: 6px 10px;
+    border: 1px solid transparent;
+}
+child:hover .item-box {
+    background: alpha(@fg0, 0.05);
+}
+child:selected .item-box {
+    background: @bg2;
+    border: 1px solid @yellow;
+}
+child:selected .item-text,
+child:selected .item-subtext {
+    color: @yellow;
+}
+
+.item-text-box {
+    padding: 4px 0;
+}
+.item-text {
+    color: @fg1;
+}
+.item-subtext {
+    /* hidden — feels cluttered with subtitles */
+    font-size: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+}
+.item-image {
+    margin-right: 12px;
+    -gtk-icon-transform: scale(0.92);
+}
+
+/* Footer keybind hints (config-disabled but style anyway) */
+.keybinds {
+    background: @bg1;
+    padding: 6px 10px;
+    margin-top: 8px;
+    color: @fg3;
+}
+
+.error {
+    color: @red;
+    padding: 6px;
+}
+
+.preview {}

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Walker launcher — ensures elephant data provider and the walker service are
+# both alive before invoking the UI. Mirrors omarchy-launch-walker.
+#
+# elephant: walker's data backend (apps, calc, files, websearch, etc).
+# walker --gapplication-service: keeps walker resident so the UI shows in
+#                                 ~30ms instead of cold-starting GTK every time.
+#
+# Args are forwarded to walker — e.g. `launch-walker --dmenu` for stdin pickers.
+
+if ! pgrep -x elephant >/dev/null 2>&1; then
+    setsid uwsm app -- elephant >/dev/null 2>&1 &
+fi
+
+if ! pgrep -f 'walker --gapplication-service' >/dev/null 2>&1; then
+    setsid uwsm app -- env GSK_RENDERER=cairo walker --gapplication-service >/dev/null 2>&1 &
+    # Give the service a moment to register so the first invocation isn't slow.
+    sleep 0.15
+fi
+
+exec walker "$@"

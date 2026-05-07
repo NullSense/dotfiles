@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Smart screenshot — Omarchy's flow, adapted.
+#
+# Modes:    smart (default) | region | windows | fullscreen
+# Editor:   satty (Enter saves, Esc copies)
+# Output:   ~/Pictures/Screenshots/screenshot-TIMESTAMP.png + clipboard
+#
+# Smart-click anywhere snaps to the monitor or window underneath the click,
+# so an accidental 2-pixel rectangle becomes the whole window/output.
+#
+# Override via ~/.config/user-dirs.dirs (XDG_PICTURES_DIR) or env:
+#   OMARCHY_SCREENSHOT_DIR=/foo
+#   OMARCHY_SCREENSHOT_EDITOR=swappy   # default: satty
+
+[[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
+OUTPUT_DIR="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures/Screenshots}}"
+mkdir -p "$OUTPUT_DIR"
+
+# Cancel an in-flight screenshot by re-pressing the bind (slurp running)
+pkill slurp && exit 0
+
+EDITOR_BIN="${OMARCHY_SCREENSHOT_EDITOR:-satty}"
+
+ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --editor=*) EDITOR_BIN="${arg#--editor=}" ;;
+        *)          ARGS+=("$arg") ;;
+    esac
+done
+set -- "${ARGS[@]}"
+
+MODE="${1:-smart}"
+
+# Handle portrait / transformed displays correctly when computing geometry.
+JQ_MONITOR_GEO='
+  def format_geo:
+    .x as $x | .y as $y |
+    (.width / .scale | floor) as $w |
+    (.height / .scale | floor) as $h |
+    .transform as $t |
+    if $t == 1 or $t == 3 then "\($x),\($y) \($h)x\($w)"
+    else                       "\($x),\($y) \($w)x\($h)" end;
+'
+
+get_rectangles() {
+    local ws=$(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | .activeWorkspace.id')
+    hyprctl monitors -j | jq -r --arg ws "$ws" "${JQ_MONITOR_GEO} .[] | select(.activeWorkspace.id == (\$ws | tonumber)) | format_geo"
+    hyprctl clients -j | jq -r --arg ws "$ws" '.[] | select(.workspace.id == ($ws | tonumber)) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"'
+}
+
+# Freeze the screen during selection (otherwise live updates leak in)
+PID=
+cleanup_freeze() { [[ -n $PID ]] && kill $PID 2>/dev/null; }
+trap cleanup_freeze EXIT
+
+freeze_for_pick() {
+    hyprpicker -r -z >/dev/null 2>&1 &
+    PID=$!
+    sleep 0.1
+}
+
+case "$MODE" in
+    region)
+        freeze_for_pick
+        SELECTION=$(slurp 2>/dev/null)
+        ;;
+    windows)
+        freeze_for_pick
+        SELECTION=$(get_rectangles | slurp -r 2>/dev/null)
+        ;;
+    fullscreen)
+        SELECTION=$(hyprctl monitors -j | jq -r "${JQ_MONITOR_GEO} .[] | select(.focused == true) | format_geo")
+        ;;
+    smart|*)
+        RECTS=$(get_rectangles)
+        freeze_for_pick
+        SELECTION=$(echo "$RECTS" | slurp 2>/dev/null)
+
+        # Tiny click? snap to the rectangle it landed inside
+        if [[ $SELECTION =~ ^([0-9]+),([0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]]; then
+            if (( ${BASH_REMATCH[3]} * ${BASH_REMATCH[4]} < 20 )); then
+                cx=${BASH_REMATCH[1]}; cy=${BASH_REMATCH[2]}
+                while IFS= read -r rect; do
+                    [[ $rect =~ ^([0-9]+),([0-9]+)[[:space:]]([0-9]+)x([0-9]+) ]] || continue
+                    rx=${BASH_REMATCH[1]}; ry=${BASH_REMATCH[2]}
+                    rw=${BASH_REMATCH[3]}; rh=${BASH_REMATCH[4]}
+                    if (( cx >= rx && cx < rx+rw && cy >= ry && cy < ry+rh )); then
+                        SELECTION="${rx},${ry} ${rw}x${rh}"
+                        break
+                    fi
+                done <<<"$RECTS"
+            fi
+        fi
+        ;;
+esac
+
+[[ -z $SELECTION ]] && exit 0
+
+FILEPATH="$OUTPUT_DIR/screenshot-$(date +'%Y-%m-%d_%H-%M-%S').png"
+
+grim -g "$SELECTION" "$FILEPATH" || exit 1
+wl-copy < "$FILEPATH"
+
+# Clickable preview notification — clicking opens satty for annotation
+(
+    ACTION=$(notify-send "Screenshot saved" "Click to edit · saved to $FILEPATH" \
+        -t 8000 -i "$FILEPATH" -A "default=edit")
+    if [[ $ACTION == "default" ]]; then
+        case "$EDITOR_BIN" in
+            satty)
+                satty --filename "$FILEPATH" --output-filename "$FILEPATH" \
+                      --actions-on-enter save-to-clipboard --save-after-copy \
+                      --copy-command 'wl-copy'
+                ;;
+            *)  "$EDITOR_BIN" "$FILEPATH" ;;
+        esac
+    fi
+) &

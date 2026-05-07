@@ -1,0 +1,50 @@
+# Walker — Omarchy-style with our gruvbox theme.
+#
+# Walker model: a compositor-aware GTK4 launcher. Default invocation lists
+# desktop apps + websearch; prefixes route to other providers.
+#
+# Service mode: walker --gapplication-service runs in the background so the
+# UI summons in <50ms. autostart.conf launches it.
+
+force_keyboard_focus = true
+selection_wrap       = true
+theme                = "gruvbox"
+hide_action_hints    = true
+
+[placeholders]
+"default" = { input = " Search…", list = "No results" }
+
+[keybinds]
+quick_activate = []
+
+[columns]
+symbols = 1
+
+[providers]
+max_results = 256
+default = ["desktopapplications", "websearch"]
+
+# Prefix routing — type these characters to switch provider mid-search:
+[[providers.prefixes]]
+prefix   = "/"
+provider = "providerlist"
+
+[[providers.prefixes]]
+prefix   = "."
+provider = "files"
+
+[[providers.prefixes]]
+prefix   = ":"
+provider = "symbols"
+
+[[providers.prefixes]]
+prefix   = "="
+provider = "calc"
+
+[[providers.prefixes]]
+prefix   = "@"
+provider = "websearch"
+
+[[providers.prefixes]]
+prefix   = "$"
+provider = "clipboard"

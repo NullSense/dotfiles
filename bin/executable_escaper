@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+escaped="$(wl-paste | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+printf '%s' "$escaped" | wl-copy
+notify-send -t 2000 "Clipboard" "Escaped quotes and backslashes"

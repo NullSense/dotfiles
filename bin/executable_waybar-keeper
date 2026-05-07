@@ -1,0 +1,61 @@
+#!/usr/bin/env sh
+# Supervise waybar — restart on crash with exponential backoff (capped at 30s).
+#
+# Why this exists: sway's `bar { swaybar_command waybar }` block only spawns
+# waybar at sway init. If waybar dies mid-session (segfault, OOM, manual kill)
+# nothing brings it back until the next sway reload. This keeper sits in the
+# background and respawns it.
+#
+# To upgrade waybar config without flicker: `pkill -SIGUSR2 waybar` (waybar
+# reloads its own config in-place; the keeper doesn't see an exit).
+# To stop the keeper itself (e.g. for debugging): `pkill -x waybar-keeper`.
+
+# NB: deliberately no `set -e`. The whole point of this loop is to recover
+# from waybar exiting non-zero (e.g. via pkill -TERM); set -e would propagate
+# that exit to the keeper and kill the very thing supposed to respawn it.
+set -u
+
+PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/waybar-keeper.pid"
+
+# Single-instance.
+if [ -r "$PIDFILE" ]; then
+    old=$(cat "$PIDFILE" 2>/dev/null || true)
+    if [ -n "$old" ] && [ "$old" != "$$" ] && kill -0 "$old" 2>/dev/null; then
+        exit 0
+    fi
+fi
+echo "$$" > "$PIDFILE"
+trap 'rm -f "$PIDFILE"' EXIT TERM INT
+
+# Pick the right waybar config based on which compositor is running.
+# - Hyprland → ~/.config/waybar/config-hypr (uses hyprland/workspaces module)
+# - Sway     → ~/.config/waybar/config (uses sway/workspaces module)
+# Some shells (zshrc) historically forced XDG_CURRENT_DESKTOP=sway, so prefer
+# the more reliable XDG_SESSION_DESKTOP and fall back to current. Final fallback:
+# detect a running Hyprland instance via $HYPRLAND_INSTANCE_SIGNATURE.
+desktop="${XDG_SESSION_DESKTOP:-${XDG_CURRENT_DESKTOP:-}}"
+if [ -z "$desktop" ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    desktop="Hyprland"
+fi
+case "$desktop" in
+    Hyprland|hyprland) WAYBAR_ARGS="-c $HOME/.config/waybar/config-hypr" ;;
+    sway)              WAYBAR_ARGS="" ;;
+    *)                 WAYBAR_ARGS="" ;;   # fallback — let waybar use defaults
+esac
+
+backoff=1
+while :; do
+    # shellcheck disable=SC2086
+    waybar $WAYBAR_ARGS
+    # waybar exited. Sleep a bit so a rapid crash loop doesn't peg the CPU,
+    # then double the backoff up to 30s. Reset on a "clean enough" run (>30s).
+    started=$(date +%s)
+    sleep "$backoff"
+    now=$(date +%s)
+    if [ $((now - started)) -gt 30 ]; then
+        backoff=1
+    else
+        backoff=$((backoff * 2))
+        [ "$backoff" -gt 30 ] && backoff=30
+    fi
+done

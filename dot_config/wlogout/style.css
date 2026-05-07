@@ -1,0 +1,41 @@
+/*
+ * wlogout — Gruvbox Dark Hard.
+ * Five buttons in a single row, big icons, hover = yellow accent.
+ * Keybinds: l=lock e=logout u=suspend r=reboot s=shutdown  (Esc cancels).
+ */
+
+* {
+    background-image: none;
+    box-shadow: none;
+    transition: 120ms ease;
+}
+
+window {
+    background-color: rgba(29, 32, 33, 0.92);
+}
+
+button {
+    color: #ebdbb2;
+    background-color: #282828;
+    border: 2px solid #504945;
+    border-radius: 0;
+    margin: 18px;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 35%;
+}
+
+button:focus,
+button:active,
+button:hover {
+    color: #1d2021;
+    background-color: #fabd2f;
+    border-color: #fe8019;
+    outline-style: none;
+}
+
+#lock     { background-image: url("/usr/share/wlogout/icons/lock.png"); }
+#logout   { background-image: url("/usr/share/wlogout/icons/logout.png"); }
+#suspend  { background-image: url("/usr/share/wlogout/icons/suspend.png"); }
+#reboot   { background-image: url("/usr/share/wlogout/icons/reboot.png"); }
+#shutdown { background-image: url("/usr/share/wlogout/icons/shutdown.png"); }

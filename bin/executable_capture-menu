@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Capture menu — Omarchy's two-level structure.
+#
+# Top:  Screenshot · Screenrecord · Text Extraction · Color
+#       (Screenshot = smart mode; click drag = region, click anywhere = window/monitor.)
+# Sub:  Screenrecord → audio choice
+#
+# Pressing the bind while recording stops the recording (matches omarchy).
+# Layer animation is disabled via `layerrule = noanim, rofi` in looknfeel.conf,
+# so the menu disappears instantly on selection — no sleep needed.
+
+set -uo pipefail
+
+is_recording() { pgrep -f "^gpu-screen-recorder" >/dev/null; }
+
+# Recording? bind is a hard "stop" — no menu.
+if is_recording; then
+    ~/bin/screenrecord
+    exit 0
+fi
+
+DMENU=( /home/nullsense/bin/launch-walker --dmenu --width 360 )
+
+top=$(printf '%s\n' \
+    '  Screenshot' \
+    '  Screenrecord' \
+    '  Text extraction (OCR)' \
+    '  Color picker' \
+    | "${DMENU[@]}" --placeholder 'Capture')
+
+case "$top" in
+    *Screenshot*)
+        ~/bin/screenshot      # smart: drag for region, click for window/monitor
+        ;;
+    *Screenrecord*)
+        sub=$(printf '%s\n' \
+            '  No audio' \
+            '  Desktop audio' \
+            '  Desktop + microphone' \
+            | "${DMENU[@]}" --placeholder 'Screenrecord')
+        case "$sub" in
+            *"No audio"*)              ~/bin/screenrecord ;;
+            *"Desktop + microphone"*)  ~/bin/screenrecord --with-desktop-audio --with-microphone-audio ;;
+            *"Desktop audio"*)         ~/bin/screenrecord --with-desktop-audio ;;
+        esac
+        ;;
+    *OCR*|*Text*)
+        ~/bin/ocr
+        ;;
+    *Color*)
+        pkill hyprpicker || hyprpicker -a
+        ;;
+esac

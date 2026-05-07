@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# Keybindings viewer — Omarchy's omarchy-menu-keybindings, ported to rofi.
+#
+# Pulls live binds from `hyprctl binds`, resolves keycodes to symbols via
+# xkbcli, prioritizes commonly-used ones to the top, and pipes through rofi.
+#
+# Run with `--print` to dump to stdout (useful for piping or debugging).
+
+set -uo pipefail
+
+declare -A KEYCODE_SYM_MAP
+
+build_keymap_cache() {
+    local keymap
+    keymap=$(xkbcli compile-keymap 2>/dev/null) || return 0
+    while IFS=, read -r code sym; do
+        [[ -z $code || -z $sym ]] && continue
+        KEYCODE_SYM_MAP["$code"]="$sym"
+    done < <(
+        awk '
+            BEGIN { sec="" }
+            /xkb_keycodes/ { sec="codes"; next }
+            /xkb_symbols/  { sec="syms";  next }
+            sec=="codes" {
+                if (match($0, /<([A-Za-z0-9_]+)>\s*=\s*([0-9]+)\s*;/, m)) code_by_name[m[1]] = m[2]
+            }
+            sec=="syms" {
+                if (match($0, /key\s*<([A-Za-z0-9_]+)>\s*\{\s*\[\s*([^, \]]+)/, m)) sym_by_name[m[1]] = m[2]
+            }
+            END {
+                for (k in code_by_name) {
+                    c = code_by_name[k]; s = sym_by_name[k]
+                    if (c != "" && s != "" && s != "NoSymbol") print c "," s
+                }
+            }
+        ' <<<"$keymap"
+    )
+}
+
+parse_keycodes() {
+    while IFS= read -r line; do
+        if [[ $line =~ code:([0-9]+) ]]; then
+            local code="${BASH_REMATCH[1]}"
+            local sym="${KEYCODE_SYM_MAP[$code]:-code:$code}"
+            echo "${line/code:${code}/$sym}"
+        elif [[ $line =~ mouse:([0-9]+) ]]; then
+            local code="${BASH_REMATCH[1]}" sym
+            case "$code" in
+                272) sym="LMB" ;; 273) sym="RMB" ;; 274) sym="MMB" ;;
+                *)   sym="mouse:${code}" ;;
+            esac
+            echo "${line/mouse:${code}/$sym}"
+        else
+            echo "$line"
+        fi
+    done
+}
+
+dynamic_bindings() {
+    hyprctl -j binds | jq -r '.[] |
+        {modmask, key, keycode, description, dispatcher, arg} |
+        "\(.modmask),\(.key)@\(.keycode),\(.description),\(.dispatcher),\(.arg)"' |
+        sed -r \
+            -e 's/null//' \
+            -e "s,$HOME/bin/,,g" \
+            -e 's,uwsm app -- ,,' \
+            -e 's,uwsm-app -- ,,' \
+            -e 's/@0//' \
+            -e 's/,@/,code:/' \
+            -e 's/^0,/,/' \
+            -e 's/^1,/SHIFT,/'    -e 's/^4,/CTRL,/'  \
+            -e 's/^5,/SHIFT CTRL,/' -e 's/^8,/ALT,/'  \
+            -e 's/^9,/SHIFT ALT,/' -e 's/^12,/CTRL ALT,/' \
+            -e 's/^13,/SHIFT CTRL ALT,/' \
+            -e 's/^64,/SUPER,/' \
+            -e 's/^65,/SUPER SHIFT,/'   -e 's/^68,/SUPER CTRL,/' \
+            -e 's/^69,/SUPER SHIFT CTRL,/' -e 's/^72,/SUPER ALT,/' \
+            -e 's/^73,/SUPER SHIFT ALT,/' -e 's/^76,/SUPER CTRL ALT,/' \
+            -e 's/^77,/SUPER SHIFT CTRL ALT,/'
+}
+
+format_lines() {
+    awk -F, '
+    {
+        combo = $1 " + " $2
+        gsub(/^[ \t]*\+?[ \t]*/, "", combo)
+        gsub(/[ \t]+$/, "", combo)
+
+        action = $3
+        if (action == "") {
+            for (i = 4; i <= NF; i++) action = action $i (i < NF ? "," : "")
+            sub(/,$/, "", action)
+            gsub(/(^|,)[[:space:]]*exec[[:space:]]*,?/, "", action)
+            gsub(/^[ \t]+|[ \t]+$/, "", action)
+        }
+        gsub(/[ \t]+/, " ", combo)
+        if (action != "") printf "%-32s  →  %s\n", combo, action
+    }'
+}
+
+prioritize() {
+    awk '
+    {
+        line = $0; prio = 50
+        if (match(line, /Open terminal/))            prio = 0
+        if (match(line, /app launcher/))             prio = 1
+        if (match(line, /Vicinae/))                  prio = 2
+        if (match(line, /Window switcher/))          prio = 3
+        if (match(line, /Power menu/))               prio = 4
+        if (match(line, /Lock screen/))              prio = 5
+        if (match(line, /Localhost services/))       prio = 6
+        if (match(line, /Maximize/))                 prio = 7
+        if (match(line, /Exclusive fullscreen/))     prio = 8
+        if (match(line, /Fake fullscreen/))          prio = 9
+        if (match(line, /Pin/))                      prio = 10
+        if (match(line, /Kill window/))              prio = 11
+        if (match(line, /Smart screenshot/))         prio = 12
+        if (match(line, /Screen recording/))         prio = 13
+        if (match(line, /OCR/))                      prio = 14
+        if (match(line, /Color picker/))             prio = 15
+        if (match(line, /Bitwarden/))                prio = 16
+        if (match(line, /Clipboard/))                prio = 17
+        if (match(line, /Dropdown/))                 prio = 18
+        if (match(line, /workspace/))                prio = 30
+        if (match(line, /Group/))                    prio = 60
+        if (match(line, /XF86/))                     prio = 90
+        printf "%02d\t%s\n", prio, line
+    }' | sort -k1,1n -k2,2 | cut -f2-
+}
+
+output() {
+    build_keymap_cache
+    dynamic_bindings | sort -u | parse_keycodes | format_lines | prioritize
+}
+
+if [[ ${1:-} == "--print" || ${1:-} == "-p" ]]; then
+    output
+else
+    output | /home/nullsense/bin/launch-walker \
+        --dmenu --width 800 --placeholder 'keybind' >/dev/null
+fi

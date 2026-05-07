@@ -81,8 +81,6 @@ command -v mise     &>/dev/null && eval "$(mise activate zsh)"
 command -v atuin    &>/dev/null && eval "$(atuin init zsh)"
 command -v direnv   &>/dev/null && eval "$(direnv hook zsh)"
 command -v starship &>/dev/null && eval "$(starship init zsh)"
-# zoxide last: its chpwd hook must not be shadowed by starship/atuin precmd hooks
-command -v zoxide   &>/dev/null && eval "$(zoxide init zsh --cmd cd)"
 
 # ─── Keybindings ────────────────────────────────────────────────────────────
 # Ctrl-Space → accept autosuggestion is bound in the atload hook above, so it
@@ -109,3 +107,8 @@ yy() {
 [[ -f ~/bin/zshaliases ]] && source ~/bin/zshaliases
 [[ -f ~/bin/zshfzfrc  ]] && source ~/bin/zshfzfrc
 [[ -f ~/.secrets       ]] && source ~/.secrets
+
+# zoxide MUST be last: it installs a chpwd hook + precmd, and zoxide's doctor
+# warns if any later sourced file (aliases, hooks, secrets) registers chpwd
+# after it. Keep this at the very bottom of zshrc.
+command -v zoxide   &>/dev/null && eval "$(zoxide init zsh --cmd cd)"

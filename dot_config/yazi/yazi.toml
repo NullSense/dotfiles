@@ -1,7 +1,15 @@
 [mgr]
-show_hidden = true
+show_hidden    = true
+sort_by        = "natural"
+sort_dir_first = true
+scrolloff      = 5
 
 [preview]
-image = "chafa-rs -f sixel --size 1920x1080 --color=full --symbols all -s 1.0 {}"
-width = 75
-height = 85
+max_width     = 1000
+max_height    = 1200
+image_delay   = 30
+image_filter  = "triangle"
+image_quality = 75
+
+[tasks]
+image_alloc = 1073741824

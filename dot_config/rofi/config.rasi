@@ -2,7 +2,7 @@ configuration {
     modi:                       "drun,run,window,ssh";
     show-icons:                 true;
     icon-theme:                 "Adwaita";
-    font:                       "Maple Mono NF 12";
+    font:                       "Hack Nerd Font Mono 12";
     display-drun:               "  ";
     display-run:                "  ";
     display-window:             "  ";

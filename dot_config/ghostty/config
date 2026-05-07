@@ -1,10 +1,15 @@
-# Ghostty — gruvbox dark, Maple Mono
-font-family = "Maple Mono NF"
-font-size = 12
-# QD-OLED panels lose a touch of perceived weight with greyscale AA;
-# font-thicken adds ~0.5px of stroke. Subtle but makes monospace feel
-# "right" again on the AORUS without bringing back subpixel fringing.
-font-thicken = true
+# Ghostty — gruvbox dark, Hack Nerd Font Mono
+font-family = "Hack Nerd Font Mono"
+font-size = 8
+# Disabled — was masking fractional-scale upscaling fuzz on the AORUS.
+# Now that foot/Signal/etc. use wp_fractional_scale_v1 properly, the extra
+# stroke is no longer needed and adds perceptible softness. Re-enable if
+# the QD-OLED still feels under-weighted with the chosen font.
+# Bias toward sharper rendering. 1.3.0 changed the default from full -> light
+# hinting to match GTK; `hinting` re-enables full hinting (sharper stems at
+# 12pt). `force-autohint` overrides the font's embedded TT hints with
+# FreeType's autohinter, which is more consistent across weights/sizes for
+# Nerd Font patches. Drop `force-autohint` first if glyphs feel "stiff".
 
 theme = "Gruvbox Dark Hard"
 
@@ -14,6 +19,11 @@ window-decoration = false
 
 cursor-style = block
 cursor-style-blink = true
+mouse-hide-while-typing = true
+unfocused-split-opacity = 0.85
+
+clipboard-trim-trailing-spaces = true
+clipboard-paste-protection = true
 
 scrollback-limit = 100000
 # Ghostty values: `true` writes only to PRIMARY (middle-click paste, doesn't
@@ -24,4 +34,27 @@ copy-on-select = true
 shell-integration = zsh
 shell-integration-features = cursor,sudo,title
 
-gtk-single-instance = true
+# Was true — but single-instance silently dispatches `ghostty` CLI calls as
+# new-window messages to the running primary, which uses ITS config and drops
+# any --font-family flag or fresh config-file values. Disabling makes every
+# invocation a real independent process that honors its current config.
+# Cost: ~150ms slower startup per window, more RAM for many windows.
+gtk-single-instance = false
+
+# Don't prompt when closing a window/tab with a running process. ghostty's
+# default fires for any non-shell process (including the shell-integration
+# wrapper itself in some setups), which makes Ctrl+D / $mod+Shift+q noisy.
+confirm-close-surface = false
+
+# ghostty 1.3.x defaults to forcing the FreeType autohinter (force-autohint +
+# autohint), which OVERRIDES each font's hand-crafted TrueType bytecode hints
+# with a generic algorithm. The autohinter is fine for fonts that lack native
+# hints, but it's measurably softer than the native hinter for any well-hinted
+# monospace (Hack, JetBrains Mono, IBM Plex Mono, FiraCode all have excellent
+# native hints). Switch to native hinting + light target (best for greyscale
+# AA on QD-OLED — won't drift horizontal stems).
+# And don't prompt on `exit` either — let the shell close the surface cleanly.
+quit-after-last-window-closed = true
+
+freetype-load-flags = hinting,no-force-autohint,no-autohint,light
+font-thicken = false

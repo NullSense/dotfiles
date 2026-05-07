@@ -1,7 +1,7 @@
 [user]
     email = matas234@gmail.com
     name = NullSense
-    signingkey = CB5590199041EB914A80D18196154ED6A2543B48
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII2uFCH4EpEwjdYLXxFs9gh7idl8ErFa3mpTg4cq+xpz Arch NullSense ed25519
 
 [init]
     defaultBranch = main
@@ -90,3 +90,11 @@
     process = git-lfs filter-process
     required = true
     clean = git-lfs clean -- %f
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	allowedSignersFile = /home/nullsense/.config/git/allowed_signers
+[http]
+	proxySSLCAInfo = /home/nullsense/.agent-vault/mitm-ca.pem
+[url "git@github.com:"]
+	insteadOf = https://github.com/

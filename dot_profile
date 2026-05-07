@@ -1,9 +1,11 @@
 EDITOR="/usr/bin/nvim"
 
-# Sway/Wayland environment
-export WLR_RENDERER=vulkan          # Enable Vulkan renderer for ICC color profile support
-export XDG_CURRENT_DESKTOP=sway
+# Wayland-generic environment (compositor-agnostic).
+# XDG_CURRENT_DESKTOP and XDG_SESSION_DESKTOP are now set by the launcher
+# wrappers (~/bin/start-sway, ~/bin/start-hyprland) so they reflect the
+# compositor we actually launch — instead of being hardcoded to one.
 export XDG_SESSION_TYPE=wayland
+export WLR_RENDERER=vulkan          # Vulkan renderer (ICC + HDR support on sway)
 export MOZ_ENABLE_WAYLAND=1         # Firefox native Wayland
 export QT_QPA_PLATFORM=wayland      # Qt apps use Wayland
 export SDL_VIDEODRIVER=wayland      # SDL games use Wayland

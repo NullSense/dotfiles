@@ -6,14 +6,20 @@
 # Service mode: walker --gapplication-service runs in the background so the
 # UI summons in <50ms. autostart.conf launches it.
 
-force_keyboard_focus = true
-selection_wrap       = true
-theme                = "gruvbox"
-hide_action_hints    = true
+force_keyboard_focus       = true
+selection_wrap             = true
+hide_action_hints          = true
 
-# Per-provider placeholders. Walker keys these by provider name. The "default"
-# placeholder is what you see when you first open the launcher — we use it to
-# advertise the prefix legend so you don't have to memorise them.
+# Use omarchy's layout/CSS theme; it imports
+# ~/.config/omarchy/current/theme/walker.css so colors flip with omarchy-theme-set.
+# additional_theme_location points walker at the in-tree omarchy theme dir.
+theme                      = "omarchy-default"
+additional_theme_location  = "~/.local/share/omarchy/default/walker/themes/"
+
+# Per-provider placeholders. Walker keys these by provider name.
+# TODO(hint-footer): add a static prefix-legend GtkLabel to a forked
+# omarchy-default layout.xml (see Plannotator agent's recommendation). Until
+# then, the legend lives in the "default" placeholder text.
 [placeholders]
 "default"            = { input = " Search · / providers · = calc · @ web · $ clipboard · . files · : symbols", list = "No results" }
 "providerlist"       = { input = " Pick a provider…",   list = "" }

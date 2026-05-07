@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Bitwarden picker over walker --dmenu (replaces rofi-rbw).
+#
+# Action:  copy   — copies password to clipboard, clears in 30s
+#          type   — types the password into the focused window via wtype
+# Default: copy. First arg can be 'copy' or 'type'.
+
+set -euo pipefail
+ACTION="${1:-copy}"
+
+# Make sure rbw is unlocked; if not, prompt for the master password.
+if ! rbw unlocked >/dev/null 2>&1; then
+    rbw unlock || { notify-send -u critical "Bitwarden" "Vault locked — couldn't unlock"; exit 1; }
+fi
+
+# Format: "Name  ·  Username" — fzf-friendly, walker dedupes on the full line.
+sel=$(rbw list --fields name,user | awk -F'\t' '{ printf "%s  ·  %s\n", $1, $2 }' \
+        | ~/bin/launch-walker --dmenu)
+[[ -z $sel ]] && exit 0
+
+name=${sel%%  ·  *}
+user=${sel##*  ·  }
+
+case "$ACTION" in
+    type)
+        if ! command -v wtype >/dev/null 2>&1; then
+            notify-send -u critical "Bitwarden" "wtype not installed — can't type"
+            exit 1
+        fi
+        rbw get "$name" "$user" | wtype -
+        ;;
+    copy|*)
+        rbw get "$name" "$user" | wl-copy
+        notify-send -t 3000 "Bitwarden" "Password for $name copied (clears in 30s)"
+        ( sleep 30 && wl-copy --clear ) &
+        ;;
+esac

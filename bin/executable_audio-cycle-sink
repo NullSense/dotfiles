@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Cycle default sink between Realtek line-out (headphones, 3.5 mm rear jack)
+# and the Aorus FO32U2 monitor speakers (HDMI/DP audio on the AMD GPU).
+set -euo pipefail
+
+HEADPHONES="alsa_output.pci-0000_0f_00.6.analog-stereo"
+AORUS="alsa_output.pci-0000_03_00.1.hdmi-stereo-extra4"
+
+current=$(pactl get-default-sink)
+case "$current" in
+  "$HEADPHONES") next="$AORUS" ;;
+  *)             next="$HEADPHONES" ;;
+esac
+
+pactl set-default-sink "$next"
+
+# Move every active stream onto the new default so audio follows the user.
+pactl list short sink-inputs | awk '{print $1}' | while read -r id; do
+  pactl move-sink-input "$id" "$next" 2>/dev/null || true
+done
+
+# Notify (best-effort) so the user gets feedback even without waybar.
+if command -v notify-send >/dev/null 2>&1; then
+  case "$next" in
+    "$HEADPHONES") label="Headphones" ;;
+    "$AORUS")      label="Aorus speakers" ;;
+    *)             label="$next" ;;
+  esac
+  notify-send -t 1500 -i audio-volume-high "Audio output" "→ $label"
+fi

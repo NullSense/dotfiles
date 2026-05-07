@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# voice-bench — interactive voice-quality bench across all chain presets.
+#
+# Walks you through speaking the same lines under every preset, records both
+# raw and cleaned, prints per-take stats, and tells you how to compare.
+#
+# Usage:
+#   voice-bench               # run the interactive bench (5 presets, ~3 min)
+#   voice-bench play          # play back the latest cleaned takes in order
+#   voice-bench list          # list saved takes
+#   voice-bench clean         # delete saved takes
+#
+# Output dir: ~/audio-tests/  (override with VOICE_BENCH_DIR=…)
+
+set -euo pipefail
+
+OUT_DIR="${VOICE_BENCH_DIR:-$HOME/audio-tests}"
+RAW_SRC="alsa_input.usb-Samson_Technologies_Samson_Q2U_Microphone-00.analog-stereo"
+CLN_SRC="voice_cleaned"
+
+# Order intentional: minimal first (baseline), then progressively flavored.
+PRESETS=(minimal broadcast warm deep crisp daily)
+SECS=12
+
+mkdir -p "$OUT_DIR"
+
+cmd="${1:-bench}"
+
+case "$cmd" in
+  list)
+    if [[ -z $(ls -A "$OUT_DIR" 2>/dev/null) ]]; then
+      echo "(empty: no recordings yet — run 'voice-bench')"
+    else
+      ls -lh "$OUT_DIR"
+    fi
+    exit 0
+    ;;
+  clean)
+    rm -f "$OUT_DIR"/*-raw.wav "$OUT_DIR"/*-cleaned.wav
+    echo "cleaned $OUT_DIR"
+    exit 0
+    ;;
+  play)
+    for p in "${PRESETS[@]}"; do
+      f="$OUT_DIR/$p-cleaned.wav"
+      [[ -f "$f" ]] || { echo "  (skipping $p — no recording)"; continue; }
+      printf "\n═══  %s  ═══\n" "$p"
+      pw-play "$f"
+      sleep 0.4
+    done
+    echo
+    echo "Done. To replay any single one:"
+    for p in "${PRESETS[@]}"; do
+      [[ -f "$OUT_DIR/$p-cleaned.wav" ]] && echo "  pw-play $OUT_DIR/$p-cleaned.wav"
+    done
+    exit 0
+    ;;
+  bench)
+    ;;
+  *)
+    sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+    exit 1
+    ;;
+esac
+
+# ─── Bench start ────────────────────────────────────────────────
+
+# Make sure Q2U is at full hardware level (dynamic mic — needs the gain).
+pactl set-source-volume "$RAW_SRC" 100% 2>/dev/null || true
+
+cat <<EOF
+
+═════════════════════════════════════════════════════════════════
+  voice-bench — recording you under each chain preset
+═════════════════════════════════════════════════════════════════
+
+  You'll go through ${#PRESETS[@]} presets:
+    ${PRESETS[*]}
+
+  For EACH preset you'll read this 3-line script (~${SECS}s total):
+
+    1.  "Hello, my name is …, and this is a normal voice test."
+    2.  (quietly, almost whisper)  "Just a quick low-level test."
+    3.  (loudly!) "TESTING — TESTING — ONE TWO THREE!"
+
+  This exercises:
+    line 1 → tonality / EQ      line 2 → noise floor / RNNoise
+    line 3 → compressor + limiter
+
+  Files saved per preset to:
+    $OUT_DIR/<preset>-raw.wav
+    $OUT_DIR/<preset>-cleaned.wav
+
+  After the bench, run 'voice-bench play' to listen back in order,
+  then 'audio-preset <winner>' to pick your favorite.
+
+EOF
+read -r -p "[ Press Enter to start ] " _
+
+# ─── Stats helper ───────────────────────────────────────────────
+analyze() {
+  python3 - "$1" "$2" <<'PY'
+import wave, struct, math, sys
+label, f = sys.argv[1], sys.argv[2]
+with wave.open(f, 'rb') as w:
+    sr=w.getframerate(); n=w.getnframes(); ch=w.getnchannels()
+    data=w.readframes(n)
+    samples=struct.unpack('<'+'h'*(n*ch), data)
+    if ch==2: samples=samples[::2]
+    if not samples:
+        print(f"    {label}: (empty)"); raise SystemExit
+    rms=math.sqrt(sum(s*s for s in samples)/len(samples))
+    peak=max(abs(s) for s in samples)
+    win=max(1,int(0.2*sr)); s2=[s*s for s in samples]; csum=0.0; q=float('inf')
+    for i,v in enumerate(s2):
+        csum+=v
+        if i>=win: csum-=s2[i-win]
+        if i+1>=win: q=min(q, math.sqrt(csum/win))
+    db = lambda x: 20*math.log10(max(x,1)/32768)
+    flag = "  CLIPPING!" if peak>=32760 else ""
+    print(f"    {label:8s}  RMS {db(rms):+5.1f}   Peak {db(peak):+5.1f}{flag}   Floor {db(q):+6.1f}  dBFS")
+PY
+}
+
+# ─── Loop over presets ─────────────────────────────────────────
+for preset in "${PRESETS[@]}"; do
+  printf "\n\n═══════  preset: %s  ═══════\n" "$preset"
+  echo "  switching... (this restarts pipewire — ~2s)"
+  audio-preset "$preset" >/dev/null 2>&1 || {
+    echo "  ERR: failed to activate $preset" >&2
+    continue
+  }
+  sleep 0.5
+
+  # Wait until both sources are ready
+  for _ in $(seq 1 15); do
+    if pactl list short sources | grep -q "$CLN_SRC"; then break; fi
+    sleep 0.2
+  done
+
+  cat <<EOF
+
+  Read aloud (covers normal / quiet / loud):
+
+    1.  "Hello, my name is __, and this is a normal voice test."
+    2.  (quietly)  "Just a quick low-level test."
+    3.  (loudly!) "TESTING — TESTING — ONE TWO THREE!"
+
+EOF
+  read -r -p "  [ Press Enter when ready ] " _
+  echo -n "  "
+  for i in 3 2 1; do printf "%d... " "$i"; sleep 1; done
+  echo "GO!"
+
+  RAW="$OUT_DIR/$preset-raw.wav"
+  CLN="$OUT_DIR/$preset-cleaned.wav"
+  rm -f "$RAW" "$CLN"
+
+  pw-record --target "$RAW_SRC" --channels 1 --rate 48000 -- "$RAW" >/dev/null 2>&1 &
+  PR=$!
+  pw-record --target "$CLN_SRC" --channels 1 --rate 48000 -- "$CLN" >/dev/null 2>&1 &
+  PC=$!
+
+  for ((i=SECS; i>0; i--)); do
+    printf "\r  recording... %2ds left  " "$i"
+    sleep 1
+  done
+  printf "\r  recording... done.       \n\n"
+
+  kill "$PR" "$PC" 2>/dev/null || true
+  wait "$PR" 2>/dev/null || true
+  wait "$PC" 2>/dev/null || true
+
+  analyze "RAW"     "$RAW"
+  analyze "CLEANED" "$CLN"
+done
+
+# ─── Final summary ─────────────────────────────────────────────
+cat <<EOF
+
+
+═════════════════════════════════════════════════════════════════
+  Bench complete.
+
+  Listen to all takes back-to-back:
+      voice-bench play
+
+  Play one preset:
+      pw-play $OUT_DIR/<preset>-cleaned.wav      # processed
+      pw-play $OUT_DIR/<preset>-raw.wav          # before chain
+
+  Visual comparison (waveform / spectrum):
+      audacity $OUT_DIR/*.wav
+
+  Pick your winner:
+      audio-preset <preset>
+
+  Clear all takes when you're done:
+      voice-bench clean
+
+  How to read the stats:
+    RMS   = average loudness            higher = louder overall
+    Peak  = loudest sample              should never go above 0 dBFS
+    Floor = quietest 200 ms             lower = cleaner silence
+                                        below -85 dBFS = RNNoise gating works
+
+  A good cleaned take typically has:
+    Floor below -80 dBFS, Peak around -1 to -3 dBFS, RMS -18 to -14 dBFS
+    (RMS-to-Peak distance ~12 dB on cleaned vs ~20 dB on raw — that's compression)
+
+═════════════════════════════════════════════════════════════════
+
+EOF

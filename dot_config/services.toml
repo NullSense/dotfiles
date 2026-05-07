@@ -1,0 +1,34 @@
+# Friendly labels for localhost ports. Loaded by ~/bin/services.
+# Anything not listed here falls back to the process name from `ss`.
+# Format:  PORT = "Description"
+# Comments are # at the start of a line.
+
+# ─── Your stuff ──────────────────────────────────────────────────────────────
+14321 = "Agent Vault — credential broker UI"
+14322 = "Agent Vault — HTTPS proxy"
+# 8080 = "aiquota dashboard"          # uncomment & adjust if you wire one up
+
+# ─── Common dev servers ──────────────────────────────────────────────────────
+3000  = "Next.js / CRA / Express"
+3001  = "Alt dev server"
+3333  = "tinacms / refine"
+4000  = "Phoenix / Foundry / GraphQL"
+4173  = "Vite preview"
+5000  = "Flask / .NET / AirPlay"
+5173  = "Vite default"
+5432  = "PostgreSQL"
+5500  = "Live Server"
+6379  = "Redis"
+7860  = "Gradio"
+8000  = "Django / Python http.server"
+8080  = "Generic backend / Tomcat"
+8081  = "Webpack dev server"
+8888  = "Jupyter / pgAdmin"
+9000  = "MinIO / SonarQube"
+9090  = "Prometheus"
+9200  = "Elasticsearch"
+11434 = "Ollama"
+
+# ─── Databases (informational; ss will show them but they're not browsable) ──
+3306  = "MySQL"
+27017 = "MongoDB"

@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# voice-render — apply a preset's processing chain to a raw WAV file (offline).
+#
+# Usage:
+#   voice-render <raw.wav> <preset>          → writes raw.wav.rendered-<preset>.wav next to input
+#   voice-render <raw.wav> <preset> <out.wav>
+#   voice-render <raw.wav> all <out_dir/>    → renders ALL presets to out_dir/
+#
+# Tech notes:
+#   - Uses ffmpeg's LADSPA bridge to load the SAME RNNoise plugin as the live chain.
+#   - Uses ffmpeg's native equalizer/highpass/highshelf/acompressor/alimiter for the
+#     rest of the chain. These are CLOSE BUT NOT BYTE-IDENTICAL to the LSP plugins
+#     in the live filter-chain. The character is the same; A/B comparison is valid.
+#   - Output is float32 48 kHz to preserve dynamic range across the chain.
+
+set -euo pipefail
+
+RNNOISE_LADSPA=/usr/lib/ladspa/librnnoise_ladspa.so
+RNNOISE_LABEL=noise_suppressor_mono
+
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+  exit 1
+}
+
+[[ $# -ge 2 ]] || usage
+RAW="$1"
+PRESET="$2"
+OUT="${3:-}"
+
+[[ -f "$RAW" ]] || { echo "voice-render: no such file: $RAW" >&2; exit 1; }
+
+# ─── ffmpeg filter graphs ────────────────────────────────────────────
+# Each preset returns the exact filter chain string for ffmpeg's -af.
+filter_for() {
+  case "$1" in
+    minimal)
+      echo "highpass=f=80,ladspa=f=$RNNOISE_LADSPA:p=$RNNOISE_LABEL:c=c0=50|c1=200|c2=0|c3=0|c4=0,alimiter=limit=0.891:attack=4:release=6"
+      ;;
+    broadcast)
+      echo "highpass=f=80,ladspa=f=$RNNOISE_LADSPA:p=$RNNOISE_LABEL:c=c0=50|c1=200|c2=0|c3=0|c4=0,\
+equalizer=f=120:t=q:w=1.5:g=2,\
+equalizer=f=220:t=q:w=1:g=-3,\
+equalizer=f=500:t=q:w=1.5:g=-2,\
+equalizer=f=4000:t=q:w=1:g=4,\
+highshelf=f=9000:t=q:w=0.7:g=2,\
+acompressor=threshold=-20dB:ratio=3:attack=10:release=100:makeup=9dB,\
+alimiter=limit=0.891:attack=4:release=6"
+      ;;
+    warm)
+      echo "highpass=f=60,ladspa=f=$RNNOISE_LADSPA:p=$RNNOISE_LABEL:c=c0=50|c1=200|c2=0|c3=0|c4=0,\
+equalizer=f=100:t=q:w=1.2:g=3.5,\
+equalizer=f=250:t=q:w=1:g=-2,\
+equalizer=f=500:t=q:w=1.5:g=-1,\
+equalizer=f=3000:t=q:w=1:g=2,\
+acompressor=threshold=-22dB:ratio=4:attack=15:release=150:makeup=9dB,\
+alimiter=limit=0.891:attack=4:release=6"
+      ;;
+    crisp)
+      echo "highpass=f=80,ladspa=f=$RNNOISE_LADSPA:p=$RNNOISE_LABEL:c=c0=50|c1=200|c2=0|c3=0|c4=0,\
+equalizer=f=250:t=q:w=1:g=-3,\
+equalizer=f=450:t=q:w=1.4:g=-2.5,\
+equalizer=f=1500:t=q:w=1.5:g=-1.5,\
+equalizer=f=110:t=q:w=1:g=1.5,\
+equalizer=f=3000:t=q:w=1:g=3,\
+highshelf=f=9000:t=q:w=0.7:g=3,\
+acompressor=threshold=-20dB:ratio=3:attack=5:release=130:makeup=9dB,\
+alimiter=limit=0.891:attack=4:release=6"
+      ;;
+    deep)
+      echo "highpass=f=55,ladspa=f=$RNNOISE_LADSPA:p=$RNNOISE_LABEL:c=c0=50|c1=200|c2=0|c3=0|c4=0,\
+equalizer=f=90:t=q:w=1:g=5,\
+equalizer=f=180:t=q:w=1:g=2,\
+equalizer=f=450:t=q:w=1.5:g=-3,\
+equalizer=f=2800:t=q:w=1:g=2,\
+highshelf=f=8000:t=q:w=0.7:g=1,\
+acompressor=threshold=-24dB:ratio=5:attack=12:release=180:makeup=9dB,\
+alimiter=limit=0.891:attack=4:release=6"
+      ;;
+    distant)
+      echo "highpass=f=90,ladspa=f=$RNNOISE_LADSPA:p=$RNNOISE_LABEL:c=c0=50|c1=200|c2=0|c3=0|c4=0,\
+equalizer=f=180:t=q:w=1:g=2,\
+equalizer=f=450:t=q:w=1.4:g=-3,\
+equalizer=f=1500:t=q:w=1.5:g=-1.5,\
+equalizer=f=3500:t=q:w=1:g=4,\
+highshelf=f=9000:t=q:w=0.7:g=4,\
+acompressor=threshold=-24dB:ratio=4:attack=5:release=130:makeup=12dB,\
+alimiter=limit=0.891:attack=4:release=6"
+      ;;
+    daily)
+      echo "highpass=f=80,ladspa=f=$RNNOISE_LADSPA:p=$RNNOISE_LABEL:c=c0=50|c1=200|c2=0|c3=0|c4=0,\
+equalizer=f=130:t=q:w=1:g=2,\
+equalizer=f=280:t=q:w=1:g=-2,\
+equalizer=f=450:t=q:w=1.4:g=-2.5,\
+equalizer=f=1500:t=q:w=1.5:g=-1,\
+equalizer=f=3500:t=q:w=1:g=3.5,\
+highshelf=f=9000:t=q:w=0.7:g=2.5,\
+acompressor=threshold=-22dB:ratio=4:attack=5:release=130:makeup=10.5dB,\
+alimiter=limit=0.891:attack=4:release=6"
+      ;;
+    signature)
+      echo "highpass=f=80,ladspa=f=$RNNOISE_LADSPA:p=$RNNOISE_LABEL:c=c0=50|c1=200|c2=0|c3=0|c4=0,\
+equalizer=f=120:t=q:w=1:g=2.5,\
+equalizer=f=250:t=q:w=1:g=-3,\
+equalizer=f=450:t=q:w=1.4:g=-2,\
+equalizer=f=1500:t=q:w=1.5:g=-1.5,\
+equalizer=f=2500:t=q:w=2:g=-2,\
+equalizer=f=3000:t=q:w=1:g=2.5,\
+highshelf=f=8000:t=q:w=0.7:g=2,\
+acompressor=threshold=-22dB:ratio=4:attack=5:release=130:makeup=10dB,\
+alimiter=limit=0.891:attack=4:release=6"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ALL_PRESETS=(minimal broadcast warm crisp deep distant daily signature)
+
+render_one() {
+  local p=$1 outfile=$2
+  local f
+  if ! f=$(filter_for "$p"); then
+    echo "voice-render: unknown preset: $p" >&2
+    return 1
+  fi
+  ffmpeg -loglevel error -y -i "$RAW" -af "$f" -ar 48000 -ac 1 -c:a pcm_s16le "$outfile"
+}
+
+if [[ "$PRESET" == "all" ]]; then
+  outdir="${OUT:-${RAW%.*}-rendered}"
+  mkdir -p "$outdir"
+  echo "voice-render: rendering ALL ${#ALL_PRESETS[@]} presets → $outdir/"
+  for p in "${ALL_PRESETS[@]}"; do
+    of="$outdir/$p-rendered.wav"
+    if render_one "$p" "$of"; then
+      sz=$(du -h "$of" | cut -f1)
+      printf "  ✓ %-12s → %s  (%s)\n" "$p" "$(basename "$of")" "$sz"
+    else
+      printf "  ✗ %-12s FAILED\n" "$p"
+    fi
+  done
+else
+  outfile="${OUT:-${RAW%.*}-rendered-$PRESET.wav}"
+  if render_one "$PRESET" "$outfile"; then
+    echo "voice-render: wrote $outfile"
+  else
+    exit 1
+  fi
+fi

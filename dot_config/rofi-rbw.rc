@@ -1,0 +1,6 @@
+selector=rofi
+clipboarder=wl-copy
+typer=wtype
+clear-after=45
+typing-start-delay=250
+use-notify-send=true

@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# audio-test — record yourself through both raw mic AND the active chain,
+# play back the two recordings, and print level stats so you can compare.
+#
+# Usage:
+#   audio-test            # 10-second test (default)
+#   audio-test 20         # 20-second test
+#   audio-test 5 quiet    # 5s, skip the playback prompts (just stats + files)
+
+set -euo pipefail
+
+SECS="${1:-10}"
+MODE="${2:-loud}"
+
+RAW_SRC="alsa_input.usb-Samson_Technologies_Samson_Q2U_Microphone-00.analog-stereo"
+CLN_SRC="voice_cleaned"
+
+OUT_DIR="${AUDIO_TEST_DIR:-$HOME/audio-tests}"
+mkdir -p "$OUT_DIR"
+
+# Verify cleaned source exists
+if ! pactl list short sources | grep -q '^[0-9]*[[:space:]]*voice_cleaned'; then
+  echo "WARN: voice_cleaned source not found." >&2
+  echo "  Active preset: $(grep -oE 'preset=[a-z]+' ~/.config/pipewire/pipewire.conf.d/99-mic-chain.conf 2>/dev/null | head -1 | cut -d= -f2 || echo off)" >&2
+  echo "  Run 'audio-preset broadcast' first." >&2
+  exit 1
+fi
+
+PRESET=$(grep -oE 'preset=[a-z]+' ~/.config/pipewire/pipewire.conf.d/99-mic-chain.conf 2>/dev/null | head -1 | cut -d= -f2 || echo "?")
+RAW="$OUT_DIR/${PRESET}-raw.wav"
+CLN="$OUT_DIR/${PRESET}-cleaned.wav"
+
+cat <<EOF
+══════════════════════════════════════════════════════════
+  Mic A/B test    preset: $PRESET    duration: ${SECS}s
+══════════════════════════════════════════════════════════
+
+  Speak normally — read a paragraph, count from 1 to 20,
+  pause for a couple seconds, then say "louder" loudly so
+  the limiter has something to catch.
+
+EOF
+
+for i in 3 2 1; do
+  printf "  %d... " "$i"
+  sleep 1
+done
+echo "GO!"
+echo
+
+# Record both simultaneously to the same wall clock
+pw-record --target "$RAW_SRC" --channels 1 --rate 48000 -- "$RAW" >/dev/null 2>&1 &
+PID_RAW=$!
+pw-record --target "$CLN_SRC" --channels 1 --rate 48000 -- "$CLN" >/dev/null 2>&1 &
+PID_CLN=$!
+
+# Live countdown bar
+for ((i=SECS; i>0; i--)); do
+  printf "\r  recording... %2ds left " "$i"
+  sleep 1
+done
+printf "\r  recording... done       \n\n"
+
+kill "$PID_RAW" "$PID_CLN" 2>/dev/null || true
+wait "$PID_RAW" 2>/dev/null || true
+wait "$PID_CLN" 2>/dev/null || true
+
+# Stats: RMS, peak, crest factor, noise floor (quietest 200 ms window)
+analyze() {
+  python3 - "$1" <<'PY'
+import wave, struct, math, sys
+f = sys.argv[1]
+with wave.open(f, 'rb') as w:
+    sr = w.getframerate(); n = w.getnframes(); ch = w.getnchannels(); sw = w.getsampwidth()
+    data = w.readframes(n)
+    samples = struct.unpack('<' + 'h'*(n*ch), data)
+    if ch == 2: samples = samples[::2]
+    if not samples:
+        print("  (empty)"); raise SystemExit
+    n_samples = len(samples)
+    rms_full = math.sqrt(sum(s*s for s in samples) / n_samples)
+    peak     = max(abs(s) for s in samples)
+    win = max(1, int(0.2*sr))
+    quietest = float('inf')
+    s2 = [s*s for s in samples]
+    csum = 0.0
+    for i, v in enumerate(s2):
+        csum += v
+        if i >= win: csum -= s2[i-win]
+        if i+1 >= win:
+            r = math.sqrt(csum/win)
+            if r < quietest: quietest = r
+    def db(x): return 20*math.log10(max(x,1)/32768)
+    print(f"    RMS:   {db(rms_full):+6.1f} dBFS")
+    print(f"    Peak:  {db(peak):+6.1f} dBFS  ({'CLIPPING!' if peak >= 32760 else 'safe'})")
+    print(f"    Floor: {db(quietest):+6.1f} dBFS  (quietest 200 ms — lower = cleaner silence)")
+    print(f"    Crest: {(db(peak)-db(rms_full)):4.1f} dB    (lower = more compressed)")
+PY
+}
+
+echo "─── Stats ────────────────────────────────────────────────"
+echo "  RAW  (Q2U direct):"
+analyze "$RAW"
+echo
+echo "  CLEANED (preset=$PRESET):"
+analyze "$CLN"
+echo
+
+if [[ "$MODE" != "quiet" ]]; then
+  read -r -p "  Press Enter to play RAW…  " _
+  pw-play "$RAW"
+  echo
+  read -r -p "  Press Enter to play CLEANED…  " _
+  pw-play "$CLN"
+  echo
+fi
+
+cat <<EOF
+
+  Files saved (kept per-preset, so you can A/B across presets):
+    $RAW
+    $CLN
+
+  All your past takes:
+    ls $OUT_DIR
+    pw-play $OUT_DIR/<preset>-cleaned.wav
+
+  Tips:
+    - Open with 'audacity' to see waveforms / spectrum side-by-side.
+    - 'audio-preset deep' then 'audio-test 15' to compare a different flavor.
+    - Floor near -90 dBFS = digital silence (RNNoise gating between words).
+    - Peak above -1 dBFS on CLEANED would mean the limiter let something past.
+    - If CLEANED RMS isn't ~6-9 dB above RAW RMS, makeup gain is too low.
+
+EOF

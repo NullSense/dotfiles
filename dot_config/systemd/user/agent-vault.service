@@ -1,0 +1,44 @@
+[Unit]
+Description=Agent Vault — credential broker for AI agents
+Documentation=https://infisical.com/docs/agent-vault
+Documentation=file://%h/dotfiles/arch-install/AGENT-VAULT.md
+# Wait for the user session before starting. graphical-session.target is set
+# when sway is up, which is when we want the broker available.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+
+# systemd unseals this file via TPM2 at service start. Plaintext is mounted
+# to a tmpfs at $CREDENTIALS_DIRECTORY (mode 0500, owned by service user
+# only) and vanishes when the service stops. The .cred file at rest is
+# ciphertext bound to TPM2 PCR 7 (Secure Boot policy) + a host-key — useless
+# if exfiltrated to another machine.
+LoadCredentialEncrypted=agent-vault-master:%h/.config/credstore.encrypted/agent-vault-master.cred
+
+# Pipe the unsealed credential into agent-vault's --password-stdin. The
+# password never enters the service's environment block (so it never appears
+# in `systemctl show` or `journalctl` envblob dumps).
+ExecStart=/bin/sh -c 'cat "$CREDENTIALS_DIRECTORY/agent-vault-master" | /usr/local/bin/agent-vault server --password-stdin'
+
+# If the daemon crashes (OOM, panic), bring it back. systemd's default
+# StartLimitIntervalSec/StartLimitBurst caps will prevent a tight loop if
+# TPM unsealing fails persistently — service will fail-stopped after that.
+Restart=on-failure
+RestartSec=5
+
+# Hardening: agent-vault doesn't need to touch most of the system. These
+# directives shrink the surface a compromised process could affect.
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.agent-vault
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+
+[Install]
+WantedBy=default.target

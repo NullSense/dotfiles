@@ -1,0 +1,666 @@
+#!/usr/bin/env bash
+# voice-tui — interactive voice-chain bench & A/B comparison TUI.
+#
+# One menu-driven program covering: quick bench, distance bench, full preset
+# sweep, A/B/C compare, playback, preset switching, recording browser.
+#
+# Self-contained — uses pw-record / pw-play / pactl / python3 (all preinstalled).
+
+set -uo pipefail
+
+# ─── Constants ────────────────────────────────────────────────────────
+RAW_SRC="alsa_input.usb-Samson_Technologies_Samson_Q2U_Microphone-00.analog-stereo"
+CLN_SRC="voice_cleaned"
+OUT_DIR="${VOICE_TUI_DIR:-$HOME/audio-tests}"
+PRESET_DIR="$HOME/.config/audio-presets"
+ACTIVE_CONF="$HOME/.config/pipewire/pipewire.conf.d/99-mic-chain.conf"
+
+mkdir -p "$OUT_DIR"
+
+# ─── Colors ───────────────────────────────────────────────────────────
+if [[ -t 1 ]]; then
+  BOLD=$'\e[1m'; DIM=$'\e[2m'
+  RED=$'\e[31m'; GREEN=$'\e[32m'; YELLOW=$'\e[33m'
+  BLUE=$'\e[34m'; MAGENTA=$'\e[35m'; CYAN=$'\e[36m'
+  RESET=$'\e[0m'
+else
+  BOLD=''; DIM=''; RED=''; GREEN=''; YELLOW=''; BLUE=''; MAGENTA=''; CYAN=''; RESET=''
+fi
+
+clr()    { printf '\e[2J\e[H'; }
+hr()     { printf "${DIM}%s${RESET}\n" "──────────────────────────────────────────────────────────────"; }
+hr2()    { printf "${DIM}%s${RESET}\n" "══════════════════════════════════════════════════════════════"; }
+pause()  { read -rp "  ${DIM}[ Enter to continue ]${RESET} " _ </dev/tty; }
+ask()    { local p=$1 d=${2:-}; local r; read -rp "  $p${d:+ [$d]}: " r </dev/tty; echo "${r:-$d}"; }
+yn()     { local p=$1 d=${2:-N}; local r; read -rp "  $p (y/N): " r </dev/tty; [[ ${r:-$d} =~ ^[Yy] ]]; }
+
+# ─── State helpers ────────────────────────────────────────────────────
+current_preset() {
+  if [[ -f "$ACTIVE_CONF" ]]; then
+    grep -oE 'preset=[a-z]+' "$ACTIVE_CONF" | head -1 | cut -d= -f2 || echo "?"
+  else
+    echo "off"
+  fi
+}
+
+list_presets() {
+  for f in "$PRESET_DIR"/*.conf; do
+    [[ -f "$f" ]] || continue
+    basename "$f" .conf
+  done | sort
+}
+
+q2u_volume() {
+  pactl get-source-volume "$RAW_SRC" 2>/dev/null \
+    | grep -oE '[0-9]+%' | head -1 || echo "?"
+}
+
+default_source() { pactl get-default-source 2>/dev/null || echo "?"; }
+default_sink()   { pactl get-default-sink   2>/dev/null || echo "?"; }
+
+source_short() {
+  local s=$(default_source)
+  case $s in
+    voice_cleaned) echo "Voice (Cleaned)" ;;
+    alsa_input.*Samson*) echo "Q2U raw" ;;
+    *) echo "$s" ;;
+  esac
+}
+
+sink_short() {
+  local s=$(default_sink)
+  case $s in
+    *0f_00.6.analog-stereo) echo "Headphones" ;;
+    *03_00.1.hdmi*extra4)   echo "Aorus speakers" ;;
+    *) echo "$s" ;;
+  esac
+}
+
+chain_loaded() {
+  pactl list short sources 2>/dev/null | grep -qE "^[0-9]+\s+$CLN_SRC\b"
+}
+
+# ─── Display ─────────────────────────────────────────────────────────
+header() {
+  clr
+  hr2
+  printf "  ${BOLD}voice-tui${RESET}   ${DIM}interactive voice chain bench${RESET}\n"
+  hr2
+  printf "  Preset: ${GREEN}%-12s${RESET}   Source: ${CYAN}%-18s${RESET}   Output: ${MAGENTA}%s${RESET}\n" \
+    "$(current_preset)" "$(source_short)" "$(sink_short)"
+  printf "  Q2U gain: ${YELLOW}%-6s${RESET}   Chain: %s\n" \
+    "$(q2u_volume)" "$(chain_loaded && echo "${GREEN}loaded${RESET}" || echo "${RED}NOT LOADED${RESET}")"
+  hr2
+  echo
+}
+
+# ─── Stats ───────────────────────────────────────────────────────────
+analyze() {
+  # $1 = label, $2 = file
+  python3 - "$1" "$2" 2>/dev/null <<'PY'
+import wave, struct, math, sys, os, subprocess, re
+label, f = sys.argv[1], sys.argv[2]
+if not os.path.isfile(f) or os.path.getsize(f) < 100:
+    print(f"    {label}: (empty)"); raise SystemExit
+with wave.open(f, 'rb') as w:
+    sr=w.getframerate(); n=w.getnframes(); ch=w.getnchannels()
+    data=w.readframes(n)
+    samples=struct.unpack('<'+'h'*(n*ch), data)
+    if ch==2: samples=samples[::2]
+    if not samples:
+        print(f"    {label}: (empty)"); raise SystemExit
+    rms=math.sqrt(sum(s*s for s in samples)/len(samples))
+    peak=max(abs(s) for s in samples)
+    win=max(1,int(0.2*sr)); s2=[s*s for s in samples]; csum=0.0; q=float('inf')
+    for i,v in enumerate(s2):
+        csum+=v
+        if i>=win: csum-=s2[i-win]
+        if i+1>=win: q=min(q, math.sqrt(csum/win))
+    db = lambda x: 20*math.log10(max(x,1)/32768)
+    flag = "  CLIPPING!" if peak>=32760 else ""
+
+    # Objective EBU R128 LUFS measurement via ffmpeg's ebur128 filter
+    lufs_str = ""
+    try:
+        r = subprocess.run(
+            ["ffmpeg","-hide_banner","-nostats","-i",f,
+             "-af","ebur128=peak=true","-f","null","-"],
+            capture_output=True, text=True, timeout=15)
+        text = r.stderr
+        # last "I:" / "TP:" lines
+        m_i = re.findall(r"\bI:\s+(-?\d+\.?\d*)\s+LUFS", text)
+        m_tp = re.findall(r"\bTP:\s+(-?\d+\.?\d*)\s+dBFS", text)
+        m_lra = re.findall(r"\bLRA:\s+(-?\d+\.?\d*)\s+LU", text)
+        if m_i and m_tp and m_lra:
+            lufs_str = f"   I {float(m_i[-1]):+5.1f} LUFS  TP {float(m_tp[-1]):+4.1f}  LRA {float(m_lra[-1]):4.1f} LU"
+    except Exception:
+        pass
+
+    print(f"    {label:10s}  RMS {db(rms):+5.1f}   Peak {db(peak):+5.1f}{flag}   Floor {db(q):+6.1f}  dBFS{lufs_str}")
+PY
+}
+
+# ─── Recording ───────────────────────────────────────────────────────
+countdown() {
+  echo -n "  "
+  for i in 3 2 1; do printf "${YELLOW}%d… ${RESET}" "$i"; sleep 1; done
+  printf "${GREEN}${BOLD}GO!${RESET}\n\n"
+}
+
+record_pair() {
+  # $1 = secs, $2 = raw_path, $3 = cln_path, $4 = label
+  local secs=$1 raw=$2 cln=$3 label=$4
+  rm -f "$raw" "$cln"
+
+  pw-record --target "$RAW_SRC" --channels 1 --rate 48000 -- "$raw" >/dev/null 2>&1 &
+  local PR=$!
+  pw-record --target "$CLN_SRC" --channels 1 --rate 48000 -- "$cln" >/dev/null 2>&1 &
+  local PC=$!
+
+  for ((i=secs; i>0; i--)); do
+    printf "\r  ${CYAN}● recording${RESET}  $label  ${DIM}—${RESET} %2ds left  " "$i"
+    sleep 1
+  done
+  printf "\r  ${GREEN}✓ done${RESET}            $label                       \n\n"
+
+  kill "$PR" "$PC" 2>/dev/null || true
+  wait "$PR" 2>/dev/null || true
+  wait "$PC" 2>/dev/null || true
+}
+
+read_script() {
+  cat <<EOF
+  ${BOLD}Read aloud${RESET} (covers normal / quiet / loud levels):
+
+    ${CYAN}1.${RESET} "Hello, my name is __, this is a normal voice test."
+    ${CYAN}2.${RESET} ${DIM}(quietly)${RESET}  "Just a quick low-level test."
+    ${CYAN}3.${RESET} ${BOLD}(LOUD!)${RESET}  "TESTING — TESTING — ONE TWO THREE!"
+
+EOF
+}
+
+ensure_chain() {
+  if ! chain_loaded; then
+    printf "  ${RED}Chain not loaded.${RESET} Activating preset '${YELLOW}%s${RESET}'…\n" "$(current_preset)"
+    audio-preset "$(current_preset)" >/dev/null 2>&1 || {
+      printf "  ${RED}Failed.${RESET} Run 'audio-preset broadcast' manually.\n"
+      pause; return 1
+    }
+  fi
+  return 0
+}
+
+# ─── Menu actions ────────────────────────────────────────────────────
+
+m_quick() {
+  header
+  printf "  ${BOLD}Quick bench${RESET} ${DIM}— current preset, single take${RESET}\n\n"
+  ensure_chain || return
+  local p=$(current_preset)
+  local secs=$(ask "Duration (seconds)" "12")
+  echo
+  read_script
+  pause
+  countdown
+  local raw="$OUT_DIR/$p-raw.wav"
+  local cln="$OUT_DIR/$p-cleaned.wav"
+  record_pair "$secs" "$raw" "$cln" "preset=$p"
+  hr; analyze "RAW"     "$raw"; analyze "CLEANED" "$cln"; hr
+  echo
+  printf "  Saved:\n    %s\n    %s\n\n" "$raw" "$cln"
+  if yn "Play back (raw, then cleaned)?"; then
+    echo; printf "  ${DIM}playing RAW…${RESET}\n";     pw-play "$raw" 2>/dev/null
+    echo; printf "  ${DIM}playing CLEANED…${RESET}\n"; pw-play "$cln" 2>/dev/null
+    echo
+  fi
+  pause
+}
+
+m_distance() {
+  header
+  printf "  ${BOLD}Distance bench${RESET} ${DIM}— current preset at 3 placements${RESET}\n\n"
+  ensure_chain || return
+  local p=$(current_preset)
+  local secs=$(ask "Duration per take (seconds)" "12")
+  local labels=(close mid far)
+  local descs=(
+    "${BOLD}~6 inches${RESET} — lean in, mic at upper-lip height, 15° off-axis"
+    "${BOLD}~30 cm (1 ft)${RESET} — comfortable boom position"
+    "${BOLD}~60 cm (arm's length)${RESET} — boom pushed away"
+  )
+
+  for i in 0 1 2; do
+    echo; hr
+    printf "  ${YELLOW}Take %d/3${RESET}  ${MAGENTA}%s${RESET}\n" "$((i+1))" "${labels[$i]}"
+    printf "  Position: %s\n" "${descs[$i]}"
+    hr
+    echo
+    read_script
+    pause
+    countdown
+    local raw="$OUT_DIR/$p-${labels[$i]}-raw.wav"
+    local cln="$OUT_DIR/$p-${labels[$i]}-cleaned.wav"
+    record_pair "$secs" "$raw" "$cln" "$p ${labels[$i]}"
+    analyze "  CLEANED" "$cln"
+  done
+
+  echo; hr2
+  printf "  ${BOLD}Done.${RESET} Compare with:\n"
+  for l in "${labels[@]}"; do
+    printf "    pw-play $OUT_DIR/$p-$l-cleaned.wav\n"
+  done
+  echo
+  if yn "Play all 3 back-to-back now?"; then
+    for l in "${labels[@]}"; do
+      echo; printf "  ${CYAN}═══ %s ═══${RESET}\n" "$l"
+      pw-play "$OUT_DIR/$p-$l-cleaned.wav" 2>/dev/null
+    done
+    echo
+  fi
+  pause
+}
+
+m_sweep() {
+  header
+  printf "  ${BOLD}Full sweep${RESET} ${DIM}— record all presets at one distance${RESET}\n\n"
+  local secs=$(ask "Duration per preset (seconds)" "12")
+  echo
+  printf "  ${BOLD}Stay at one consistent distance${RESET} for all takes (e.g. ~30 cm).\n"
+  printf "  You'll go through each preset; it auto-switches between takes.\n\n"
+  pause
+
+  local presets
+  mapfile -t presets < <(list_presets)
+
+  for p in "${presets[@]}"; do
+    echo; hr2
+    printf "  ${MAGENTA}preset: %s${RESET}\n" "$p"
+    hr2
+    audio-preset "$p" >/dev/null 2>&1 || { echo "  ${RED}skip $p${RESET}"; continue; }
+    sleep 0.4
+    # wait for chain
+    for _ in $(seq 1 25); do chain_loaded && break; sleep 0.2; done
+    read_script
+    pause
+    countdown
+    local raw="$OUT_DIR/$p-raw.wav"
+    local cln="$OUT_DIR/$p-cleaned.wav"
+    record_pair "$secs" "$raw" "$cln" "preset=$p"
+    analyze "  CLEANED" "$cln"
+  done
+
+  echo; hr2
+  printf "  ${BOLD}Sweep complete.${RESET}  Listen back-to-back from menu option 5.\n"
+  echo
+  pause
+}
+
+m_compare() {
+  header
+  printf "  ${BOLD}Compare presets${RESET} ${DIM}— pick 2-4 to A/B/C${RESET}\n\n"
+  local presets
+  mapfile -t presets < <(list_presets)
+
+  echo "  Available:"
+  local i=1
+  for p in "${presets[@]}"; do
+    printf "    ${CYAN}%d${RESET}) %s\n" "$i" "$p"
+    ((i++))
+  done
+  echo
+  local sel=$(ask "Numbers separated by spaces (e.g. '1 3 5')")
+  [[ -z "$sel" ]] && return
+  local picks=()
+  for n in $sel; do
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    [[ "$n" -ge 1 && "$n" -le ${#presets[@]} ]] || continue
+    picks+=("${presets[$((n-1))]}")
+  done
+  if (( ${#picks[@]} < 2 )); then
+    printf "  ${RED}Need at least 2 valid picks.${RESET}\n"
+    pause; return
+  fi
+
+  local secs=$(ask "Duration per take" "12")
+  echo
+  printf "  Will record: ${YELLOW}%s${RESET}\n" "${picks[*]}"
+  printf "  Stay at the SAME placement for every take.\n\n"
+  pause
+
+  for p in "${picks[@]}"; do
+    echo; hr
+    printf "  ${MAGENTA}preset: %s${RESET}\n" "$p"
+    hr
+    audio-preset "$p" >/dev/null 2>&1
+    sleep 0.4
+    for _ in $(seq 1 25); do chain_loaded && break; sleep 0.2; done
+    read_script
+    pause
+    countdown
+    record_pair "$secs" "$OUT_DIR/$p-raw.wav" "$OUT_DIR/$p-cleaned.wav" "preset=$p"
+    analyze "  CLEANED" "$OUT_DIR/$p-cleaned.wav"
+  done
+
+  echo; hr2
+  if yn "Play all in sequence now?"; then
+    for p in "${picks[@]}"; do
+      echo; printf "  ${CYAN}═══ %s ═══${RESET}\n" "$p"
+      pw-play "$OUT_DIR/$p-cleaned.wav" 2>/dev/null
+    done
+    echo
+  fi
+  pause
+}
+
+m_play() {
+  # Loop until user picks back/quit. Plays a take, shows stats, then re-prompts —
+  # so you can A/B between many takes without bouncing back to the main menu.
+  while true; do
+    header
+    printf "  ${BOLD}Listen${RESET} ${DIM}— pick a take; loops until you go back${RESET}\n\n"
+    local files
+    mapfile -t files < <(ls -1 "$OUT_DIR"/*.wav 2>/dev/null | sort)
+    if (( ${#files[@]} == 0 )); then
+      printf "  ${YELLOW}No recordings yet.${RESET}  Run a bench first.\n"
+      pause; return
+    fi
+
+    echo "  Saved takes:"
+    local i=1
+    for f in "${files[@]}"; do
+      local sz=$(du -h "$f" | cut -f1)
+      printf "    ${CYAN}%3d${RESET}) %-55s  ${DIM}%s${RESET}\n" "$i" "$(basename "$f")" "$sz"
+      ((i++))
+    done
+    echo
+    printf "    ${CYAN}  a${RESET})  play ALL cleaned takes back-to-back\n"
+    printf "    ${CYAN}  r${RESET})  play ALL rendered takes back-to-back\n"
+    printf "    ${CYAN}  n${RESET})  play ALL .norm takes back-to-back\n"
+    printf "    ${CYAN}  s${RESET})  show stats (LUFS + RMS + Peak + Floor) for all\n"
+    printf "    ${CYAN}  d${RESET})  delete one take\n"
+    printf "    ${CYAN}b/q${RESET})  back to main menu\n"
+    printf "\n  ${DIM}Tip: Ctrl-C during playback skips to next prompt without quitting.${RESET}\n\n"
+
+    local pick=$(ask "Pick")
+    case "$pick" in
+      ""|b|q|B|Q) return ;;
+
+      a|r|n)
+        local suffix
+        case "$pick" in
+          a) suffix="cleaned.wav" ;;
+          r) suffix="rendered.wav" ;;
+          n) suffix=".norm.wav" ;;
+        esac
+        local matched=0
+        # Allow Ctrl-C to break out of pw-play without exiting voice-tui.
+        trap : INT
+        for f in "${files[@]}"; do
+          [[ "$f" == *$suffix ]] || continue
+          matched=1
+          echo; printf "  ${CYAN}═══ %s ═══${RESET}\n" "$(basename "$f" .wav)"
+          pw-play "$f" 2>/dev/null || true
+        done
+        trap 'echo; echo "  interrupted."; exit 130' INT
+        if (( matched == 0 )); then
+          printf "  ${YELLOW}No takes matching '%s' yet.${RESET}\n" "$suffix"
+        fi
+        echo
+        pause
+        ;;
+
+      s)
+        echo; hr
+        for f in "${files[@]}"; do
+          analyze "$(basename "$f" .wav)" "$f"
+        done
+        hr; echo
+        pause
+        ;;
+
+      d)
+        local del=$(ask "Number to delete")
+        if [[ "$del" =~ ^[0-9]+$ ]] && (( del >= 1 && del <= ${#files[@]} )); then
+          local victim="${files[$((del-1))]}"
+          if yn "Delete $(basename "$victim")?"; then
+            rm -f "$victim"
+            printf "  ${GREEN}deleted.${RESET}\n"
+            sleep 0.4
+          fi
+        fi
+        ;;
+
+      *)
+        if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#files[@]} )); then
+          local f="${files[$((pick-1))]}"
+          echo; printf "  ${DIM}playing %s…${RESET}  ${DIM}(Ctrl-C to skip)${RESET}\n\n" "$(basename "$f")"
+          trap : INT
+          pw-play "$f" 2>/dev/null || true
+          trap 'echo; echo "  interrupted."; exit 130' INT
+          echo
+          analyze "$(basename "$f" .wav)" "$f"
+          echo
+          # No pause — straight back to the picker for rapid A/B compares.
+        else
+          printf "  ${YELLOW}Unknown choice: %s${RESET}\n" "$pick"
+          sleep 0.6
+        fi
+        ;;
+    esac
+  done
+}
+
+m_switch() {
+  header
+  printf "  ${BOLD}Switch preset${RESET}\n\n"
+  local presets
+  mapfile -t presets < <(list_presets)
+  local cur=$(current_preset)
+
+  echo "  Available:"
+  local i=1
+  for p in "${presets[@]}"; do
+    local mark=" "
+    [[ "$p" == "$cur" ]] && mark="${GREEN}*${RESET}"
+    printf "  $mark ${CYAN}%d${RESET}) %s\n" "$i" "$p"
+    ((i++))
+  done
+  printf "    ${CYAN}%d${RESET}) ${RED}off${RESET} (disable chain)\n" $((i))
+  echo
+  local pick=$(ask "Pick number (Enter to cancel)")
+  [[ -z "$pick" ]] && return
+  [[ "$pick" =~ ^[0-9]+$ ]] || { pause; return; }
+
+  if (( pick == ${#presets[@]} + 1 )); then
+    audio-preset off
+  elif (( pick >= 1 && pick <= ${#presets[@]} )); then
+    audio-preset "${presets[$((pick-1))]}"
+  fi
+  echo
+  pause
+}
+
+m_render() {
+  header
+  printf "  ${BOLD}Render mode${RESET} ${DIM}— record once, apply ALL presets offline${RESET}\n\n"
+  printf "  Records your voice ${BOLD}once${RESET} from the raw mic, then renders the\n"
+  printf "  recording through every preset chain via ffmpeg + LADSPA.\n\n"
+  printf "  ${YELLOW}Caveat:${RESET} ffmpeg's compressor/limiter aren't byte-identical to\n"
+  printf "  the LSP plugins in the live chain — close, but not exact. RNNoise IS\n"
+  printf "  the exact same plugin (loaded via LADSPA bridge).\n\n"
+  printf "  ${GREEN}Pro:${RESET} you only have to read the script ONCE, every preset gets\n"
+  printf "  the identical input — perfect A/B with zero performance variance.\n\n"
+
+  local secs=$(ask "Recording duration (seconds)" "15")
+  echo
+  read_script
+  printf "  Recording will go straight from the Q2U raw source — chain state\n"
+  printf "  doesn't matter for the recording itself.\n\n"
+  pause
+  countdown
+
+  local raw="$OUT_DIR/render-source.wav"
+  rm -f "$raw"
+
+  pw-record --target "$RAW_SRC" --channels 1 --rate 48000 -- "$raw" >/dev/null 2>&1 &
+  local PR=$!
+  for ((i=secs; i>0; i--)); do
+    printf "\r  ${CYAN}● recording raw${RESET}  ${DIM}—${RESET} %2ds left  " "$i"
+    sleep 1
+  done
+  printf "\r  ${GREEN}✓ raw captured${RESET}                              \n\n"
+  kill "$PR" 2>/dev/null || true
+  wait "$PR" 2>/dev/null || true
+
+  analyze "RAW SOURCE" "$raw"
+  echo
+  hr
+  printf "  ${BOLD}Rendering all presets…${RESET}\n"
+  hr
+  voice-render "$raw" all "$OUT_DIR/" 2>&1 | sed 's/^/  /'
+  echo
+
+  hr2
+  printf "  ${BOLD}Stats per preset${RESET}\n"
+  hr2
+  for p in minimal broadcast warm crisp deep distant daily; do
+    local f="$OUT_DIR/$p-rendered.wav"
+    [[ -f "$f" ]] && analyze "$p" "$f"
+  done
+  echo
+
+  if yn "Play all rendered takes back-to-back?"; then
+    for p in minimal broadcast warm crisp deep distant daily; do
+      local f="$OUT_DIR/$p-rendered.wav"
+      [[ -f "$f" ]] || continue
+      echo; printf "  ${CYAN}═══ %s ═══${RESET}\n" "$p"
+      pw-play "$f" 2>/dev/null
+    done
+    echo
+  fi
+  pause
+}
+
+m_normalize() {
+  header
+  printf "  ${BOLD}LUFS normalize${RESET} ${DIM}— EBU R128 / objective loudness target${RESET}\n\n"
+  local files
+  mapfile -t files < <(ls -1 "$OUT_DIR"/*.wav 2>/dev/null | grep -v '\.norm\.wav$' | sort)
+  if (( ${#files[@]} == 0 )); then
+    printf "  ${YELLOW}No recordings yet.${RESET}\n"
+    pause; return
+  fi
+
+  echo "  Pick a file to normalize:"
+  local i=1
+  for f in "${files[@]}"; do
+    printf "    ${CYAN}%2d${RESET}) %s\n" "$i" "$(basename "$f")"
+    ((i++))
+  done
+  printf "    ${CYAN} a${RESET}) normalize ALL rendered/cleaned takes\n"
+  echo
+  local pick=$(ask "Pick (or 'a')")
+  [[ -z "$pick" ]] && return
+
+  echo
+  printf "  ${BOLD}Loudness target${RESET}\n"
+  printf "    ${CYAN}1${RESET})  podcast    ${DIM}-16 LUFS / -1 dBTP   (Apple Podcasts, AES standard)${RESET}\n"
+  printf "    ${CYAN}2${RESET})  streaming  ${DIM}-14 LUFS / -1.5 dBTP (YouTube, Spotify, TikTok)${RESET}\n"
+  printf "    ${CYAN}3${RESET})  broadcast  ${DIM}-23 LUFS / -1 dBTP   (EBU R128 strict)${RESET}\n"
+  printf "    ${CYAN}4${RESET})  loud       ${DIM}-12 LUFS / -1 dBTP   (heavily compressed)${RESET}\n"
+  echo
+  local tp=$(ask "Pick" "1")
+  local target
+  case "$tp" in
+    1|"")  target=podcast ;;
+    2)     target=streaming ;;
+    3)     target=broadcast ;;
+    4)     target=loud ;;
+    *)     target=podcast ;;
+  esac
+
+  echo
+  if [[ "$pick" == "a" ]]; then
+    for f in "${files[@]}"; do
+      [[ "$f" == *cleaned.wav || "$f" == *rendered.wav ]] || continue
+      printf "  ${CYAN}%s${RESET}\n" "$(basename "$f")"
+      voice-normalize "$f" "$target" 2>&1 | sed 's/^/    /'
+      echo
+    done
+  elif [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#files[@]} )); then
+    local f="${files[$((pick-1))]}"
+    voice-normalize "$f" "$target" 2>&1 | sed 's/^/  /'
+  fi
+
+  echo
+  printf "  ${DIM}Normalized files saved alongside originals with .norm.wav suffix.${RESET}\n"
+  echo
+  pause
+}
+
+m_browse() {
+  header
+  printf "  ${BOLD}Saved takes${RESET} ${DIM}— %s${RESET}\n\n" "$OUT_DIR"
+  if [[ -z "$(ls -A "$OUT_DIR" 2>/dev/null)" ]]; then
+    printf "  ${YELLOW}(empty)${RESET}\n"
+  else
+    ls -lh "$OUT_DIR" | sed 's/^/  /'
+  fi
+  echo
+  pause
+}
+
+m_reset() {
+  header
+  printf "  ${BOLD}Reset takes${RESET}\n\n"
+  printf "  This removes all .wav files in ${YELLOW}%s${RESET}\n\n" "$OUT_DIR"
+  if yn "Are you sure?"; then
+    rm -f "$OUT_DIR"/*.wav
+    printf "  ${GREEN}cleaned.${RESET}\n"
+  fi
+  echo
+  pause
+}
+
+# ─── Main loop ───────────────────────────────────────────────────────
+main_menu() {
+  while true; do
+    header
+    cat <<EOF
+  ${BOLD}Menu${RESET}
+
+    ${CYAN}1${RESET})  Quick bench           ${DIM}— current preset, 1 take${RESET}
+    ${CYAN}2${RESET})  Distance bench        ${DIM}— close / mid / far${RESET}
+    ${CYAN}3${RESET})  Full sweep            ${DIM}— all presets at one distance${RESET}
+    ${CYAN}4${RESET})  Compare              ${DIM}— pick 2-4 presets, A/B/C${RESET}
+    ${CYAN}5${RESET})  Render mode           ${DIM}— record ONCE, render ALL offline (fast)${RESET}
+    ${BOLD}${CYAN}6${RESET})  ${BOLD}Normalize${RESET}             ${DIM}— EBU R128 LUFS objective loudness target${RESET}
+    ${CYAN}7${RESET})  Listen               ${DIM}— play saved takes${RESET}
+    ${CYAN}8${RESET})  Switch preset
+    ${CYAN}9${RESET})  Browse saved files
+    ${CYAN}0${RESET})  Reset all takes
+    ${CYAN}q${RESET})  Quit
+
+EOF
+    local pick
+    pick=$(ask "Choose")
+    case "$pick" in
+      1) m_quick ;;
+      2) m_distance ;;
+      3) m_sweep ;;
+      4) m_compare ;;
+      5) m_render ;;
+      6) m_normalize ;;
+      7) m_play ;;
+      8) m_switch ;;
+      9) m_browse ;;
+      0) m_reset ;;
+      q|Q|"") clr; echo "  bye."; exit 0 ;;
+      *) ;;
+    esac
+  done
+}
+
+trap 'echo; echo "  interrupted."; exit 130' INT
+
+main_menu

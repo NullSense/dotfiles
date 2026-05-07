@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# voice-normalize — EBU R128 / LUFS loudness normalization for any WAV.
+#
+# Uses ffmpeg's loudnorm filter (EBU R128 compliant, with 192 kHz upsampling
+# for true-peak detection). Two-pass: measure first, then linear-scale to target.
+#
+# Usage:
+#   voice-normalize <input.wav>                       → -16 LUFS / -1 dBTP / 7 LRA (podcast)
+#   voice-normalize <input.wav> <target>              → preset target
+#   voice-normalize <input.wav> <target> <output.wav> → custom output path
+#
+# Targets (preset shortcuts):
+#   podcast    -16 LUFS / -1 dBTP / 7 LRA   (Apple Podcasts, AES standard)
+#   streaming  -14 LUFS / -1.5 dBTP / 7 LRA  (YouTube, Spotify, TikTok)
+#   broadcast  -23 LUFS / -1 dBTP / 7 LRA   (EBU R128 strict)
+#   loud       -12 LUFS / -1 dBTP / 5 LRA   (very compressed; "loud" calls)
+#
+# Or custom: voice-normalize in.wav -18 / -2 / 6     (LUFS / TP / LRA)
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+  exit 1
+fi
+
+IN="$1"
+TARGET="${2:-podcast}"
+
+# Translate preset names to numeric targets
+case "$TARGET" in
+  podcast)    I=-16; TP=-1.0; LRA=7 ;;
+  streaming)  I=-14; TP=-1.5; LRA=7 ;;
+  broadcast)  I=-23; TP=-1.0; LRA=7 ;;
+  loud)       I=-12; TP=-1.0; LRA=5 ;;
+  *)
+    # Treat as numeric (-XX) — three positional args expected: I TP LRA
+    I="$TARGET"
+    TP="${3:--1}"
+    LRA="${4:-7}"
+    ;;
+esac
+
+# Output file: default = sibling with .norm.wav
+OUT="${3:-}"
+if [[ -z "$OUT" || "$OUT" == "$TP" || "$OUT" == "$LRA" ]]; then
+  OUT="${IN%.*}.norm.wav"
+fi
+
+[[ -f "$IN" ]] || { echo "voice-normalize: no such file: $IN" >&2; exit 1; }
+
+# ─── Pass 1: measure ────────────────────────────────────────────────
+echo "voice-normalize: measuring $IN..."
+measured=$(ffmpeg -hide_banner -loglevel info -i "$IN" \
+  -af "loudnorm=I=$I:TP=$TP:LRA=$LRA:print_format=json" \
+  -f null - 2>&1 | awk '/^\{/,/^\}/' | tr -d '\n')
+
+# Extract values
+M_I=$(echo "$measured" | grep -oE '"input_i" : "[^"]*"' | cut -d'"' -f4)
+M_TP=$(echo "$measured" | grep -oE '"input_tp" : "[^"]*"' | cut -d'"' -f4)
+M_LRA=$(echo "$measured" | grep -oE '"input_lra" : "[^"]*"' | cut -d'"' -f4)
+M_THRESH=$(echo "$measured" | grep -oE '"input_thresh" : "[^"]*"' | cut -d'"' -f4)
+OFFSET=$(echo "$measured" | grep -oE '"target_offset" : "[^"]*"' | cut -d'"' -f4)
+
+if [[ -z "$M_I" ]]; then
+  echo "voice-normalize: pass-1 measurement failed" >&2
+  echo "$measured" >&2
+  exit 1
+fi
+
+printf "  measured:  I=%s LUFS  TP=%s dBTP  LRA=%s LU\n" "$M_I" "$M_TP" "$M_LRA"
+printf "  target:    I=%s LUFS  TP=%s dBTP  LRA=%s LU\n"  "$I"   "$TP"  "$LRA"
+echo
+echo "voice-normalize: applying linear loudnorm → $OUT"
+
+# ─── Pass 2: apply ──────────────────────────────────────────────────
+ffmpeg -hide_banner -loglevel error -y -i "$IN" \
+  -af "loudnorm=I=$I:TP=$TP:LRA=$LRA:measured_I=$M_I:measured_TP=$M_TP:measured_LRA=$M_LRA:measured_thresh=$M_THRESH:offset=$OFFSET:linear=true:print_format=summary" \
+  -ar 48000 -ac 1 -c:a pcm_s16le "$OUT"
+
+echo "voice-normalize: wrote $OUT"

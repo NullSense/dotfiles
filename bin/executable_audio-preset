@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# audio-preset — switch the mic filter chain between named flavors.
+#
+# Usage:
+#   audio-preset                  # show current preset
+#   audio-preset list             # list available presets
+#   audio-preset broadcast        # warm chest + presence + air (NPR voice)
+#   audio-preset warm             # bassy, smooth, podcast host
+#   audio-preset crisp            # bright, intelligible, streaming/Discord
+#   audio-preset minimal          # RNNoise + limiter only, no EQ/comp
+#   audio-preset off              # disable chain entirely (raw Q2U)
+#
+# After a switch, this script restarts pipewire + portals and re-pins the
+# default source to "Voice (Cleaned)" (or Q2U raw, for `off`).
+
+set -euo pipefail
+
+PRESET_DIR="$HOME/.config/audio-presets"
+ACTIVE="$HOME/.config/pipewire/pipewire.conf.d/99-mic-chain.conf"
+RAW_SRC="alsa_input.usb-Samson_Technologies_Samson_Q2U_Microphone-00.analog-stereo"
+
+current_preset() {
+  if [[ -f "$ACTIVE" ]]; then
+    grep -oE 'preset=[a-z]+' "$ACTIVE" | head -1 | cut -d= -f2 || echo "unknown"
+  else
+    echo "off"
+  fi
+}
+
+case "${1:-show}" in
+  show|status|"")
+    cur=$(current_preset)
+    echo "Current preset: $cur"
+    echo "Default source: $(pactl get-default-source)"
+    ;;
+
+  list|ls)
+    echo "Available presets (in $PRESET_DIR):"
+    for f in "$PRESET_DIR"/*.conf; do
+      [[ -f "$f" ]] || continue
+      name=$(basename "$f" .conf)
+      desc=$(sed -n '2p' "$f" | sed 's/^# //')
+      printf "  %-12s %s\n" "$name" "$desc"
+    done
+    echo "  off          disable chain — use raw Q2U"
+    ;;
+
+  off)
+    rm -f "$ACTIVE"
+    systemctl --user restart pipewire pipewire-pulse wireplumber \
+      xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr
+    sleep 1
+    pactl set-default-source "$RAW_SRC"
+    echo "Chain disabled. Default source = Q2U raw."
+    ;;
+
+  *)
+    target="$PRESET_DIR/$1.conf"
+    if [[ ! -f "$target" ]]; then
+      echo "ERR: no preset '$1' at $target" >&2
+      echo "Try: audio-preset list" >&2
+      exit 1
+    fi
+    cp -f "$target" "$ACTIVE"
+    systemctl --user restart pipewire pipewire-pulse wireplumber \
+      xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr
+    # Wait up to 5s for the virtual source to appear
+    for _ in $(seq 1 25); do
+      if pactl list short sources 2>/dev/null | grep -q '^[0-9]*[[:space:]]*voice_cleaned'; then
+        break
+      fi
+      sleep 0.2
+    done
+    if pactl list short sources | grep -q '^[0-9]*[[:space:]]*voice_cleaned'; then
+      pactl set-default-source voice_cleaned
+      echo "Active preset: $1"
+      echo "Default source = Voice (Cleaned)"
+    else
+      echo "WARN: voice_cleaned not visible after 5s; check journalctl --user -u pipewire" >&2
+      exit 1
+    fi
+    ;;
+esac

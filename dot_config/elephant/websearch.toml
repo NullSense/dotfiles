@@ -1,0 +1,78 @@
+# Walker / elephant websearch — Google + Perplexity + a few power-user prefixes.
+#
+# When called via the @ prefix in walker:
+#   - Bare query: shows the default engine (Google) plus any prefix matches.
+#   - "g foo"   → Google
+#   - "p foo"   → Perplexity (AI search)
+#   - "y foo"   → YouTube
+#   - "gh foo"  → GitHub code
+#   - "ar foo"  → Arch Wiki
+#   - "wk foo"  → Wikipedia
+#   - "ai foo"  → ChatGPT
+# Anything matched by a prefix runs that engine; otherwise the default fires.
+#
+# %TERM% is replaced with the URL-encoded query.
+
+always_show_default  = true
+command              = 'xdg-open'
+engines_as_actions   = false
+history              = true
+history_when_empty   = false
+text_prefix          = 'Search: '
+
+[Config]
+hide_from_providerlist = false
+icon                   = 'applications-internet'
+min_score              = 20
+name_pretty            = 'Web Search'
+
+[[entries]]
+default = true
+name    = "Google"
+prefix  = "g "
+url     = "https://www.google.com/search?q=%TERM%"
+
+[[entries]]
+name   = "Perplexity"
+prefix = "p "
+url    = "https://www.perplexity.ai/search/new?q=%TERM%"
+
+[[entries]]
+name   = "ChatGPT"
+prefix = "ai "
+url    = "https://chat.openai.com/?q=%TERM%"
+
+[[entries]]
+name   = "YouTube"
+prefix = "y "
+url    = "https://www.youtube.com/results?search_query=%TERM%"
+
+[[entries]]
+name   = "GitHub"
+prefix = "gh "
+url    = "https://github.com/search?q=%TERM%&type=code"
+
+[[entries]]
+name   = "Arch Wiki"
+prefix = "ar "
+url    = "https://wiki.archlinux.org/index.php?search=%TERM%"
+
+[[entries]]
+name   = "Wikipedia"
+prefix = "wk "
+url    = "https://en.wikipedia.org/w/index.php?search=%TERM%"
+
+[[entries]]
+name   = "DuckDuckGo"
+prefix = "ddg "
+url    = "https://duckduckgo.com/?q=%TERM%"
+
+[[entries]]
+name   = "MDN"
+prefix = "mdn "
+url    = "https://developer.mozilla.org/en-US/search?q=%TERM%"
+
+[[entries]]
+name   = "crates.io"
+prefix = "cr "
+url    = "https://crates.io/search?q=%TERM%"

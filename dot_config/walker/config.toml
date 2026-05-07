@@ -11,8 +11,22 @@ selection_wrap       = true
 theme                = "gruvbox"
 hide_action_hints    = true
 
+# Per-provider placeholders. Walker keys these by provider name. The "default"
+# placeholder is what you see when you first open the launcher — we use it to
+# advertise the prefix legend so you don't have to memorise them.
 [placeholders]
-"default" = { input = " Search…", list = "No results" }
+"default"            = { input = " Search · / providers · = calc · @ web · $ clipboard · . files · : symbols", list = "No results" }
+"providerlist"       = { input = " Pick a provider…",   list = "" }
+"desktopapplications"= { input = " App…",                list = "No matching apps" }
+"runner"             = { input = " Run command…",       list = "Type any shell command" }
+"windows"            = { input = " Switch window…",     list = "No open windows" }
+"calc"               = { input = " Calc — try `1024^2` or `5 * 7 GBP to EUR`", list = "Type an expression" }
+"websearch"          = { input = " Search · g · p (perplexity) · y (yt) · gh · ar · wk · mdn · cr", list = "Type a query" }
+"files"              = { input = " File path…",         list = "Type a path or pattern" }
+"symbols"            = { input = " Emoji / symbol…",   list = "" }
+"clipboard"          = { input = " Clipboard history…", list = "Empty" }
+"bookmarks"          = { input = " Bookmark…",          list = "" }
+"archlinuxpkgs"      = { input = " Arch package…",      list = "" }
 
 [keybinds]
 quick_activate = []

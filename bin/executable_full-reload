@@ -4,11 +4,16 @@
 #   - waybar (systemd unit reload via SIGUSR2 — in-place reload, no restart)
 #   - mako (makoctl reload — re-reads ~/.config/mako/config)
 #   - walker (omarchy-restart-walker if available)
-#   - dropdown terminal (systemd restart — picks up new ghostty config)
 #   - swaybg (kill + respawn against the current background symlink)
 #
 # Bound to SUPER+SHIFT+R in dot_config/hypr/bindings.conf.
 # Notify on completion so you can see it ran.
+#
+# NOT reloaded by default: dropdown-terminal.service. Restarting that unit
+# kills the ghostty inside the special:dropdown workspace and is jarring if
+# the dropdown is currently focused. Pass --with-dropdown to force it, or
+# run `systemctl --user restart dropdown-terminal.service` manually after a
+# ghostty config edit.
 
 set -u
 
@@ -33,8 +38,13 @@ if command -v omarchy-restart-walker >/dev/null 2>&1; then
     omarchy-restart-walker >/dev/null 2>&1
 fi
 
-# Dropdown terminal — restart the systemd unit (picks up ghostty config edits).
-systemctl --user restart dropdown-terminal.service >/dev/null 2>&1
+# Dropdown terminal — opt-in only (restart kills any ghostty inside the
+# dropdown special workspace). Pass --with-dropdown to force.
+case "${1:-}" in
+    --with-dropdown)
+        systemctl --user restart dropdown-terminal.service >/dev/null 2>&1
+        ;;
+esac
 
 # Wallpaper — kill any swaybg and respawn pointing at the current symlink.
 # Belt-and-braces in case the omarchy autostart's swaybg lost its window

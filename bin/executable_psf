@@ -1,61 +1,84 @@
 #!/usr/bin/env bash
-# psf — paru-backed package install/uninstall fuzzy-finder.
+# psf — package install/uninstall fuzzy-finder.
 #
-# Single source: paru is the unified frontend (knows pacman repos AND AUR),
-# so the previous pacman/aur source toggle is gone — paru -Slq lists both,
-# and `paru -S` resolves whichever side a package lives on.
+# Sources:
+#   pacman repos      → `pacman -Slq` (instant, plain text)
+#   AUR               → fetched on demand from aur.archlinux.org/packages.gz
+#                       and cached at ~/.cache/psf/aur-packages.txt
+#                       (paru's own cache at ~/.cache/paru/packages.aur is a
+#                       custom binary format and `paru -Slq --aur` itself
+#                       outputs raw bytes — verified on paru v2.1.0 — so we
+#                       don't touch either, that was the binary-garbage bug.)
 #
-# Glitch fixes from the prior zsh-function version:
-#   * stdin/stdout for paru pinned to /dev/tty so PKGBUILD-review and
-#     dep-confirmation prompts don't fight with the previous fzf alt-screen.
-#   * mapfile (instead of word-splitting `pkgs=($(...))`) preserves package
-#     names that contain weird chars and avoids globbing.
-#   * paru passed `--skipreview --noupgrademenu` for non-interactive sanity
-#     when the caller is the omarchy menu (floating one-shot terminal).
-#     Override with PSF_INTERACTIVE=1 to get full paru prompts.
+# Bindings:
+#   ^Space  install ↔ uninstall toggle
+#   ^A      pacman ↔ AUR source toggle (only meaningful in install mode)
+#   Enter   act on selection
+#
+# Install always goes through `paru -S` so AUR packages resolve. Default
+# flags `--skipreview --noupgrademenu` for non-interactive (omarchy menu
+# launches this in a one-shot floating terminal). Set PSF_INTERACTIVE=1
+# to get full paru prompts.
 
 set -uo pipefail
 
 paru_install_flags=( --skipreview --noupgrademenu )
 [[ ${PSF_INTERACTIVE:-0} == 1 ]] && paru_install_flags=()
 
-build_install_list() {
-    # Combine pacman repos with paru's AUR cache. We deliberately do NOT
-    # call `paru -Slq --aur` — paru's interactive UI / progress chatter
-    # leaks into stdout and shows up as binary garbage in fzf. The cache
-    # file (paru maintains it after any `paru -Sy`) gives us the AUR
-    # names without invoking an interactive paru.
-    pacman -Slq 2>/dev/null
-    local aur_cache="${XDG_CACHE_HOME:-$HOME/.cache}/paru/packages.aur"
-    [[ -r $aur_cache ]] && cat "$aur_cache"
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/psf"
+mkdir -p "$cache_dir"
+aur_cache="$cache_dir/aur-packages.txt"
+aur_max_age_min=720  # refetch after 12h
+
+refresh_aur_cache() {
+    [[ -s $aur_cache ]] && [[ -z $(find "$aur_cache" -mmin +"$aur_max_age_min" 2>/dev/null) ]] && return 0
+
+    printf 'fetching AUR package list…\r' >&2
+    if curl -sf --max-time 15 'https://aur.archlinux.org/packages.gz' \
+        | gunzip 2>/dev/null \
+        | grep -v '^#' > "$aur_cache.tmp" 2>/dev/null && [[ -s $aur_cache.tmp ]]; then
+        mv "$aur_cache.tmp" "$aur_cache"
+        printf '\033[K' >&2  # clear progress line
+        return 0
+    else
+        rm -f "$aur_cache.tmp"
+        printf 'AUR fetch failed; using stale cache or empty\n' >&2
+        [[ -s $aur_cache ]] && return 0 || return 1
+    fi
 }
 
 mode=install
+src=pacman
 while true; do
-    case "$mode" in
-        install)
-            action=( paru -S "${paru_install_flags[@]}" )
-            header="⬇️  Install │ ^Space → uninstall │ Enter installs (repo + AUR)"
-            pkg_list=$(build_install_list | sort -u)
+    case "$mode-$src" in
+        install-pacman)
+            pkg_list=$(pacman -Slq 2>/dev/null)
+            tag='⬇️  Install · 📦 pacman'
             ;;
-        uninstall)
-            action=( paru -Rns )
-            header="🗑️  Remove │ ^Space → install │ Enter removes"
+        install-aur)
+            refresh_aur_cache || { sleep 1; src=pacman; continue; }
+            pkg_list=$(cat "$aur_cache")
+            tag='⬇️  Install · 🌟 AUR'
+            ;;
+        uninstall-*)
             pkg_list=$(pacman -Qq 2>/dev/null)
+            tag='🗑️  Remove'
             ;;
     esac
 
     if [[ -z $pkg_list ]]; then
-        printf 'package list is empty (pacman/paru cache missing?)\n' >&2
+        printf 'package list empty\n' >&2
         read -r -p 'Press Enter to retry, Ctrl-C to exit '
         continue
     fi
 
+    header="$tag │ ^Space toggle install/remove │ ^A toggle pacman/AUR"
+
     result=$(printf '%s\n' "$pkg_list" | fzf \
         --multi \
-        --preview 'paru --color=always -Si {1}' \
+        --preview 'paru --color=always -Si {1} 2>/dev/null || pacman -Si {1}' \
         --preview-window='right:60%:wrap' \
-        --expect=ctrl-space \
+        --expect=ctrl-space,ctrl-a \
         --header="$header" \
         --prompt='🔍 ' \
         --pointer='▶' \
@@ -69,9 +92,16 @@ while true; do
         ctrl-space)
             mode=$([[ $mode == install ]] && echo uninstall || echo install)
             ;;
+        ctrl-a)
+            src=$([[ $src == pacman ]] && echo aur || echo pacman)
+            ;;
         *)
             (( ${#pkgs[@]} == 0 )) && break
-            "${action[@]}" "${pkgs[@]}" </dev/tty >/dev/tty 2>&1 && break
+            if [[ $mode == install ]]; then
+                paru -S "${paru_install_flags[@]}" "${pkgs[@]}" </dev/tty >/dev/tty 2>&1 && break
+            else
+                paru -Rns "${pkgs[@]}" </dev/tty >/dev/tty 2>&1 && break
+            fi
             ;;
     esac
 done

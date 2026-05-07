@@ -4,11 +4,17 @@ PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-# Spawn ghostty with a known class so the windowrule for class=dropdown_term
-# in monitors.conf places it into the special:dropdown workspace. Restart
-# unconditionally — closing the dropdown is supposed to keep the workspace
-# pre-warmed; without this the next $mod+u summon would lag the cold-start.
-ExecStart=/usr/bin/ghostty --class=dropdown_term
+# Spawn ghostty with a valid GTK reverse-DNS app ID — Ghostty silently
+# drops --class values that aren't a valid GTK application ID (see
+# ghostty#4596 / #382 / #3974), which is why the previous
+# `--class=dropdown_term` never set the Wayland app_id and the dropdown
+# ended up in the tiling layer instead of on special:dropdown. Use the
+# `=` form; the space-separated form was flaky for some users. Matching
+# windowrules live in dot_config/hypr/windows.conf.
+#
+# Restart=always keeps the workspace pre-warmed — closing the dropdown
+# respawns within 1s so the next $mod+u summon is instant.
+ExecStart=/usr/bin/ghostty --class=com.mitchellh.ghostty-dropdown
 Restart=always
 RestartSec=1
 # Cap cascading restarts (ghostty crash-loop after a config edit) — fail

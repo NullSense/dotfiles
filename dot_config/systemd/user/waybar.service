@@ -1,0 +1,22 @@
+[Unit]
+Description=Waybar — status bar
+Documentation=https://github.com/Alexays/Waybar/wiki
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+# Pick the right config based on which compositor wrapped graphical-session.
+# Most of the time it's Hyprland; the fallback handles Sway-era sessions.
+ExecStart=/bin/sh -c 'cfg="$HOME/.config/waybar/config-hypr"; [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || [ "$XDG_CURRENT_DESKTOP" = "Hyprland" ] || cfg="$HOME/.config/waybar/config"; exec /usr/bin/waybar -c "$cfg"'
+ExecReload=/usr/bin/kill -SIGUSR2 $MAINPID
+KillMode=mixed
+Restart=on-failure
+RestartSec=2
+# Cap cascading restarts when something keeps killing waybar (e.g. config
+# parse error after an edit) — fail loud after 5 retries in 60s instead of
+# spinning forever and burning CPU.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=graphical-session.target

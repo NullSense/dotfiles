@@ -1,0 +1,24 @@
+#!/bin/sh
+# Toggle DP-1 (AORUS FO32U2 OLED HDR1000) between SDR-with-auto-HDR and
+# always-on HDR. cm_auto_hdr in looknfeel.conf already auto-switches per
+# fullscreen surface, so the "off" state here is the smart default; "on"
+# forces HDR for everything (useful for HDR colorpicker work, mastering,
+# or apps that don't tag their surface as HDR but should be).
+#
+# State file /tmp/hdr-state holds "on" when forced; absent/anything-else
+# means default. Hyprland's `hyprctl keyword` rewrites the live config.
+
+set -eu
+
+MON=DP-1
+STATE=/tmp/hdr-state
+
+if [ "$(cat "$STATE" 2>/dev/null)" = "on" ]; then
+    hyprctl keyword monitor "$MON, 3840x2160@240, 0x0, 2.0, bitdepth, 10" >/dev/null
+    rm -f "$STATE"
+    notify-send -u low "HDR" "Auto (SDR desktop, HDR on fullscreen)"
+else
+    hyprctl keyword monitor "$MON, 3840x2160@240, 0x0, 2.0, bitdepth, 10, cm, hdredid" >/dev/null
+    echo on >"$STATE"
+    notify-send -u low "HDR" "Forced on (whole desktop)"
+fi

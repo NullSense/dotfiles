@@ -19,23 +19,34 @@ set -uo pipefail
 paru_install_flags=( --skipreview --noupgrademenu )
 [[ ${PSF_INTERACTIVE:-0} == 1 ]] && paru_install_flags=()
 
+build_install_list() {
+    # Combine pacman repos with paru's AUR cache. We deliberately do NOT
+    # call `paru -Slq --aur` — paru's interactive UI / progress chatter
+    # leaks into stdout and shows up as binary garbage in fzf. The cache
+    # file (paru maintains it after any `paru -Sy`) gives us the AUR
+    # names without invoking an interactive paru.
+    pacman -Slq 2>/dev/null
+    local aur_cache="${XDG_CACHE_HOME:-$HOME/.cache}/paru/packages.aur"
+    [[ -r $aur_cache ]] && cat "$aur_cache"
+}
+
 mode=install
 while true; do
     case "$mode" in
         install)
-            list_cmd=( paru -Slq )
             action=( paru -S "${paru_install_flags[@]}" )
-            header="⬇️  Install │ ^Space → uninstall │ Enter installs"
+            header="⬇️  Install │ ^Space → uninstall │ Enter installs (repo + AUR)"
+            pkg_list=$(build_install_list | sort -u)
             ;;
         uninstall)
-            list_cmd=( paru -Qq )
             action=( paru -Rns )
             header="🗑️  Remove │ ^Space → install │ Enter removes"
+            pkg_list=$(pacman -Qq 2>/dev/null)
             ;;
     esac
 
-    if ! pkg_list=$("${list_cmd[@]}" 2>&1); then
-        printf 'paru list failed:\n%s\n' "$pkg_list" >&2
+    if [[ -z $pkg_list ]]; then
+        printf 'package list is empty (pacman/paru cache missing?)\n' >&2
         read -r -p 'Press Enter to retry, Ctrl-C to exit '
         continue
     fi

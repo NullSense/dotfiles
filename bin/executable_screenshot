@@ -44,9 +44,20 @@ JQ_MONITOR_GEO='
 '
 
 get_rectangles() {
-    local ws=$(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | .activeWorkspace.id')
-    hyprctl monitors -j | jq -r --arg ws "$ws" "${JQ_MONITOR_GEO} .[] | select(.activeWorkspace.id == (\$ws | tonumber)) | format_geo"
-    hyprctl clients -j | jq -r --arg ws "$ws" '.[] | select(.workspace.id == ($ws | tonumber)) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"'
+    # Active workspace + any special workspace overlaid on the focused
+    # monitor (dropdown, spotify, etc. — special IDs are negative). Without
+    # the special id, smart-snap can't pick up the dropdown terminal even
+    # though it's visibly on top of the desktop.
+    local mon_json
+    mon_json=$(hyprctl monitors -j)
+    local ws=$(jq -r '.[] | select(.focused == true) | .activeWorkspace.id' <<<"$mon_json")
+    local sws=$(jq -r '.[] | select(.focused == true) | .specialWorkspace.id // empty' <<<"$mon_json")
+
+    jq -r --arg ws "$ws" "${JQ_MONITOR_GEO} .[] | select(.activeWorkspace.id == (\$ws | tonumber)) | format_geo" <<<"$mon_json"
+    hyprctl clients -j | jq -r --arg ws "$ws" --arg sws "${sws:-0}" '
+        .[] | select(.workspace.id == ($ws | tonumber) or
+                     (($sws | tonumber) != 0 and .workspace.id == ($sws | tonumber)))
+            | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"'
 }
 
 # Freeze the screen during selection (otherwise live updates leak in)

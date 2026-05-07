@@ -17,12 +17,16 @@
     ],
     "modules-right": [
         "custom/aiquota",
+        "custom/hyprwhspr",
         "group/system",
         "group/storage",
         "group/audio",
         "battery#mouse",
         "idle_inhibitor",
         "tray"
+    ],
+    "include": [
+        "/home/nullsense/.config/waybar/hyprwhspr-module.jsonc"
     ],
     "group/system": {
         "orientation": "horizontal",

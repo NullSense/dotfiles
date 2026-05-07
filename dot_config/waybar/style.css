@@ -1,3 +1,4 @@
+@import "/usr/lib/hyprwhspr/config/waybar/hyprwhspr-style.css";
 /*
  * Waybar — Gruvbox Dark Hard, Omarchy-inspired refresh.
  *
@@ -93,8 +94,15 @@ window#waybar.hidden { opacity: 0.0; }
     padding: 0 4px;
     margin-right: 6px;
 }
+/* NB: do NOT use `all: initial;` here — GTK CSS resets the GtkButton's
+ * default geometry (min-width/min-height/padding), so the workspace buttons
+ * exist in the tree but render with zero size and disappear from the bar.
+ * Use explicit transparent-background overrides instead. */
 #workspaces button {
-    all: initial;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    text-shadow: none;
     color: @fg3;
     font-family: "Hack Nerd Font Mono";
     font-size: 12px;

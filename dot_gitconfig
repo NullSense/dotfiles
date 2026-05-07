@@ -94,7 +94,5 @@
 	format = ssh
 [gpg "ssh"]
 	allowedSignersFile = /home/nullsense/.config/git/allowed_signers
-[http]
-	proxySSLCAInfo = /home/nullsense/.agent-vault/ca-bundle.pem
 [url "git@github.com:"]
 	insteadOf = https://github.com/

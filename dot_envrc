@@ -1,52 +1,18 @@
-# ~/.envrc — direnv root for $HOME. Loads agent-vault session env when an
-# active vault session exists; otherwise no-op. Per Agent Vault docs
-# (arch-install/AGENT-VAULT.md §"Working .envrc"). After editing run:
-#   direnv allow ~
+# Intentionally empty.
 #
-# This is the CANONICAL setup — env vars only ever live inside shells that
-# cd'd under ~. They MUST NOT bleed into the systemd user manager
-# (otherwise every user service starts trusting the MITM CA, which breaks
-# system HTTPS for browsers, pacman, etc).
-
-__AV_TOKEN="$(agent-vault vault token --vault default 2>/dev/null)"
-if [[ -n "$__AV_TOKEN" ]]; then
-    export AGENT_VAULT_SESSION_TOKEN="$__AV_TOKEN"
-    export AGENT_VAULT_ADDR=http://127.0.0.1:14321
-    export AGENT_VAULT_VAULT=default
-
-    # Proxy is HTTPS (the proxy itself uses TLS), not HTTP.
-    export HTTPS_PROXY="https://${__AV_TOKEN}:default@127.0.0.1:14322"
-    export HTTP_PROXY="https://${__AV_TOKEN}:default@127.0.0.1:14322"
-    export NO_PROXY=localhost,127.0.0.1,aur.archlinux.org
-
-    # MITM CA — different env vars cover different libraries:
-    #   SSL_CERT_FILE         OpenSSL (covers most C-linked HTTPS clients)
-    #   REQUESTS_CA_BUNDLE    Python requests (also urllib3 in some versions)
-    #   CURL_CA_BUNDLE        curl (ignores SSL_CERT_FILE)
-    #   NODE_EXTRA_CA_CERTS   Node — ADDS to system CAs (additive, doesn't replace)
-    #   DENO_CERT             Deno
-    #   GIT_SSL_CAINFO        git
-    #
-    # We point most replace-style env vars at a COMBINED bundle (system CAs
-    # + MITM CA) so AUR/GitHub/non-MITM'd HTTPS still verifies. The credential
-    # injection still happens at the proxy layer (HTTPS_PROXY) — adding
-    # system CAs to the trust store doesn't compromise agent-vault, it only
-    # restores trust for domains the proxy doesn't intercept.
-    __AV_BUNDLE="$HOME/.agent-vault/ca-bundle.pem"
-    __AV_MITM="$HOME/.agent-vault/mitm-ca.pem"
-    __AV_SYS="/etc/ssl/certs/ca-certificates.crt"
-    if [[ ! -f "$__AV_BUNDLE" || "$__AV_MITM" -nt "$__AV_BUNDLE" || "$__AV_SYS" -nt "$__AV_BUNDLE" ]]; then
-        cat "$__AV_SYS" "$__AV_MITM" > "$__AV_BUNDLE" 2>/dev/null && chmod 600 "$__AV_BUNDLE"
-    fi
-    export SSL_CERT_FILE="$__AV_BUNDLE"
-    export REQUESTS_CA_BUNDLE="$__AV_BUNDLE"
-    export CURL_CA_BUNDLE="$__AV_BUNDLE"
-    export NODE_EXTRA_CA_CERTS="$__AV_MITM"   # additive, MITM only
-    export DENO_CERT="$__AV_BUNDLE"
-    export GIT_SSL_CAINFO="$__AV_BUNDLE"
-    unset __AV_BUNDLE __AV_MITM __AV_SYS
-
-    # Node 24+ requires this to honor HTTPS_PROXY.
-    export NODE_USE_ENV_PROXY=1
-fi
-unset __AV_TOKEN
+# Agent Vault is invoked per-process via `agent-vault vault run -- <cmd>`
+# (see ~/bin/zshaliases for the claude/codex wrappers). The CLI sets up
+# HTTPS_PROXY + CA env scoped to that one child process tree, which is the
+# project's recommended pattern.
+#
+# We deliberately do NOT export HTTPS_PROXY / SSL_CERT_FILE / CURL_CA_BUNDLE
+# / etc globally from this file. Doing so was the source of recurring cert
+# errors:
+#   - tools that don't honor those env vars (libalpm, Go-based binaries
+#     using only system roots) were forced through the MITM proxy and
+#     failed TLS verification on passthrough hosts (AUR, GitHub, lmstudio.ai)
+#   - shells started before any cert-bundle change kept stale env forever
+#   - the workaround was a custom "system-CAs + MITM-CA" merged bundle, but
+#     the agent-vault proxy itself terminates client TLS with leaves minted
+#     by the MITM CA and re-establishes upstream TLS using its own internal
+#     trust store, so the merged bundle was solving a self-inflicted problem

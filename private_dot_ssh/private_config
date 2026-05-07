@@ -1,40 +1,40 @@
-# SSH Client Configuration
-# Security hardening for all hosts
+# SSH Client Configuration — security hardening for all hosts.
+# Identity is presented by Bitwarden's SSH agent (~/.bitwarden-ssh-agent.sock).
+# Never reference IdentityFile pointing to plaintext private keys on disk.
+
 Host *
-    HashKnownHosts yes
-    IdentitiesOnly yes
-    ServerAliveInterval 60
-    ServerAliveCountMax 3
-    Compression yes
-    ForwardAgent no
-    ForwardX11 no
+    # Identity & agent
+    AddKeysToAgent          no                    # agent is Bitwarden, not local cache
+    # IdentitiesOnly intentionally NOT set globally — with only the Bitwarden
+    # agent and no on-disk IdentityFile, IdentitiesOnly=yes leaves ssh with
+    # nothing to offer and produces "Permission denied (publickey)". The
+    # agent only holds keys we explicitly added, so "try all agent keys" is
+    # safe. Re-enable per-host if you ever load multiple keys you want to
+    # scope (e.g. work-only key for a work host).
+    PreferredAuthentications publickey
+    PubkeyAcceptedAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512,rsa-sha2-256
 
-    # Prefer modern key algorithms
-    HostKeyAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
-    KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
-    Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
-    MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
+    # Privacy
+    HashKnownHosts          yes                   # don't leak host inventory if the file is read
+    StrictHostKeyChecking   accept-new            # auto-add unknown hosts; reject changed
+    VisualHostKey           yes                   # ASCII-art fingerprint on first connect (MITM hint)
 
-# Project hosts
-Host core
-    HostName 116.203.176.179
-    Port 2222
+    # Connection hygiene
+    ServerAliveInterval     60
+    ServerAliveCountMax     3
+    Compression             yes
+    ForwardAgent            no                    # never bounce the Bitwarden socket forward
+    ForwardX11              no
 
-Host purgatory
-    HostName 116.203.176.179
-    Port 8529
+    # Modern crypto only — ed25519 keys, post-quantum hybrid KEX, AEAD ciphers,
+    # ETM MACs. Order matters: client offers in this order, server picks first match.
+    HostKeyAlgorithms       ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512,rsa-sha2-256
+    KexAlgorithms           sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
+    Ciphers                 chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+    MACs                    hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
 
-Host toodoo
-    HostName 159.69.195.170
-    Port 2237
-
-Host seedhost
-    HostName spot.seedhost.eu
-    Port 22
-
-# GitHub
+# GitHub — uses Bitwarden agent, no on-disk IdentityFile.
 Host github.com
     HostName github.com
     User git
-    IdentityFile ~/.ssh/id_rsa
-    PreferredAuthentications publickey
+    # IdentityFile intentionally omitted — agent presents the key.

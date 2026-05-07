@@ -6,11 +6,19 @@
 # Triggered by content-hash change: re-runs whenever this script's bytes
 # change. Idempotent — safe to re-fire.
 #
-# digest-source: {{ output "echo" "v1" }}
+# digest-source: {{ output "echo" "v2" }}
 
 set -eu
 
 mkdir -p "$HOME/.config/omarchy/current" "$HOME/.config/omarchy/themed"
+
+# waybar-off toggle — tells omarchy's hyprland autostart to skip its bare
+# `exec-once = uwsm-app -- waybar` line, because our systemd waybar.service
+# owns waybar lifecycle. Without this we get two waybar processes racing
+# the same output. The toggle is just a flag file omarchy probes via
+# `omarchy-toggle-enabled waybar-off`.
+mkdir -p "$HOME/.local/state/omarchy/toggles"
+touch "$HOME/.local/state/omarchy/toggles/waybar-off"
 
 # Wallpaper symlink — omarchy's autostart fires `swaybg -i ~/.config/
 # omarchy/current/background -m fill` early in the session. Without this

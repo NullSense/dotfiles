@@ -1,0 +1,18 @@
+# uwsm — environment variables exported into every process the user's
+# graphical session spawns (waybar, hyprlock, exec-once apps, walker,
+# etc.). Sourced shell-style at session start. Format: `export KEY=VAL`.
+#
+# Why this file exists:
+#   The bare systemd-user PATH is tiny (/usr/local/sbin:/usr/local/bin:/usr
+#   /bin:...). Interactive shells fatten it via zshrc/zinit/mise, but
+#   non-interactive children (uwsm `exec-once`, systemd user units like
+#   waybar.service) inherit only the slim systemd PATH. Without these lines
+#   helium / wl-gammarelay-rs / omarchy-hyprland-monitor-watch fail to
+#   resolve at boot with "Command not found", even though the binaries
+#   exist on disk.
+#
+# Putting PATH here (not in environment.d) keeps the slimmer Wayland-related
+# overrides separate from the heavier shell PATH, and confines the addition
+# to the graphical session only — Xorg/login sessions are unaffected.
+
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/omarchy/bin:$HOME/bin:$HOME/.bun/bin:$HOME/.local/share/pnpm:$PATH"

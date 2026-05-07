@@ -5,9 +5,8 @@ PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-# Pick the right config based on which compositor wrapped graphical-session.
-# Most of the time it's Hyprland; the fallback handles Sway-era sessions.
-ExecStart=/bin/sh -c 'cfg="$HOME/.config/waybar/config-hypr"; [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || [ "$XDG_CURRENT_DESKTOP" = "Hyprland" ] || cfg="$HOME/.config/waybar/config"; exec /usr/bin/waybar -c "$cfg"'
+# Canonical: waybar auto-discovers ~/.config/waybar/config.jsonc.
+ExecStart=/usr/bin/waybar
 ExecReload=/usr/bin/kill -SIGUSR2 $MAINPID
 KillMode=mixed
 Restart=on-failure

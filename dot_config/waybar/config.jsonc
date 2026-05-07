@@ -1,0 +1,307 @@
+// Waybar — canonical fat config (status-first ordering).
+//
+// Single config file (not config-hypr or any split) — this matches omarchy's
+// expected layout. Modules are inlined here, not include'd from sidecar files,
+// so config diffs/upstream merges have one place to land.
+{
+    "layer": "top",
+    "position": "top",
+    "height": 30,
+    "spacing": 0,
+    "margin-top": 0,
+    "margin-bottom": 0,
+    "margin-left": 0,
+    "margin-right": 0,
+
+    "modules-left": [
+        "hyprland/workspaces",
+        "hyprland/window",
+        "custom/media",
+        "hyprland/submap"
+    ],
+    "modules-center": [
+        "clock"
+    ],
+    "modules-right": [
+        "custom/aiquota",
+        "custom/hyprwhspr",
+        "custom/xt3-status",
+        "idle_inhibitor",
+        "group/display",
+        "group/system",
+        "pulseaudio",
+        "battery#mouse",
+        "tray"
+    ],
+
+    // ── Groups (drawer-style hover-expand) ────────────────────────────────────
+    "group/display": {
+        "orientation": "horizontal",
+        "drawer": {
+            "transition-duration": 300,
+            "children-class": "disp-child",
+            "transition-left-to-right": false
+        },
+        "modules": [
+            "custom/brightness",
+            "custom/colortemp"
+        ]
+    },
+    "group/system": {
+        "orientation": "horizontal",
+        "drawer": {
+            "transition-duration": 300,
+            "children-class": "sys-child",
+            "transition-left-to-right": false
+        },
+        "modules": [
+            "cpu",
+            "memory",
+            "temperature",
+            "disk#home",
+            "disk#root"
+        ]
+    },
+
+    // ── Hyprland modules ──────────────────────────────────────────────────────
+    "hyprland/workspaces": {
+        "disable-scroll": false,
+        "all-outputs": false,
+        "on-click": "activate",
+        "format": "{icon}",
+        "format-icons": {
+            "default": "",
+            "1": "1",
+            "2": "2",
+            "3": "3",
+            "4": "4",
+            "5": "5",
+            "6": "6",
+            "7": "7",
+            "8": "8",
+            "9": "9",
+            "10": "0",
+            "active": "󱓻"
+        },
+        "persistent-workspaces": {
+            "DP-1": [1, 2, 4, 5, 6],
+            "DP-2": [3]
+        }
+    },
+    "hyprland/window": {
+        "format": "{title}",
+        "max-length": 80,
+        "separate-outputs": true,
+        "rewrite": {
+            "(.*) — Mozilla Firefox": "🦊  $1",
+            "(.*) - Visual Studio Code": "  $1",
+            "(.*) - Ghostty": "  $1",
+            "(.*) - Foot": "  $1"
+        }
+    },
+    "hyprland/submap": {
+        "format": "   {}",
+        "tooltip": false
+    },
+
+    "clock": {
+        "format": "{:%a  %H:%M}",
+        "format-alt": "{:%a %d %b · W%V %Y}",
+        "tooltip-format": "<big>{:%A, %d %B %Y\n%H:%M:%S}</big>\n<tt><small>{calendar}</small></tt>",
+        "calendar": {
+            "mode": "month",
+            "mode-mon-col": 3,
+            "weeks-pos": "right",
+            "on-scroll": 1,
+            "format": {
+                "months":   "<span color='#fabd2f'><b>{}</b></span>",
+                "days":     "<span color='#ebdbb2'>{}</span>",
+                "weeks":    "<span color='#8ec07c'><b>W{}</b></span>",
+                "weekdays": "<span color='#83a598'><b>{}</b></span>",
+                "today":    "<span color='#fb4934'><b><u>{}</u></b></span>"
+            }
+        },
+        "actions": {
+            "on-click-right": "mode",
+            "on-scroll-up": "shift_up",
+            "on-scroll-down": "shift_down"
+        }
+    },
+
+    // ── Custom: aiquota (Claude/Codex token tracker) ─────────────────────────
+    // Wrapper script supplies agent-vault env (HTTPS_PROXY + SSL_CERT_FILE).
+    // systemd-spawned waybar doesn't inherit interactive-shell env; the wrapper
+    // is the canonical fix for "binary needs HTTPS proxy outside an interactive
+    // shell" — symmetric to mediaplayer-wrap.sh.
+    "custom/aiquota": {
+        "exec": "$HOME/.config/waybar/aiquota-wrap.sh",
+        "return-type": "json",
+        "interval": 30,
+        "tooltip": true,
+        "on-click": "ghostty -e $HOME/code/aiquota/target/release/aiquota tui"
+    },
+
+    // ── Custom: hyprwhspr (speech-to-text status) ────────────────────────────
+    "custom/hyprwhspr": {
+        "format": "{}",
+        "exec": "/usr/lib/hyprwhspr/config/hyprland/hyprwhspr-tray.sh status",
+        "interval": 1,
+        "return-type": "json",
+        "exec-on-event": true,
+        "on-click":       "/usr/lib/hyprwhspr/config/hyprland/hyprwhspr-tray.sh record",
+        "on-click-right": "/usr/lib/hyprwhspr/config/hyprland/hyprwhspr-tray.sh restart",
+        "tooltip": true
+    },
+
+    // ── Custom: X-T3 webcam + privacy indicator ──────────────────────────────
+    "custom/xt3-status": {
+        "exec": "$HOME/.config/waybar/xt3-status.sh",
+        "return-type": "json",
+        "interval": 2,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click":       "systemctl --user restart xt3-webcam.service",
+        "on-click-right": "systemctl --user stop xt3-webcam.service"
+    },
+
+    "idle_inhibitor": {
+        "format": "{icon}",
+        "format-icons": {
+            "activated":   "",
+            "deactivated": ""
+        },
+        "tooltip-format-activated":   "Idle inhibitor: ON",
+        "tooltip-format-deactivated": "Idle inhibitor: off"
+    },
+
+    // ── group/display children ───────────────────────────────────────────────
+    "custom/brightness": {
+        "format": "󰃠  {}%",
+        "exec": "$HOME/bin/brightness-ctl get",
+        "tooltip-format": "Display brightness (real backlight via DDC/CI — saves wattage)\n   scroll       ±5%   (clamped 0–100%)\n   left-click   100%\n   middle-click 30%   (low / night-friendly)\nNote: scroll updates the actual backlight, not just gamma.",
+        "on-scroll-up":     "$HOME/bin/brightness-ctl +5",
+        "on-scroll-down":   "$HOME/bin/brightness-ctl -5",
+        "on-click":         "$HOME/bin/brightness-ctl 100",
+        "on-click-middle":  "$HOME/bin/brightness-ctl 30",
+        "interval": 5,
+        "signal": 8
+    },
+    "custom/colortemp": {
+        "format": "  {}",
+        "exec":   "wl-gammarelay-rs watch {t}K",
+        "tooltip-format": "Color temperature  (synced across all monitors)\n   scroll      ±100K\n   left-click   6500K  day\n   right-click  4000K  warm\n   middle-click 6500K  +  reset brightness/gamma  (true-color / editing)",
+        "on-scroll-up":    "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n +100",
+        "on-scroll-down":  "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n -100",
+        "on-click":        "busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 6500",
+        "on-click-right":  "busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 4000",
+        "on-click-middle": "$HOME/bin/color-neutral"
+    },
+
+    // ── group/system children ────────────────────────────────────────────────
+    "cpu": {
+        "interval": 5,
+        "format": "   {usage}%",
+        "tooltip-format": "CPU  {usage}%   load {load}\n  L-click  btop\n  R-click  htop",
+        "on-click":       "foot --app-id=floating-monitor btop",
+        "on-click-right": "foot --app-id=floating-monitor htop"
+    },
+    "memory": {
+        "interval": 10,
+        "format": "   {used:0.1f}G",
+        "tooltip-format": "RAM  {used:0.1f}G / {total:0.1f}G  ({percentage}%)\nswap {swapUsed:0.1f}G / {swapTotal:0.1f}G  ({swapPercentage}%)\n  L-click  btop\n  R-click  free -h",
+        "on-click":       "foot --app-id=floating-monitor btop",
+        "on-click-right": "foot --app-id=floating-monitor sh -c 'free -h; echo; read -r _'"
+    },
+    "temperature": {
+        "critical-threshold": 85,
+        "format": "   {temperatureC}°",
+        "format-critical": "   {temperatureC}°",
+        "tooltip-format": "Temp  {temperatureC}°C  ({temperatureF}°F)\n  L-click  btop (sensors)",
+        "on-click": "foot --app-id=floating-monitor btop"
+    },
+    "disk#home": {
+        "interval": 30,
+        "format": "   {percentage_used}%",
+        "tooltip-format": "~  used {used} of {total}  ({percentage_used}%)\n  L-click  thunar ~\n  R-click  btop (disk view)",
+        "path": "/home/",
+        "on-click":       "thunar $HOME",
+        "on-click-right": "foot --app-id=floating-monitor btop"
+    },
+    "disk#root": {
+        "interval": 30,
+        "format": "   {percentage_used}%",
+        "tooltip-format": "/  used {used} of {total}  ({percentage_used}%)\n  L-click  thunar /\n  R-click  df -h",
+        "path": "/",
+        "on-click":       "thunar /",
+        "on-click-right": "foot --app-id=floating-monitor sh -c 'df -hT -x tmpfs -x devtmpfs -x squashfs; echo; read -r _'"
+    },
+
+    "pulseaudio": {
+        "format": "{icon}  {volume}%",
+        "format-bluetooth":       "   {volume}%",
+        "format-bluetooth-muted": "   muted",
+        "format-muted":           "   muted",
+        "format-source":          "   {volume}%",
+        "format-source-muted":    "  ",
+        "format-icons": {
+            "headphones": "  ",
+            "handsfree":  "  ",
+            "headset":    "  ",
+            "phone":      "  ",
+            "portable":   "  ",
+            "car":        "  ",
+            "default":    ["  ", "  ", "  "]
+        },
+        "scroll-step": 2,
+        "on-click":        "pavucontrol",
+        "on-click-middle": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+        "on-click-right":  "$HOME/bin/audio-cycle-sink",
+        "tooltip-format":  "Sink: {desc}\n  L-click  pavucontrol\n  R-click  cycle (headphones ↔ Aorus)\n  M-click  mute\n  scroll   ±2%"
+    },
+
+    "battery#mouse": {
+        "bat": "hidpp_battery_0",
+        "interval": 15,
+        "format":            "   {capacity}%",
+        "format-charging":    "   {capacity}%",
+        "format-discharging": "   {capacity}%",
+        "format-plugged":     "   {capacity}%",
+        "format-full":        "   full",
+        "format-not-charging": "   {capacity}%",
+        "tooltip-format":              "Logitech PRO X — {capacity}%  {time}\n  L-click  bluetoothctl info",
+        "tooltip-format-charging":     "Logitech PRO X — {capacity}% (charging )",
+        "tooltip-format-full":         "Logitech PRO X — fully charged",
+        "tooltip-format-not-charging": "Logitech PRO X — {capacity}% (idle)",
+        "states": {
+            "warning":  25,
+            "critical": 10
+        },
+        "on-click": "foot --app-id=floating-monitor sh -c 'upower -i $(upower -e | grep hidpp); echo; read -r _'"
+    },
+
+    "tray": {
+        "spacing": 12,
+        "icon-size": 16
+    },
+
+    "custom/media": {
+        "format": "{icon} {text}",
+        "return-type": "json",
+        "max-length": 55,
+        "format-icons": {
+            "spotify": "  ",
+            "default": "  "
+        },
+        "escape": true,
+        "exec":            "$HOME/.config/waybar/mediaplayer-wrap.sh 2> /dev/null",
+        "on-click":        "playerctl play-pause",
+        "on-click-right":  "playerctl next",
+        "on-click-middle": "playerctl previous",
+        "on-scroll-up":    "playerctl next",
+        "on-scroll-down":  "playerctl previous",
+        "tooltip": true,
+        "tooltip-format": "{}\n  L-click   play / pause\n  R-click   next\n  M-click   previous\n  scroll    skip ±1"
+    }
+}

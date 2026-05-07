@@ -10,10 +10,13 @@ force_keyboard_focus       = true
 selection_wrap             = true
 hide_action_hints          = true
 
-# Use omarchy's layout/CSS theme; it imports
-# ~/.config/omarchy/current/theme/walker.css so colors flip with omarchy-theme-set.
-# additional_theme_location points walker at the in-tree omarchy theme dir.
-theme                      = "nullsense"
+# Walker GTK theme. Active is omarchy-default (canonical, supported, no
+# transparency/layering bugs). The nullsense theme files remain available
+# under ~/.config/walker/themes/nullsense — change this line to "nullsense"
+# and restart walker (`pkill walker; walker --gapplication-service &`) to
+# preview. Both themes import ~/.config/omarchy/current/theme/walker.css so
+# the palette flips with `omarchy-theme-set`.
+theme                      = "omarchy-default"
 additional_theme_location  = "~/.local/share/omarchy/default/walker/themes/"
 
 # Per-provider placeholders. The "default" placeholder is now compact —

@@ -335,7 +335,7 @@
         "systemctl enable systemd-oomd.service",
         "systemctl enable firewalld.service",
         "systemctl enable tailscaled.service",
-        "echo i2c-dev > /etc/modules-load.d/i2c-dev.conf",
+        "printf 'i2c-dev\\nfuse\\n' > /etc/modules-load.d/local.conf",
         "groupadd -f i2c",
         "printf 'KERNEL==\"i2c-[0-9]*\", GROUP=\"i2c\", MODE=\"0660\"\\n' > /etc/udev/rules.d/45-ddcutil-i2c.rules",
         "systemctl enable fstrim.timer",

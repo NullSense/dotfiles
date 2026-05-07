@@ -13,16 +13,24 @@ REPO="imputnet/helium-linux"
 ARCH="x86_64"
 APPIMAGE_DIR="${HOME}/.local/bin"
 APPIMAGE_PATH="${APPIMAGE_DIR}/helium.AppImage"
+COMMAND_PATH="${APPIMAGE_DIR}/helium"
 DESKTOP_DIR="${HOME}/.local/share/applications"
 ICON_DIR="${HOME}/.local/share/icons/hicolor/512x512/apps"
 VERSION_FILE="${APPIMAGE_DIR}/.helium.version"
 
 mkdir -p "$APPIMAGE_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 
-# Latest release tag from GitHub API
-LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep -m1 '"tag_name":' | cut -d'"' -f4)
-[[ -n "$LATEST" ]] || { echo "helium-update: failed to query GitHub API" >&2; exit 1; }
+command -v jq >/dev/null || { echo "helium-update: jq is required" >&2; exit 1; }
+
+RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
+LATEST=$(jq -r '.tag_name // empty' <<<"$RELEASE_JSON")
+URL=$(jq -r --arg arch "$ARCH" '
+  .assets[]
+  | select(.name | test("^helium-.*-" + $arch + "\\.AppImage$"))
+  | .browser_download_url
+' <<<"$RELEASE_JSON" | head -1)
+[[ -n "$LATEST" ]] || { echo "helium-update: failed to find latest release tag" >&2; exit 1; }
+[[ -n "$URL" ]] || { echo "helium-update: failed to find ${ARCH} AppImage asset for ${LATEST}" >&2; exit 1; }
 
 CURRENT=""
 [[ -f "$VERSION_FILE" ]] && CURRENT=$(cat "$VERSION_FILE")
@@ -34,7 +42,6 @@ fi
 
 echo "helium-update: ${CURRENT:-<none>} -> $LATEST"
 
-URL="https://github.com/${REPO}/releases/download/${LATEST}/helium-${LATEST}-${ARCH}.AppImage"
 TMP=$(mktemp --suffix=.AppImage)
 trap 'rm -f "$TMP"' EXIT
 
@@ -60,6 +67,7 @@ if [[ ! -f "${DESKTOP_DIR}/helium.desktop" ]] || [[ "$CURRENT" != "$LATEST" ]]; 
 fi
 
 mv -f "$TMP" "$APPIMAGE_PATH"
+ln -sfn "$APPIMAGE_PATH" "$COMMAND_PATH"
 echo "$LATEST" > "$VERSION_FILE"
 
 # Refresh desktop database + icon cache (silent if missing)

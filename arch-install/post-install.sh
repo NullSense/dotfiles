@@ -120,19 +120,6 @@ paru -S --noconfirm --needed \
   infisical-bin \
   xpadneo-dkms-git
 
-echo "=== [7b/11] Helium browser (Chromium-based, AppImage with weekly auto-update) ==="
-# Helium has no built-in updater (privacy stance, no telemetry). The
-# helium-update script (deployed by chezmoi to ~/bin/) queries GitHub releases
-# API and atomically replaces the AppImage when a new tag appears.
-# helium-update.timer runs it 10min after boot and weekly thereafter.
-if command -v helium-update >/dev/null 2>&1; then
-  helium-update
-  systemctl --user daemon-reload
-  systemctl --user enable --now helium-update.timer
-else
-  echo "  helium-update not in PATH — run 'chezmoi apply' first, then re-run this phase"
-fi
-
 echo "=== [7c/11] Boot-order self-heal (resists Windows update boot hijacks) ==="
 # Windows feature/security updates often re-prioritize 'Windows Boot Manager'
 # at position 0 in UEFI BootOrder. Without intervention you'd press F8 at
@@ -198,6 +185,17 @@ fi
 echo "=== [10/11] chezmoi pull dotfiles ==="
 if ! command -v chezmoi &>/dev/null; then sudo pacman -S --noconfirm chezmoi; fi
 chezmoi init --apply https://github.com/NullSense/dotfiles.git
+
+echo "=== [10.1/11] Helium browser (Chromium-based, AppImage with weekly auto-update) ==="
+# Helium has no built-in updater. The helium-update script deployed by chezmoi
+# queries GitHub releases and atomically replaces the AppImage when a new tag appears.
+if [[ -x "$HOME/bin/helium-update" ]]; then
+  "$HOME/bin/helium-update"
+  systemctl --user daemon-reload || true
+  systemctl --user enable --now helium-update.timer || true
+else
+  echo "  helium-update missing after chezmoi apply; skipping Helium install"
+fi
 
 echo "=== [10.5/11] global git commit-msg hook to strip ALL AI attribution ==="
 # Belt-and-suspenders: even if Claude/Codex/OpenCode misbehave and add

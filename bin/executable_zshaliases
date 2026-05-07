@@ -54,6 +54,11 @@ alias mv='mv -i'
 alias wayrestart="killall -SIGUSR2 waybar"
 alias wayreload="swaymsg reload"
 
+# Audio — restart pipewire stack AND xdg portals together so browser/Discord
+# regain mic access after chain edits. Edit ~/.config/pipewire/pipewire.conf.d/
+# then run `audio-restart`.
+alias audio-restart="systemctl --user restart pipewire pipewire-pulse wireplumber xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr"
+
 # Git shortcuts (additional to git aliases in gitconfig)
 alias gd='git diff'
 alias ga='git add'
@@ -64,3 +69,12 @@ alias gpl='git pull'
 # System info
 alias cleanup='sudo pacman -Sc && paru -Sc'
 alias orphans='sudo pacman -Qtdq | sudo pacman -Rns -'
+
+# Agent Vault — wrap AI agents so HTTPS calls route through the broker
+# and real API keys never enter the agent's process. The wrapper sets
+# proxy/CA env vars on the wrapped process ONLY — your normal shell stays
+# clean (no broken paru, no broken git, no broken curl). See:
+# ~/dotfiles/arch-install/AGENT-VAULT.md
+alias claude='agent-vault vault run --vault default -- claude'
+alias codex='agent-vault vault run --vault default -- codex'
+alias opencode='agent-vault vault run --vault default -- opencode'

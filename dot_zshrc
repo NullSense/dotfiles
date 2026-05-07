@@ -1,152 +1,111 @@
-# ============================================================================
-# zshrc — modern stack: zinit + mise + atuin + starship
-# Secrets: never committed. Sourced from ~/.secrets (gitignored, encrypted).
-# ============================================================================
+# ~/.zshrc — interactive shell config
+# Stack: zinit (plugins) · mise (tooling) · atuin (history) · starship (prompt)
+# fzf-tab (completion) · zoxide (cd) · zsh-vi-mode (modal editing)
 
-# ---------- PATH ----------------------------------------------------------
-typeset -U path PATH
+# ─── Environment ────────────────────────────────────────────────────────────
+typeset -U path PATH fpath
 path=(
   $HOME/bin
   $HOME/.local/bin
   $HOME/.cargo/bin
+  $HOME/.bun/bin
+  $HOME/.local/share/pnpm
+  /opt/rocm/bin
+  /opt/rocm/hip/bin
   $path
 )
 
-# ---------- Locale & editor ----------------------------------------------
-export LANG=en_US.UTF-8
-export LC_ALL=en_US.UTF-8
-export EDITOR=nvim
+export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+export EDITOR=nvim VISUAL=nvim MANPAGER='nvim +Man!'
+export COLORTERM=truecolor TERMINAL=ghostty
 
-# Force emacs keybindings (zsh auto-picks vi when $EDITOR contains "vi")
-bindkey -e
-export VISUAL=nvim
-export MANPAGER='nvim +Man!'
-export COLORTERM=truecolor
+# Wayland / Qt / Mozilla
+# Don't hardcode XDG_CURRENT_DESKTOP — the compositor sets it (sway via its
+# launcher, Hyprland via env.conf). Only fall back if the session left it empty.
+: "${XDG_CURRENT_DESKTOP:=$XDG_SESSION_DESKTOP}"
+export XDG_CURRENT_DESKTOP XDG_SESSION_TYPE=wayland
+export MOZ_ENABLE_WAYLAND=1 MOZ_DBUS_REMOTE=1
+export QT_QPA_PLATFORM=wayland QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 
-# ---------- Wayland / Qt / Moz hints -------------------------------------
-export XDG_CURRENT_DESKTOP=sway
-export XDG_SESSION_TYPE=wayland
-export MOZ_ENABLE_WAYLAND=1
-export MOZ_DBUS_REMOTE=1
-export QT_QPA_PLATFORM=wayland
-export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
-
-# ---------- AMD ROCm (RX 6750 XT) ----------------------------------------
-export ROCM_PATH=/opt/rocm
-export HIP_PATH=$ROCM_PATH/hip
-path=($ROCM_PATH/bin $HIP_PATH/bin $path)
+# AMD ROCm (RX 6750 XT)
+export ROCM_PATH=/opt/rocm HIP_PATH=/opt/rocm/hip
 export LD_LIBRARY_PATH="$ROCM_PATH/lib:$HIP_PATH/lib:${LD_LIBRARY_PATH:-}"
 export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
 
-# ---------- Terminal awareness -------------------------------------------
-case "$TERM_PROGRAM" in
-  ghostty) ;;
-  *) export TERM_PROGRAM="${TERM_PROGRAM:-alacritty}" ;;
-esac
-
-# ============================================================================
-# Plugin manager: zinit (turbo mode for fast startup)
-# Install: bash -c "$(curl -fsSL https://git.io/zinit-install)"
-# ============================================================================
-ZINIT_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/zinit/zinit.git"
-if [[ -f "$ZINIT_HOME/zinit.zsh" ]]; then
-  source "$ZINIT_HOME/zinit.zsh"
-
-  # Core: lazy-loaded heavy plugins
-  zinit ice depth=1
-  zinit light zsh-users/zsh-completions
-
-  zinit wait lucid for \
-    atinit"zicompinit; zicdreplay" \
-      zdharma-continuum/fast-syntax-highlighting \
-    atload"_zsh_autosuggest_start" \
-      zsh-users/zsh-autosuggestions \
-    blockf \
-      zsh-users/zsh-completions
-
-  # OMZ snippets we actually use
-  zinit wait lucid for \
-    OMZP::git \
-    OMZP::sudo \
-    OMZP::command-not-found
-fi
-
-# ---------- Completion (fallback if zinit not yet installed) -------------
-fpath=(~/.zfunc $fpath)
-autoload -Uz compinit
-compinit -C
-
-# ============================================================================
-# Version managers — mise replaces pyenv + nvm + asdf + (mostly) conda
-# Install: curl https://mise.run | sh
-# ============================================================================
-if command -v mise &>/dev/null; then
-  eval "$(mise activate zsh)"
-fi
-
-# ---------- uv (Python) — install: curl -LsSf https://astral.sh/uv/install.sh | sh
-# uv adds itself to PATH automatically; nothing to source.
-
-# ---------- bun ----------------------------------------------------------
 export BUN_INSTALL="$HOME/.bun"
-[[ -d "$BUN_INSTALL/bin" ]] && path=("$BUN_INSTALL/bin" $path)
-
-# ---------- pnpm ---------------------------------------------------------
 export PNPM_HOME="$HOME/.local/share/pnpm"
-[[ -d "$PNPM_HOME" ]] && path=("$PNPM_HOME" $path)
 
-# ============================================================================
-# Shell goodies
-# ============================================================================
+# ─── Plugins (zinit) ────────────────────────────────────────────────────────
+# Install: bash -c "$(curl -fsSL https://git.io/zinit-install)"
+ZINIT_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/zinit/zinit.git"
+source "$ZINIT_HOME/zinit.zsh"
 
-# fzf
-[[ -f /usr/share/fzf/key-bindings.zsh ]] && source /usr/share/fzf/key-bindings.zsh
-[[ -f /usr/share/fzf/completion.zsh ]] && source /usr/share/fzf/completion.zsh
+# Vi-mode loads eagerly: deferred loading breaks the first prompt's keymap.
+# ZVM_INIT_MODE=sourcing prevents zvm from clobbering bindings set after it.
+ZVM_INIT_MODE=sourcing
+ZVM_VI_INSERT_ESCAPE_BINDKEY=jk
+ZVM_LINE_INIT_MODE=$ZVM_MODE_INSERT
+zinit ice depth=1
+zinit light jeffreytse/zsh-vi-mode
 
-# atuin (history sync + better Ctrl-R)
-command -v atuin &>/dev/null && eval "$(atuin init zsh)"
+# Turbo: load after first prompt. Order matters — fzf-tab must wrap compadd
+# before fast-syntax-highlighting / zsh-autosuggestions wrap widgets.
+zinit wait lucid for \
+  atinit"zicompinit; zicdreplay" \
+    Aloxaf/fzf-tab \
+  zdharma-continuum/fast-syntax-highlighting \
+  atload"_zsh_autosuggest_start; bindkey '^ ' autosuggest-accept" \
+    zsh-users/zsh-autosuggestions \
+  blockf \
+    zsh-users/zsh-completions \
+  OMZP::git \
+  OMZP::sudo \
+  OMZP::command-not-found
 
-# zoxide (smart cd)
-command -v zoxide &>/dev/null && eval "$(zoxide init zsh --cmd cd)"
+# ─── Completion styling ─────────────────────────────────────────────────────
+zstyle ':completion:*' menu no                       # required by fzf-tab
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' 'r:|=*' 'l:|=* r:|=*'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':fzf-tab:*' fzf-bindings 'ctrl-space:toggle' 'tab:accept'
+zstyle ':fzf-tab:*' continuous-trigger '/'
+zstyle ':fzf-tab:*' switch-group ',' '.'
+zstyle ':fzf-tab:complete:cd:*'      fzf-preview 'eza -1 --color=always --icons --group-directories-first $realpath'
+zstyle ':fzf-tab:complete:(\\|*/|)ls:*' fzf-preview 'eza -1 --color=always --icons --group-directories-first $realpath'
 
-# starship
+# ─── Tool integrations ──────────────────────────────────────────────────────
+# fzf widgets (Ctrl-T file, Alt-C cd; Ctrl-R is owned by atuin below)
+source /usr/share/fzf/key-bindings.zsh
+source /usr/share/fzf/completion.zsh
+
+command -v mise     &>/dev/null && eval "$(mise activate zsh)"
+command -v atuin    &>/dev/null && eval "$(atuin init zsh)"
+command -v direnv   &>/dev/null && eval "$(direnv hook zsh)"
 command -v starship &>/dev/null && eval "$(starship init zsh)"
+# zoxide last: its chpwd hook must not be shadowed by starship/atuin precmd hooks
+command -v zoxide   &>/dev/null && eval "$(zoxide init zsh --cmd cd)"
 
-# Aliases & fzf functions
-[[ -f ~/bin/zshaliases ]] && source ~/bin/zshaliases
-[[ -f ~/bin/zshfzfrc ]] && source ~/bin/zshfzfrc
+# ─── Keybindings ────────────────────────────────────────────────────────────
+# Ctrl-Space → accept autosuggestion is bound in the atload hook above, so it
+# happens after the widget is actually defined (avoids fast-syntax-highlighting
+# "unhandled ZLE widget" warning). fzf-tab's ctrl-space:toggle only fires
+# inside the picker, so they don't conflict.
+bindkey -s '^\' 'yy\n'                              # Ctrl-\ → yazi launcher
 
-# yazi launcher (cwd-on-exit)
-function yy() {
-  local tmp; tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+# ─── Hooks & functions ──────────────────────────────────────────────────────
+autoload -U add-zsh-hook
+_eza_on_cd() { emulate -L zsh; eza -ah --icons=always --group-directories-first; print }
+add-zsh-hook chpwd _eza_on_cd
+
+# yazi launcher with cwd-on-exit
+yy() {
+  local tmp; tmp=$(mktemp -t yazi-cwd.XXXXXX)
   yazi "$@" --cwd-file="$tmp"
-  if cwd="$(command cat -- "$tmp")" && [[ -n "$cwd" && "$cwd" != "$PWD" ]]; then
-    builtin cd -- "$cwd"
-  fi
+  local cwd; cwd=$(<"$tmp")
+  [[ -n $cwd && $cwd != $PWD ]] && builtin cd -- "$cwd"
   command rm -f -- "$tmp"
 }
-bindkey -s "^\\" 'yy\n'
 
-# eza-on-cd hook
-autoload -U add-zsh-hook
-do-ls() { emulate -L zsh; eza -ah --icons=always --group-directories-first }
-add-zsh-hook chpwd do-ls
-
-# ============================================================================
-# Secrets — fetched at shell start, never committed.
-# Pick ONE strategy (see ~/dotfiles/SECRETS.md):
-#   1) Plain ~/.secrets (gitignored)        - simplest
-#   2) Infisical CLI                        - if your team uses it
-#   3) Bitwarden Secrets Manager (bws)      - if you prefer Bitwarden
-#   4) chezmoi templates with age           - dotfile-native
-# ============================================================================
-
-# Strategy 1 (default fallback): plain file, gitignored
-[[ -f ~/.secrets ]] && source ~/.secrets
-
-# Strategy 2 (uncomment if using Infisical):
-# command -v infisical &>/dev/null && eval "$(infisical export --format=dotenv-export 2>/dev/null)"
-
-# Strategy 3 (uncomment if using BWS):
-# command -v bws &>/dev/null && [[ -n "$BWS_ACCESS_TOKEN" ]] && eval "$(bws secret list --output env 2>/dev/null)"
-
+# ─── Local config & secrets ─────────────────────────────────────────────────
+[[ -f ~/bin/zshaliases ]] && source ~/bin/zshaliases
+[[ -f ~/bin/zshfzfrc  ]] && source ~/bin/zshfzfrc
+[[ -f ~/.secrets       ]] && source ~/.secrets

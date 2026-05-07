@@ -1,0 +1,15 @@
+#!/bin/sh
+# Re-run mcp-sync whenever the MCP source-of-truth changes.
+# The line below embeds a hash of .chezmoidata/mcp.yaml so this script's
+# content changes — chezmoi's run_onchange detects that and re-fires.
+#
+# source-of-truth digest: {{ include ".chezmoidata/mcp.yaml" | sha256sum }}
+
+set -eu
+
+if ! command -v mcp-sync >/dev/null 2>&1; then
+    printf 'mcp-sync not on PATH (expected ~/.local/bin/mcp-sync). Skipping.\n' >&2
+    exit 0
+fi
+
+mcp-sync

@@ -1,0 +1,9 @@
+# ~/.zshenv — sourced by EVERY zsh (interactive, login, cron, systemd user, IDE).
+# Keep minimal; put interactive stuff in dot_zshrc.
+
+# Bitwarden Desktop runs an SSH agent on this socket when its
+# Settings → SSH Agent toggle is enabled. Putting it in zshenv (not zshrc)
+# means git operations launched from non-interactive contexts (IDEs, cron,
+# systemd user services) also use the agent, not whatever stale ssh-agent
+# happens to be running.
+[ -S "$HOME/.bitwarden-ssh-agent.sock" ] && export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"

@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""mcp-sync — propagate ~/.local/share/chezmoi/.chezmoidata/mcp.yaml
+into each AI agent's native config file:
+
+  - ~/.claude.json                       (Claude Code,   mcpServers key)
+  - ~/.codex/config.toml                 (Codex,         [mcp_servers.*])
+  - ~/.config/opencode/opencode.jsonc    (OpenCode,      mcp key)
+
+Edits are surgical — every other key in those files is preserved.
+
+Source-of-truth schema (Claude-flavored, most expressive):
+
+    mcps:
+      <name>:
+        type: http | stdio
+        # http:
+        url: https://...
+        headers: { Authorization: "Bearer ..." }   # optional
+        # stdio:
+        command: <executable>
+        args: [<argv>...]
+        env: { KEY: VALUE }                         # optional
+        # filter (optional, defaults to all agents):
+        agents: [claude, codex, opencode]
+
+Run manually with `mcp-sync` or let the chezmoi run_onchange hook fire
+on every `chezmoi apply`.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+HOME = Path.home()
+SOURCE = HOME / ".local/share/chezmoi/.chezmoidata/mcp.yaml"
+
+CLAUDE_CFG = HOME / ".claude.json"
+CODEX_CFG = HOME / ".codex/config.toml"
+OPENCODE_CFG = HOME / ".config/opencode/opencode.jsonc"
+
+ALL_AGENTS = ("claude", "codex", "opencode")
+
+
+def load_source() -> dict[str, Any]:
+    with SOURCE.open() as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("mcps", {})
+
+
+def for_agent(mcps: dict[str, Any], agent: str) -> dict[str, Any]:
+    return {
+        name: spec
+        for name, spec in mcps.items()
+        if agent in spec.get("agents", ALL_AGENTS)
+    }
+
+
+# ---------- Claude Code -----------------------------------------------------
+def claude_shape(spec: dict[str, Any]) -> dict[str, Any]:
+    s = {k: v for k, v in spec.items() if k != "agents"}
+    if s["type"] == "stdio":
+        s.setdefault("env", {})
+    return s
+
+
+def sync_claude(mcps: dict[str, Any]) -> None:
+    if not CLAUDE_CFG.exists():
+        print(f"[claude] {CLAUDE_CFG} missing, skipping")
+        return
+    cfg = json.loads(CLAUDE_CFG.read_text())
+    cfg["mcpServers"] = {n: claude_shape(s) for n, s in mcps.items()}
+    # atomic write to avoid corrupting Claude's stateful file
+    tmp = CLAUDE_CFG.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, indent=2) + "\n")
+    tmp.replace(CLAUDE_CFG)
+    print(f"[claude] wrote {len(mcps)} mcpServers → {CLAUDE_CFG}")
+
+
+# ---------- Codex -----------------------------------------------------------
+def toml_escape(s: str) -> str:
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def codex_render(name: str, spec: dict[str, Any]) -> str:
+    out: list[str] = [f"[mcp_servers.{name}]"]
+    if spec["type"] == "http":
+        out.append(f"url = {toml_escape(spec['url'])}")
+        headers = spec.get("headers")
+        if headers:
+            out.append("[mcp_servers.{}.headers]".format(name))
+            for k, v in headers.items():
+                out.append(f"{toml_escape(k)} = {toml_escape(v)}")
+    else:  # stdio
+        out.append(f"command = {toml_escape(spec['command'])}")
+        args = spec.get("args", [])
+        rendered_args = ", ".join(toml_escape(a) for a in args)
+        out.append(f"args = [{rendered_args}]")
+        env = spec.get("env")
+        if env:
+            out.append(f"[mcp_servers.{name}.env]")
+            for k, v in env.items():
+                out.append(f"{toml_escape(k)} = {toml_escape(v)}")
+    return "\n".join(out) + "\n"
+
+
+def sync_codex(mcps: dict[str, Any]) -> None:
+    if not CODEX_CFG.exists():
+        print(f"[codex] {CODEX_CFG} missing, skipping")
+        return
+    text = CODEX_CFG.read_text()
+    lines = text.splitlines(keepends=True)
+
+    # Strip every existing [mcp_servers.*] table and any nested
+    # [mcp_servers.*.env|.headers] sub-tables. A table runs from its
+    # header line until the next top-level [...] header or EOF.
+    out: list[str] = []
+    i = 0
+    table_hdr = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+    while i < len(lines):
+        m = table_hdr.match(lines[i])
+        if m and m.group(1).startswith("mcp_servers"):
+            # skip this table
+            i += 1
+            while i < len(lines) and not table_hdr.match(lines[i]):
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+
+    cleaned = "".join(out).rstrip() + "\n"
+
+    # Append a fresh, ordered mcp_servers block.
+    if mcps:
+        cleaned += "\n# --- mcp_servers (managed by mcp-sync; edits here will be overwritten) ---\n"
+        for name, spec in mcps.items():
+            cleaned += "\n" + codex_render(name, spec)
+
+    tmp = CODEX_CFG.with_suffix(".toml.tmp")
+    tmp.write_text(cleaned)
+    tmp.replace(CODEX_CFG)
+    print(f"[codex] wrote {len(mcps)} [mcp_servers.*] → {CODEX_CFG}")
+
+
+# ---------- OpenCode --------------------------------------------------------
+def opencode_shape(spec: dict[str, Any]) -> dict[str, Any]:
+    if spec["type"] == "http":
+        out: dict[str, Any] = {"type": "remote", "url": spec["url"], "enabled": True}
+        if spec.get("headers"):
+            out["headers"] = spec["headers"]
+        return out
+    # stdio → local
+    cmd = [spec["command"], *spec.get("args", [])]
+    out = {"type": "local", "command": cmd, "enabled": True}
+    if spec.get("env"):
+        out["environment"] = spec["env"]
+    return out
+
+
+_JSONC_LINE_COMMENT = re.compile(r"//[^\n]*")
+_JSONC_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def strip_jsonc(text: str) -> str:
+    text = _JSONC_BLOCK_COMMENT.sub("", text)
+    # Strip line comments but only outside strings — naive but adequate
+    # for hand-maintained configs of this size.
+    out: list[str] = []
+    in_str = False
+    esc = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            out.append(ch)
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < len(text) and text[i + 1] == "/":
+            # skip to newline
+            j = text.find("\n", i)
+            i = j if j != -1 else len(text)
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def sync_opencode(mcps: dict[str, Any]) -> None:
+    if not OPENCODE_CFG.exists():
+        print(f"[opencode] {OPENCODE_CFG} missing, skipping")
+        return
+    raw = OPENCODE_CFG.read_text()
+    cleaned = strip_jsonc(raw)
+    cfg = json.loads(cleaned)
+    cfg["mcp"] = {n: opencode_shape(s) for n, s in mcps.items()}
+
+    tmp = OPENCODE_CFG.with_suffix(".jsonc.tmp")
+    # OpenCode tolerates plain JSON in .jsonc; we drop the comments to
+    # keep the file deterministic.
+    tmp.write_text(json.dumps(cfg, indent=2) + "\n")
+    tmp.replace(OPENCODE_CFG)
+    print(f"[opencode] wrote {len(mcps)} mcp entries → {OPENCODE_CFG}")
+
+
+def main() -> int:
+    if not SOURCE.exists():
+        print(f"source-of-truth not found: {SOURCE}", file=sys.stderr)
+        return 1
+    mcps = load_source()
+    if not mcps:
+        print("no MCPs defined in source-of-truth", file=sys.stderr)
+        return 1
+
+    sync_claude(for_agent(mcps, "claude"))
+    sync_codex(for_agent(mcps, "codex"))
+    sync_opencode(for_agent(mcps, "opencode"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

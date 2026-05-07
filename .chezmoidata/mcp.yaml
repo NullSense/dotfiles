@@ -1,0 +1,67 @@
+# MCP server definitions — single source of truth across all AI agents.
+#
+# Edit this file, then run `chezmoi apply` (or just save — chezmoi's
+# run_onchange hook will detect the change). The mcp-sync script will
+# patch each agent's native config:
+#   - ~/.claude.json           (Claude Code, mcpServers key)
+#   - ~/.codex/config.toml     (Codex, [mcp_servers.*] tables)
+#   - ~/.config/opencode/opencode.jsonc  (OpenCode, mcp key)
+#
+# Schema is the Claude-Code-flavored MCP shape (most expressive of the
+# three); the sync script translates per-agent. Two transports:
+#
+#   type: http   → { url, headers? }
+#   type: stdio  → { command, args[], env? }
+#
+# Notes:
+#   - For stdio MCPs that should NOT route through Agent Vault (e.g.,
+#     browser MCPs that download large blobs), prefix the command with
+#     `env -u HTTPS_PROXY -u HTTP_PROXY`.
+#   - HTTP MCPs that need API keys: keep the key in Agent Vault and
+#     leave headers blank here. AV's proxy injects on outbound.
+
+mcps:
+  # --- HTTP, hosted ---------------------------------------------------
+  exa:
+    type: http
+    url: https://mcp.exa.ai/mcp
+
+  context7:
+    type: http
+    url: https://mcp.context7.com/mcp
+
+  # --- stdio, local ---------------------------------------------------
+  playwright:
+    type: stdio
+    command: env
+    args:
+      - "-u"
+      - HTTPS_PROXY
+      - "-u"
+      - HTTP_PROXY
+      - npx
+      - "-y"
+      - "@playwright/mcp@latest"
+      - --executable-path
+      - /usr/bin/chromium
+      - --headless
+
+  chrome-devtools:
+    type: stdio
+    command: env
+    args:
+      - "-u"
+      - HTTPS_PROXY
+      - "-u"
+      - HTTP_PROXY
+      - npx
+      - "-y"
+      - chrome-devtools-mcp@latest
+
+  react-grab-mcp:
+    type: stdio
+    command: npx
+    args:
+      - "-y"
+      - "@react-grab/mcp"
+      - --stdio

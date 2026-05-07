@@ -13,15 +13,15 @@ hide_action_hints          = true
 # Use omarchy's layout/CSS theme; it imports
 # ~/.config/omarchy/current/theme/walker.css so colors flip with omarchy-theme-set.
 # additional_theme_location points walker at the in-tree omarchy theme dir.
-theme                      = "omarchy-default"
+theme                      = "nullsense"
 additional_theme_location  = "~/.local/share/omarchy/default/walker/themes/"
 
-# Per-provider placeholders. Walker keys these by provider name.
-# TODO(hint-footer): add a static prefix-legend GtkLabel to a forked
-# omarchy-default layout.xml (see Plannotator agent's recommendation). Until
-# then, the legend lives in the "default" placeholder text.
+# Per-provider placeholders. The "default" placeholder is now compact —
+# the prefix legend lives in the static GtkLabel at the bottom of the
+# nullsense theme layout.xml so it stays visible regardless of search
+# query and doesn't overload the input row.
 [placeholders]
-"default"            = { input = " Search · / providers · = calc · @ web · $ clipboard · . files · : symbols", list = "No results" }
+"default"            = { input = " Search…", list = "No results" }
 "providerlist"       = { input = " Pick a provider…",   list = "" }
 "desktopapplications"= { input = " App…",                list = "No matching apps" }
 "runner"             = { input = " Run command…",       list = "Type any shell command" }

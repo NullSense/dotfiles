@@ -16,26 +16,38 @@
  *   pill v-margin    3px       (the strip of wallpaper above/below pills)
  */
 
-@define-color bg0       #1d2021;
-@define-color bg1       #282828;
-@define-color bg2       #3c3836;
-@define-color bg3       #504945;
-@define-color bg4       #665c54;
-@define-color fg0       #fbf1c7;
-@define-color fg1       #ebdbb2;
-@define-color fg2       #d5c4a1;
-@define-color fg3       #bdae93;
-@define-color gray      #928374;
-@define-color red       #fb4934;
-@define-color green     #b8bb26;
-@define-color yellow    #fabd2f;
-@define-color blue      #83a598;
-@define-color purple    #d3869b;
-@define-color aqua      #8ec07c;
-@define-color orange    #fe8019;
-@define-color red_dim   #cc241d;
-@define-color green_dim #98971a;
-@define-color blue_dim  #458588;
+/* Theme palette — flipped by omarchy-theme-set. Our user template
+ * (~/.config/omarchy/themed/waybar.css.tpl) emits the full 16-color
+ * palette + accent/foreground/background; we then alias them to our
+ * named gruvbox-derived slots so the rest of this file (bg0..bg4,
+ * red, green, etc) stays unchanged. */
+@import url("file:///home/nullsense/.config/omarchy/current/theme/waybar.css");
+
+/* Aliasing: map omarchy's color0..color15 to our named slots. The
+ * mapping picks the most semantically-similar entry per theme — works
+ * for any gruvbox-flavored or analogous palette. Themes with very
+ * different feel (e.g. matte-black) will look monochrome on the bar
+ * but won't break. */
+@define-color bg0       @background;
+@define-color bg1       @color0;
+@define-color bg2       @color8;
+@define-color bg3       @color8;
+@define-color bg4       @color8;
+@define-color fg0       @foreground;
+@define-color fg1       @foreground;
+@define-color fg2       @color7;
+@define-color fg3       @color7;
+@define-color gray      @color8;
+@define-color red       @color9;
+@define-color green     @color10;
+@define-color yellow    @color11;
+@define-color blue      @color12;
+@define-color purple    @color13;
+@define-color aqua      @color14;
+@define-color orange    @accent;
+@define-color red_dim   @color1;
+@define-color green_dim @color2;
+@define-color blue_dim  @color4;
 
 /* ------------ Reset ------------ */
 * {

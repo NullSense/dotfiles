@@ -2,10 +2,11 @@
 Description=Agent Vault — credential broker for AI agents
 Documentation=https://infisical.com/docs/agent-vault
 Documentation=file://%h/dotfiles/arch-install/AGENT-VAULT.md
-# Wait for the user session before starting. graphical-session.target is set
-# when sway is up, which is when we want the broker available.
-After=graphical-session.target
-PartOf=graphical-session.target
+# Decoupled from graphical-session.target on purpose. agent-vault is a
+# headless daemon — it has no display dependency, and tying it to the GUI
+# session caused it to be SIGTERM'd on every Hyprland logout/exit (PartOf
+# propagates target stops to children). We start at user-instance login via
+# WantedBy=default.target and stay up across GUI restarts.
 
 [Service]
 Type=simple

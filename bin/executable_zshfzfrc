@@ -183,7 +183,6 @@ fd --type f --hidden --follow \
   --exclude ".vscode*" \
   --exclude ".gradle" \
   --exclude ".nvm" \
-  --exclude ".zplug" \
   --exclude ".forgit" \
   --exclude ".cargo/registry" \
   --exclude ".cargo/git" \

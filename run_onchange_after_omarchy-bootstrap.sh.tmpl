@@ -1,0 +1,31 @@
+#!/bin/sh
+# Idempotent post-apply bootstrap for the omarchy state dirs that chezmoi
+# can't manage directly (they live under ~/.config/omarchy/current/ which
+# is .chezmoiignore'd because omarchy-theme-set rewrites it).
+#
+# Triggered by content-hash change: re-runs whenever this script's bytes
+# change. Idempotent — safe to re-fire.
+#
+# digest-source: {{ output "echo" "v1" }}
+
+set -eu
+
+mkdir -p "$HOME/.config/omarchy/current" "$HOME/.config/omarchy/themed"
+
+# Wallpaper symlink — omarchy's autostart fires `swaybg -i ~/.config/
+# omarchy/current/background -m fill` early in the session. Without this
+# target the bar comes up over a black screen (swaybg falls back to
+# --color #000000 silently).
+if [ -e "$HOME/Pictures/wallpaper.png" ] && [ ! -e "$HOME/.config/omarchy/current/background" ]; then
+    ln -snf "$HOME/Pictures/wallpaper.png" "$HOME/.config/omarchy/current/background"
+fi
+
+# Render the active theme on first boot so per-app theme files (ghostty
+# .conf, alacritty .toml, walker.css, mako.ini, hyprlock.conf, etc.)
+# exist for the apps that source/import them. Skipped if a theme is
+# already current.
+if [ ! -L "$HOME/.config/omarchy/current/theme" ] && [ ! -d "$HOME/.config/omarchy/current/theme" ]; then
+    if command -v omarchy-theme-set >/dev/null 2>&1; then
+        omarchy-theme-set nullsense >/dev/null 2>&1 || true
+    fi
+fi

@@ -26,12 +26,25 @@ if [[ -n "$__AV_TOKEN" ]]; then
     #   NODE_EXTRA_CA_CERTS   Node — ADDS to system CAs (additive, doesn't replace)
     #   DENO_CERT             Deno
     #   GIT_SSL_CAINFO        git
-    export SSL_CERT_FILE="$HOME/.agent-vault/mitm-ca.pem"
-    export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
-    export CURL_CA_BUNDLE="$SSL_CERT_FILE"
-    export NODE_EXTRA_CA_CERTS="$SSL_CERT_FILE"
-    export DENO_CERT="$SSL_CERT_FILE"
-    export GIT_SSL_CAINFO="$SSL_CERT_FILE"
+    #
+    # We point most replace-style env vars at a COMBINED bundle (system CAs
+    # + MITM CA) so AUR/GitHub/non-MITM'd HTTPS still verifies. The credential
+    # injection still happens at the proxy layer (HTTPS_PROXY) — adding
+    # system CAs to the trust store doesn't compromise agent-vault, it only
+    # restores trust for domains the proxy doesn't intercept.
+    __AV_BUNDLE="$HOME/.agent-vault/ca-bundle.pem"
+    __AV_MITM="$HOME/.agent-vault/mitm-ca.pem"
+    __AV_SYS="/etc/ssl/certs/ca-certificates.crt"
+    if [[ ! -f "$__AV_BUNDLE" || "$__AV_MITM" -nt "$__AV_BUNDLE" || "$__AV_SYS" -nt "$__AV_BUNDLE" ]]; then
+        cat "$__AV_SYS" "$__AV_MITM" > "$__AV_BUNDLE" 2>/dev/null && chmod 600 "$__AV_BUNDLE"
+    fi
+    export SSL_CERT_FILE="$__AV_BUNDLE"
+    export REQUESTS_CA_BUNDLE="$__AV_BUNDLE"
+    export CURL_CA_BUNDLE="$__AV_BUNDLE"
+    export NODE_EXTRA_CA_CERTS="$__AV_MITM"   # additive, MITM only
+    export DENO_CERT="$__AV_BUNDLE"
+    export GIT_SSL_CAINFO="$__AV_BUNDLE"
+    unset __AV_BUNDLE __AV_MITM __AV_SYS
 
     # Node 24+ requires this to honor HTTPS_PROXY.
     export NODE_USE_ENV_PROXY=1

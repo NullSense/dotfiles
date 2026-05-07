@@ -7,3 +7,23 @@
 # systemd user services) also use the agent, not whatever stale ssh-agent
 # happens to be running.
 [ -S "$HOME/.bitwarden-ssh-agent.sock" ] && export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
+
+# Omarchy — pinned to a release tag at ~/.local/share/omarchy.
+# OMARCHY_PATH is read by every omarchy-* script for theme paths, defaults,
+# and template rendering. PATH gets the omarchy bin dir prepended so all
+# 273 omarchy-* helpers are callable from any shell, including non-
+# interactive contexts (Hyprland exec-once, systemd user units, etc.).
+if [ -d "$HOME/.local/share/omarchy" ]; then
+    export OMARCHY_PATH="$HOME/.local/share/omarchy"
+    case ":$PATH:" in
+        *":$OMARCHY_PATH/bin:"*) ;;
+        *) export PATH="$OMARCHY_PATH/bin:$PATH" ;;
+    esac
+fi
+
+# Personal ~/bin (hand-rolled scripts: brightness-ctl, voice-*, helium-update,
+# etc.) on PATH ahead of system bins — these wrap or override system tools.
+case ":$PATH:" in
+    *":$HOME/bin:"*) ;;
+    *) export PATH="$HOME/bin:$PATH" ;;
+esac

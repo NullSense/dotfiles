@@ -3,17 +3,17 @@
  * Waybar — Gruvbox Dark Hard, Omarchy-inspired refresh.
  *
  * Layout:
- *   left   — workspace dots (Omarchy-style numbers, active = filled glyph) +
- *            current submap + media player (marquee).
+ *   left   — workspace dots + current submap + media player (marquee).
  *   center — clock pill (anchor of the bar).
- *   right  — pill clusters; system/storage/audio collapse to one icon each
- *            and slide open on hover (drawer groups in config).
+ *   right  — pill family + two drawer groups (display, system) that
+ *            collapse to a single icon and slide open on hover.
  *
  * Sizing:
  *   bar height       30
  *   font-size        10px (workspaces, clock 11px bold)
  *   pill padding     2px 9px
- *   pill v-margin    3px       (the strip of wallpaper above/below pills)
+ *   pill v-margin    3px       (strip of wallpaper above/below pills)
+ *   pill h-margin    1px       (subtle gap between adjacent pills)
  */
 
 /* Theme palette — flipped by omarchy-theme-set. Our user template
@@ -54,7 +54,7 @@
     border: none;
     border-radius: 0;
     min-height: 0;
-    font-family: "Hack Nerd Font Mono", "Symbols Nerd Font", monospace;
+    font-family: 'Hack Nerd Font';
     font-size: 10px;
 }
 
@@ -62,9 +62,8 @@
 window#waybar {
     background: transparent;
     color: @fg1;
-    transition: background-color 200ms ease;
 }
-window#waybar.hidden { opacity: 0.0; }
+window#waybar.hidden { opacity: 0; }
 
 /* ============================================================
  * Pills
@@ -81,7 +80,11 @@ window#waybar.hidden { opacity: 0.0; }
 #custom-media,
 #custom-colortemp,
 #custom-brightness,
-#custom-aiquota {
+#custom-aiquota,
+#custom-agents,
+#custom-sudo,
+#custom-hyprwhspr,
+#custom-xt3-status {
     background: @bg0;
     color: @fg0;
     padding: 2px 9px;
@@ -116,19 +119,13 @@ window#waybar.hidden { opacity: 0.0; }
     box-shadow: none;
     text-shadow: none;
     color: @fg3;
-    font-family: "Hack Nerd Font Mono";
     font-size: 12px;
     font-weight: bold;
     padding: 0 7px;
     margin: 0 1px;
     transition: color 120ms ease;
 }
-#workspaces button:hover {
-    color: @fg0;
-    background: transparent;
-    box-shadow: none;
-    text-shadow: none;
-}
+#workspaces button:hover { color: @fg0; }
 #workspaces button.empty {
     color: @bg4;
 }
@@ -191,37 +188,20 @@ window#waybar.hidden { opacity: 0.0; }
 }
 
 /* ============================================================
- * Drawer groups — system / storage / audio
+ * Drawer groups — display, system
  *
- * The first child is always visible; the rest slide in on hover.
- * To make adjacent children look like one widget, we kill internal
- * margins between them inside a group.
+ * First child is always visible; the rest slide in on hover. Killing
+ * horizontal margin on trailing children fuses them into the leader.
+ * The pill family's own border supplies the visual separator line.
  * ============================================================ */
-.sys-child,
-.stor-child,
-.aud-child {
-    margin: 3px 0;
-    border-left-width: 0;       /* fuses into the leading pill */
-}
-/* Restore an inner separator line between fused pills */
-.sys-child,
-.stor-child,
-.aud-child {
-    border-left: 1px solid @bg2;
-}
+.disp-child,
+.sys-child { margin: 3px 0; }
 
-/* The leading (collapsed) pill keeps its margin on the outer side */
-#cpu, #disk, #pulseaudio {
-    margin-right: 0;
-}
-#temperature, #memory {
-    margin-left: 0;
-    margin-right: 0;
-}
-#disk.home, #disk.root,
-#custom-brightness, #custom-colortemp {
-    margin-left: 0;
-    margin-right: 0;
+/* Leading drawer pill keeps its outer (left) margin and fuses on the
+ * right with its sibling children. Trailing children sit flush both sides. */
+#cpu, #custom-brightness                  { margin-right: 0; }
+#memory, #temperature, #disk.home, #disk.root, #custom-colortemp {
+    margin: 3px 0;
 }
 
 /* ============================================================
@@ -261,12 +241,10 @@ window#waybar.hidden { opacity: 0.0; }
 #pulseaudio.bluetooth       { color: @blue; }
 
 /* ============================================================
- * Tray
+ * Tray — extra left margin reads as a separator from battery; padding
+ * matches the pill family rhythm.
  * ============================================================ */
-#tray {
-    margin-left: 6px;
-    padding: 2px 8px;
-}
+#tray { margin-left: 6px; }
 #tray > .passive { -gtk-icon-effect: dim; }
 #tray > .needs-attention {
     -gtk-icon-effect: highlight;
@@ -284,6 +262,39 @@ window#waybar.hidden { opacity: 0.0; }
     animation: blink 1s linear infinite alternate;
 }
 #custom-aiquota.stale    { color: @gray; }
+/* unauth fallback (agent-vault session expired) — dim, distinct from critical */
+#custom-aiquota.unauth   { color: @orange; }
+
+/* ============================================================
+ * Attention indicators — agents waiting + sudo open
+ *  Sentinel: any window whose terminal title starts with the agent's
+ *  brand glyph + `[<id>]` tag (OSC-2 from agent hooks). Same windowrule
+ *  also paints a red border on the agent's window in Hyprland.
+ *
+ *  Idle modules collapse invisibly: empty text + transparent box so they
+ *  don't leave a phantom pill in the bar. Pending state restores the
+ *  bg/border so it visually matches the rest of the pill family.
+ * ============================================================ */
+/* Idle pill stays visible (same chrome as the rest of the family),
+ * just dimmed; pending swaps the border red so the blink reads. */
+#custom-agents.idle,
+#custom-sudo.idle  { color: @gray; }
+#custom-agents.pending {
+    /* Per-agent foreground colors come from inline Pango spans in the
+     * module text; the pill chrome just gets a red border for emphasis. */
+    border-color: @red;
+}
+#custom-sudo.active {
+    color: @yellow;
+    border-color: @yellow;
+    animation: blink 1.2s ease-in-out infinite alternate;
+}
+
+/* hyprland workspace urgency (xdg-activation-driven) */
+#workspaces button.urgent {
+    background: @red;
+    color: @bg0;
+}
 
 /* ============================================================
  * Hover affordance
@@ -297,6 +308,10 @@ window#waybar.hidden { opacity: 0.0; }
 #custom-colortemp:hover,
 #custom-brightness:hover,
 #custom-aiquota:hover,
+#custom-xt3-status:hover,
+#custom-agents:hover,
+#custom-sudo:hover,
+#custom-hyprwhspr:hover,
 #idle_inhibitor:hover {
     background: @bg2;
     border-color: @fg3;
@@ -313,7 +328,7 @@ tooltip {
 tooltip label {
     color: @fg1;
     padding: 8px 12px;
-    font-family: "Hack Nerd Font Mono", monospace;
+    font-family: 'Hack Nerd Font';
 }
 
 /* Calendar (clock tooltip) */
@@ -340,62 +355,24 @@ calendar:indeterminate          { color: @gray; }
 }
 
 /* ============================================================
- * hyprwhspr — Gruvbox override of upstream coral palette.
- * Cascades after the @import at top of file.
+ * hyprwhspr — gruvbox override of upstream coral palette.
+ * Pill family handles geometry; we add a bottom underline that
+ * lights up to signal recording / error state.
  * ============================================================ */
-#custom-hyprwhspr {
-    margin: 0 6px;
-    padding: 2px 8px;
-    font-size: 11px;
-    border-radius: 4px;
-    background: @bg1;
-    color: @fg2;
-    border-bottom: 2px solid transparent;
-}
-
-#custom-hyprwhspr.ready {
-    color: @fg2;
-    border-color: transparent;
-}
-
+#custom-hyprwhspr        { color: @fg2; border-bottom: 2px solid transparent; }
 #custom-hyprwhspr.recording {
-    color: @aqua;                /* gruvbox aqua — calmer than upstream coral */
-    border-bottom-color: @aqua;
+    color: @aqua;
     background: @bg2;
+    border-bottom-color: @aqua;
 }
+#custom-hyprwhspr.error  { color: @yellow; border-bottom-color: @yellow; }
+#custom-hyprwhspr:hover  { background: @bg2; }
 
-#custom-hyprwhspr.stopped {
-    color: @fg2;
-    border-color: transparent;
-}
-
-#custom-hyprwhspr.error {
-    color: @yellow;
-    border-bottom-color: @yellow;
-}
-
-#custom-hyprwhspr:hover {
-    background: @bg3;
-    opacity: 1;
-}
-
-/* X-T3 webcam + privacy indicator ---------------------------------------- */
-#custom-xt3-status {
-    padding: 0 10px;
-    margin: 0 4px;
-    border-radius: 6px;
-    font-size: 14px;
-    transition: background-color 200ms ease;
-}
-#custom-xt3-status.off    { opacity: 0.55; }
-#custom-xt3-status.idle   { background: rgba(209, 154, 102, 0.10); }
-#custom-xt3-status.ready  { background: rgba(152, 195, 121, 0.10); }
-#custom-xt3-status.live {
-    background: rgba(224, 108, 117, 0.20);
-    animation: xt3-pulse 1.6s ease-in-out infinite;
-}
-@keyframes xt3-pulse {
-    0%   { background-color: rgba(224, 108, 117, 0.18); }
-    50%  { background-color: rgba(224, 108, 117, 0.40); }
-    100% { background-color: rgba(224, 108, 117, 0.18); }
-}
+/* ============================================================
+ * X-T3 webcam + privacy indicator. Pill geometry from the family;
+ * state colors layer on top via rgba for a quiet contextual tint.
+ * The X-T3 glyph itself blinks via script-side color toggle.
+ * ============================================================ */
+#custom-xt3-status.idle  { background: rgba(209, 154, 102, 0.10); }
+#custom-xt3-status.ready { background: rgba(152, 195, 121, 0.10); }
+#custom-xt3-status.live  { background: rgba(224, 108, 117, 0.12); }

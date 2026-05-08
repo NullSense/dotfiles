@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# omarchy-theme-preview — render an 800×450 swatch sheet from a theme's
+# colors.toml so it appears in the omarchy themes menu.
+#
+# The omarchy themes picker (default/elephant/omarchy_themes.lua) hides any
+# theme dir without a preview.png / preview.jpg / non-empty backgrounds/.
+# This generates a deterministic preview from colors so a colors-only theme
+# still shows up.
+#
+# Usage:
+#   omarchy-theme-preview <theme-dir>          # writes <theme-dir>/preview.png
+#   omarchy-theme-preview ~/.config/omarchy/themes/nullsense
+#
+# Reads colors.toml fields: background, foreground, accent, color0..color15.
+set -euo pipefail
+
+theme_dir="${1:?theme dir required}"
+[[ -d "$theme_dir" ]] || { echo "not a directory: $theme_dir" >&2; exit 1; }
+[[ -f "$theme_dir/colors.toml" ]] || { echo "no colors.toml in $theme_dir" >&2; exit 1; }
+
+theme_name=$(basename "$theme_dir")
+out="$theme_dir/preview.png"
+
+# Pluck a value from colors.toml. Strip surrounding quotes/whitespace; ignore
+# inline comments. Returns empty string if missing.
+get() {
+  local key="$1"
+  awk -F= -v k="$key" '
+    /^[[:space:]]*#/ { next }
+    {
+      # strip inline comments
+      sub(/[[:space:]]*#.*$/, "")
+      # split on first =
+      n = index($0, "=")
+      if (n == 0) next
+      lhs = substr($0, 1, n-1)
+      rhs = substr($0, n+1)
+      gsub(/[[:space:]]/, "", lhs)
+      if (lhs != k) next
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", rhs)
+      gsub(/^"|"$/, "", rhs)
+      print rhs
+      exit
+    }
+  ' "$theme_dir/colors.toml"
+}
+
+bg=$(get background); bg=${bg:-#1d2021}
+fg=$(get foreground); fg=${fg:-#ebdbb2}
+ac=$(get accent);     ac=${ac:-#fabd2f}
+
+# Build 16-color palette array (color0..color15)
+palette=()
+for i in $(seq 0 15); do
+  v=$(get "color$i"); v=${v:-#888888}
+  palette+=("$v")
+done
+
+# Compose with ImageMagick. Layout:
+#   - 800x450 canvas, theme bg
+#   - Big theme name top-left in fg
+#   - Accent color block under name
+#   - 16-color swatch strip across the bottom (50px wide each, 64px tall)
+swatch_h=64
+swatch_w=50
+strip_y=$((450 - swatch_h))
+
+# Build draw commands for the 16 palette swatches
+draw_palette=""
+x=0
+for c in "${palette[@]}"; do
+  draw_palette+=" fill '$c' rectangle $x,$strip_y $((x + swatch_w)),450"
+  x=$((x + swatch_w))
+done
+
+# Pick a usable monospace font — `monospace` alias is unreliable in
+# ImageMagick's freetype config. Try the first installed candidate.
+font=""
+for cand in Adwaita-Mono "Hack-Nerd-Font" "Hack" "DejaVu-Sans-Mono" "JetBrains-Mono" "Liberation-Mono" "Noto-Sans-Mono"; do
+  if magick -list font 2>/dev/null | grep -q "Font: $cand$"; then
+    font="$cand"; break
+  fi
+done
+font_args=()
+[[ -n "$font" ]] && font_args=(-font "$font")
+
+magick -size 800x450 xc:"$bg" \
+  "${font_args[@]}" \
+  -fill "$fg" -pointsize 56 -gravity NorthWest -annotate +30+30 "$theme_name" \
+  -fill "$fg" -pointsize 18                    -annotate +30+110 "bg=$bg  fg=$fg  accent=$ac" \
+  -fill "$ac" -draw "rectangle 30,150 770,250" \
+  -fill "$bg" -pointsize 32 -gravity NorthWest -annotate +50+180 "accent" \
+  -fill "$fg" -draw "$draw_palette" \
+  "$out"
+
+echo "wrote $out"

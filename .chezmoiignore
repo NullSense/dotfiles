@@ -22,3 +22,12 @@ arch-install/**
 # Walker emergencies state, omarchy toggles (waybar-off, etc.) — runtime.
 .local/state/omarchy
 .local/state/omarchy/**
+
+# omarchy backgrounds override path — `omarchy-theme-bg-next` reads
+# ~/.config/omarchy/backgrounds/<theme>/ before the theme dir's own
+# backgrounds/. We aggregate ~80MB of wallpapers under nullsense/ here so
+# the active nullsense theme cycles through every shipped wallpaper. Way
+# too much to track in dotfiles — bootstrap repopulates on demand via
+# `~/.local/bin/omarchy-bg-aggregate [theme-name]`.
+.config/omarchy/backgrounds
+.config/omarchy/backgrounds/**

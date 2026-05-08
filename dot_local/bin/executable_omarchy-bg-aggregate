@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# omarchy-bg-aggregate — copy every shipped omarchy theme's backgrounds
+# into the active theme's user-override path so the wallpaper cycler
+# (`omarchy-theme-bg-next`) draws from the full pool, not just one theme.
+#
+# omarchy looks up backgrounds in this order:
+#   1. ~/.config/omarchy/backgrounds/<theme-name>/      <- override (this path)
+#   2. ~/.config/omarchy/current/theme/backgrounds/     <- copied from theme dir
+#
+# Files are copied (not symlinked) so removing a shipped theme later doesn't
+# break the override pool. Existing files are kept (cp -n), so re-running
+# is idempotent and safe.
+set -eu
+
+target_theme="${1:-nullsense}"
+omarchy_path="${OMARCHY_PATH:-$HOME/.local/share/omarchy}"
+dest="$HOME/.config/omarchy/backgrounds/$target_theme"
+
+mkdir -p "$dest"
+copied=0
+skipped=0
+for d in "$omarchy_path"/themes/*/backgrounds; do
+  [[ -d "$d" ]] || continue
+  theme=$(basename "$(dirname "$d")")
+  for img in "$d"/*; do
+    [[ -f "$img" ]] || continue
+    name=$(basename "$img")
+    if cp -n "$img" "$dest/${theme}-${name}" 2>/dev/null; then
+      copied=$((copied + 1))
+    else
+      skipped=$((skipped + 1))
+    fi
+  done
+done
+echo "$target_theme: copied=$copied skipped=$skipped total=$(ls "$dest" | wc -l)"
+du -sh "$dest"

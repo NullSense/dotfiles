@@ -22,6 +22,8 @@
         "clock"
     ],
     "modules-right": [
+        "custom/agents",
+        "custom/sudo",
         "custom/aiquota",
         "custom/hyprwhspr",
         "custom/xt3-status",
@@ -95,11 +97,19 @@
         "format": "{title}",
         "max-length": 80,
         "separate-outputs": true,
+        "escape": false,
+        "markup": "pango",
         "rewrite": {
-            "(.*) — Mozilla Firefox": "🦊  $1",
-            "(.*) - Visual Studio Code": "  $1",
-            "(.*) - Ghostty": "  $1",
-            "(.*) - Foot": "  $1"
+            "^.\\[claude\\] (.*)$":   "<span foreground='#D97757' face='Font Awesome 7 Brands'></span>  $1",
+            "^.\\[codex\\] (.*)$":    "<span foreground='#10A37F' face='Font Awesome 7 Brands'></span>  $1",
+            "^.\\[opencode\\] (.*)$": "<span foreground='#FF5C00'>󰂩</span>  $1",
+            "^.\\[gemini\\] (.*)$":   "<span foreground='#8E75B2'>󰲾</span>  $1",
+            "^.\\[copilot\\] (.*)$":  "<span foreground='#6E5494' face='Font Awesome 7 Brands'></span>  $1",
+            "^.\\[sudo\\] (.*)$":     "<span foreground='#F0C674'>󰄔</span>  $1",
+            "(.*) — Mozilla Firefox":     "🦊  $1",
+            "(.*) - Visual Studio Code":  "  $1",
+            "(.*) - Ghostty":             "  $1",
+            "(.*) - Foot":                "  $1"
         }
     },
     "hyprland/submap": {
@@ -133,8 +143,32 @@
         "exec": "$HOME/.config/waybar/aiquota-wrap.sh",
         "return-type": "json",
         "interval": 30,
+        "signal": 9,
         "tooltip": true,
-        "on-click": "ghostty -e $HOME/code/aiquota/target/release/aiquota tui"
+        "on-click": "$HOME/.config/waybar/aiquota-cycle.sh",
+        "on-click-right": "ghostty -e $HOME/code/aiquota/target/release/aiquota tui"
+    },
+    "custom/agents": {
+        "exec": "$HOME/.config/waybar/agent-attention.sh",
+        "return-type": "json",
+        "interval": 5,
+        "signal": 8,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click": "$HOME/.config/waybar/agent-attention.sh focus",
+        "on-click-right": "$HOME/.config/waybar/agent-attention.sh dismiss-all"
+    },
+    "custom/sudo": {
+        "exec": "$HOME/.config/waybar/sudo-indicator.sh",
+        "return-type": "json",
+        "interval": 30,
+        "signal": 10,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango"
     },
     "custom/hyprwhspr": {
         "format": "{}",
@@ -154,16 +188,17 @@
         "tooltip": true,
         "escape": false,
         "markup": "pango",
-        "on-click": "systemctl --user restart xt3-webcam.service",
-        "on-click-right": "systemctl --user stop xt3-webcam.service"
+        "on-click": "$HOME/.config/waybar/xt3-action.sh restart",
+        "on-click-right": "$HOME/.config/waybar/xt3-action.sh stop",
+        "on-click-middle": "$HOME/.config/waybar/xt3-action.sh status"
     },
     "idle_inhibitor": {
         "format": "{icon}",
         "format-icons": {
-            "activated": "",
-            "deactivated": ""
+            "activated": "󰒳",
+            "deactivated": "󰒲"
         },
-        "tooltip-format-activated": "Idle inhibitor: ON",
+        "tooltip-format-activated": "Idle inhibitor: ON  (display + sleep blocked)",
         "tooltip-format-deactivated": "Idle inhibitor: off"
     },
     "custom/brightness": {
@@ -191,22 +226,22 @@
         "interval": 5,
         "format": "   {usage}%",
         "tooltip-format": "CPU  {usage}%   load {load}\n  L-click  btop\n  R-click  htop",
-        "on-click": "foot --app-id=floating-monitor btop",
-        "on-click-right": "foot --app-id=floating-monitor htop"
+        "on-click": "ghostty --class=com.local.floating-monitor -e btop",
+        "on-click-right": "ghostty --class=com.local.floating-monitor -e htop"
     },
     "memory": {
         "interval": 10,
         "format": "   {used:0.1f}G",
         "tooltip-format": "RAM  {used:0.1f}G / {total:0.1f}G  ({percentage}%)\nswap {swapUsed:0.1f}G / {swapTotal:0.1f}G  ({swapPercentage}%)\n  L-click  btop\n  R-click  free -h",
-        "on-click": "foot --app-id=floating-monitor btop",
-        "on-click-right": "foot --app-id=floating-monitor sh -c 'free -h; echo; read -r _'"
+        "on-click": "ghostty --class=com.local.floating-monitor -e btop",
+        "on-click-right": "ghostty --class=com.local.floating-monitor -e sh -c 'free -h; echo; read -r _'"
     },
     "temperature": {
         "critical-threshold": 85,
         "format": "   {temperatureC}°",
         "format-critical": "   {temperatureC}°",
         "tooltip-format": "Temp  {temperatureC}°C  ({temperatureF}°F)\n  L-click  btop (sensors)",
-        "on-click": "foot --app-id=floating-monitor btop"
+        "on-click": "ghostty --class=com.local.floating-monitor -e btop"
     },
     "disk#home": {
         "interval": 30,
@@ -214,7 +249,7 @@
         "tooltip-format": "~  used {used} of {total}  ({percentage_used}%)\n  L-click  thunar ~\n  R-click  btop (disk view)",
         "path": "/home/",
         "on-click": "thunar $HOME",
-        "on-click-right": "foot --app-id=floating-monitor btop"
+        "on-click-right": "ghostty --class=com.local.floating-monitor -e btop"
     },
     "disk#root": {
         "interval": 30,
@@ -222,7 +257,7 @@
         "tooltip-format": "/  used {used} of {total}  ({percentage_used}%)\n  L-click  thunar /\n  R-click  df -h",
         "path": "/",
         "on-click": "thunar /",
-        "on-click-right": "foot --app-id=floating-monitor sh -c 'df -hT -x tmpfs -x devtmpfs -x squashfs; echo; read -r _'"
+        "on-click-right": "ghostty --class=com.local.floating-monitor -e sh -c 'df -hT -x tmpfs -x devtmpfs -x squashfs; echo; read -r _'"
     },
     "pulseaudio": {
         "format": "{icon}  {volume}%",
@@ -267,7 +302,7 @@
             "warning": 25,
             "critical": 10
         },
-        "on-click": "foot --app-id=floating-monitor sh -c 'upower -i $(upower -e | grep hidpp); echo; read -r _'"
+        "on-click": "ghostty --class=com.local.floating-monitor -e sh -c 'upower -i $(upower -e | grep hidpp); echo; read -r _'"
     },
     "tray": {
         "spacing": 12,

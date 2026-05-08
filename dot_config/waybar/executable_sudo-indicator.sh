@@ -47,6 +47,16 @@ case "${1:-}" in
     ;;
   ""|check)
     if read_flag; then
+      # auth_prompt = sudo is asking for password right now. Distinct state
+      # from active so CSS can flash yellow vs solid yellow. Short-lived;
+      # session_open will replace it within seconds on auth success, or
+      # TTL-decay (typically <30s) on user cancel/wrong password.
+      if [[ "${F[type]:-}" == "auth_prompt" ]]; then
+        printf '{"text":"󰌾 …","alt":"prompt","class":"prompt","tooltip":"sudo is asking for your password\\nuser: %s\\ntty:  %s"}\n' \
+          "${F[user]:-?}" "${F[tty]:-?}"
+        exit 0
+      fi
+
       remaining=$(( ttl - AGE ))
       rem_min=$(( remaining / 60 ))
       rem_sec=$(( remaining % 60 ))

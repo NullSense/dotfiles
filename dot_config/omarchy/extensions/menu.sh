@@ -155,10 +155,12 @@ recording_action() {
 }
 
 show_ai_submenu() {
-  case $(menu "AI vision" "  Summarize screen\n  Explain region\n  Ask about region") in
-  *Summarize*screen*)  ai_dispose "$(hyprwhspr-vision summarize-screen)" ;;
-  *Explain*region*)    ai_dispose "$(hyprwhspr-vision explain-region)" ;;
-  *Ask*about*region*)  ai_dispose "$(hyprwhspr-vision ask-region)" ;;
+  case $(menu "AI" "  Summarize screen\n  Explain region\n  Ask about region\n  Translate region\n  Translate clipboard") in
+  *Summarize*screen*)    ai_dispose "$(hyprwhspr-vision summarize-screen)" ;;
+  *Explain*region*)      ai_dispose "$(hyprwhspr-vision explain-region)" ;;
+  *Ask*about*region*)    ai_dispose "$(hyprwhspr-vision ask-region)" ;;
+  *Translate*region*)    ai_dispose "$(hyprwhspr-translate region)" ;;
+  *Translate*clipboard*) ai_dispose "$(hyprwhspr-translate clipboard)" ;;
   *) back_to show_capture_menu ;;
   esac
 }

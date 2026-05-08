@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# hyprwhspr-translate — local translation via Gemma 4 (140+ pre-trained
+# languages, 35+ first-class). Runs against the same LM Studio instance
+# the rewrite hook uses; no API key needed.
+#
+# Subcommands:
+#   region          drag a region → vision-translate the text in it
+#   clipboard       translate current wl-clipboard contents (text-only call)
+#   text "<txt>"    translate stdin or arg text directly
+#
+# Target language UX (Raycast-multi-translate inspired): favorites at top
+# (from ~/.config/hyprwhspr/languages.txt), "Other…" at bottom opens a
+# walker input for free-text language. Gemma handles names + ISO codes.
+#
+# Source language: always auto-detected by Gemma. The system prompt makes
+# it explicit so users can override by prefixing input with "[from XX]"
+# if needed.
+
+set -euo pipefail
+
+LMS_URL_BASE="${HYPRWHSPR_LMS_URL_BASE:-http://127.0.0.1:1234}"
+LMS_MODEL="${HYPRWHSPR_LMS_MODEL:-google_gemma-4-e4b-it}"
+LANGS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/hyprwhspr/languages.txt"
+TIMEOUT=30
+
+WALKER="$(command -v omarchy-launch-walker || command -v walker)"
+WDIMS=(--width 295 --minheight 1 --maxheight 630)
+
+notify() {
+  command -v notify-send >/dev/null && \
+    notify-send -a hyprwhspr-translate "$@" 2>/dev/null || true
+}
+
+walker_input() {
+  printf '' | "$WALKER" --dmenu -I "${WDIMS[@]}" -p "${1}…" 2>/dev/null || true
+}
+
+walker_pick() {
+  "$WALKER" --dmenu "${WDIMS[@]}" -p "${1}…" 2>/dev/null || true
+}
+
+# --- Pre-flight (mirror the rewrite hook's pattern) --------------------------
+preflight() {
+  local state
+  state="$(curl -fsS --max-time 1 "${LMS_URL_BASE}/api/v0/models" 2>/dev/null \
+    | jq -r --arg id "$LMS_MODEL" '.data[] | select(.id == $id) | .state' 2>/dev/null)"
+  if [[ "$state" == "loaded" ]]; then return 0; fi
+  if [[ -z "$state" || "$state" == "null" ]]; then
+    notify -u normal "LM Studio unavailable" "Cannot reach :1234 or model not registered"
+    return 1
+  fi
+  notify -u normal "Loading model" "${LMS_MODEL} is ${state}. Triggering background load."
+  ( setsid "$HOME/.local/bin/hyprwhspr-warmup" >/dev/null 2>&1 & ) &
+  return 1
+}
+
+# --- Target language picker --------------------------------------------------
+# Favorites + "Other…" entry. Returns the picked language name, or empty
+# string if the user cancelled.
+pick_target_language() {
+  local favs
+  favs="$(grep -vE '^\s*(#|$)' "$LANGS_FILE" 2>/dev/null || printf 'English\nGerman\nLithuanian\n')"
+  local picked
+  picked="$(printf '%s\n  Other…\n' "$favs" | walker_pick 'Translate to')"
+  [[ -z "$picked" ]] && return 1
+  if [[ "$picked" == *Other* ]]; then
+    picked="$(walker_input 'Language (name or ISO code, e.g. \"Polish\" or \"pl\")')"
+    [[ -z "$picked" ]] && return 1
+  fi
+  printf '%s' "$picked"
+}
+
+# --- Capture helpers ---------------------------------------------------------
+capture_region() {
+  local geom; geom="$(slurp -d -b 28282880 -c fabd2fee -w 2 2>/dev/null)" || return 1
+  [[ -z "$geom" ]] && return 1
+  local f; f="$(mktemp --suffix=.png)"
+  grim -g "$geom" "$f" 2>/dev/null && printf '%s' "$f"
+}
+
+# --- LLM calls ---------------------------------------------------------------
+SYSTEM_TRANSLATE="You are a precision translator. Translate the user's input to the target language they specify. Output ONLY the translation — no preamble, no quotes, no commentary, no explanations. Preserve formatting (paragraphs, lists, code blocks) exactly. Preserve proper nouns, names, identifiers, technical terms, numbers, dates, and code verbatim. Auto-detect the source language. If the input is already in the target language, return it unchanged. Match register: casual stays casual, formal stays formal."
+
+translate_text() {
+  local target="$1" text="$2"
+  local body; body="$(mktemp)"
+  jq -n --arg model "$LMS_MODEL" --arg sys "$SYSTEM_TRANSLATE" \
+        --arg user "Translate to ${target}:
+
+${text}" '
+    {model: $model,
+     messages: [{role:"system",content:$sys},{role:"user",content:$user}],
+     max_tokens: 1024, temperature: 0.3, stream: false}' > "$body"
+  curl -fsS --max-time "$TIMEOUT" -H 'Content-Type: application/json' \
+    --data-binary "@${body}" "${LMS_URL_BASE}/v1/chat/completions" 2>/dev/null \
+    | jq -r '.choices[0].message.content // ""'
+  rm -f "$body"
+}
+
+translate_image() {
+  local image_path="$1" target="$2"
+  local b64file body
+  b64file="$(mktemp)"; body="$(mktemp)"
+  base64 -w0 "$image_path" > "$b64file"
+  jq -n --rawfile b "$b64file" --arg model "$LMS_MODEL" \
+        --arg sys "$SYSTEM_TRANSLATE" \
+        --arg target "$target" '
+    {model: $model,
+     messages: [
+       {role:"system", content:$sys},
+       {role:"user", content:[
+         {type:"image_url", image_url:{url:"data:image/png;base64,\($b)"}},
+         {type:"text", text:"Translate the text visible in this image to \($target). Output ONLY the translation."}
+       ]}],
+     max_tokens: 1024, temperature: 0.3, stream: false}' > "$body"
+  curl -fsS --max-time "$TIMEOUT" -H 'Content-Type: application/json' \
+    --data-binary "@${body}" "${LMS_URL_BASE}/v1/chat/completions" 2>/dev/null \
+    | jq -r '.choices[0].message.content // ""'
+  rm -f "$b64file" "$body"
+}
+
+# --- Subcommands -------------------------------------------------------------
+case "${1:-}" in
+  region)
+    img="$(capture_region)" || { notify -u low "Region capture cancelled"; exit 0; }
+    target="$(pick_target_language)" || { rm -f "$img"; notify -u low "Translation cancelled"; exit 0; }
+    preflight || { rm -f "$img"; exit 0; }
+    notify -u low -t 2000 "Translating to ${target}…"
+    translate_image "$img" "$target"
+    rm -f "$img"
+    ;;
+
+  clipboard)
+    text="$(wl-paste 2>/dev/null)"
+    [[ -z "$text" ]] && { notify -u normal "Clipboard empty" "Nothing to translate"; exit 0; }
+    target="$(pick_target_language)" || { notify -u low "Translation cancelled"; exit 0; }
+    preflight || exit 0
+    notify -u low -t 2000 "Translating to ${target}…"
+    translate_text "$target" "$text"
+    ;;
+
+  text)
+    shift
+    if [[ $# -ge 1 && "$1" != "-" ]]; then
+      text="$1"
+    else
+      text="$(cat)"
+    fi
+    [[ -z "$text" ]] && { notify -u normal "No input" "Nothing to translate"; exit 1; }
+    target="$(pick_target_language)" || exit 0
+    preflight || exit 0
+    notify -u low -t 2000 "Translating to ${target}…"
+    translate_text "$target" "$text"
+    ;;
+
+  *)
+    cat >&2 <<'EOF'
+hyprwhspr-translate — local Gemma 4 translation
+
+Usage:
+  hyprwhspr-translate region        drag region → translate text in it
+  hyprwhspr-translate clipboard     translate current clipboard
+  hyprwhspr-translate text "<txt>"  translate arg or stdin
+  hyprwhspr-translate text -        read from stdin
+
+Languages:
+  Top of picker comes from ~/.config/hyprwhspr/languages.txt
+  "Other…" entry takes any language name or ISO code via walker input.
+EOF
+    exit 2
+    ;;
+esac

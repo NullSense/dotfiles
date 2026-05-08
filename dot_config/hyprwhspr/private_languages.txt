@@ -1,0 +1,13 @@
+# Translation favorites for hyprwhspr-translate.
+# One language per line. Used as the top entries in the target-language
+# walker picker; "Other…" at the bottom takes free-text input.
+#
+# Format: name as you'd say it in English (Gemma understands either the
+# common name or ISO 639 code). Order = display order.
+#
+# Add/remove with `hyprwhspr-translate vocab-add`/`vocab-rm` (TODO) or just
+# edit this file. No daemon restart needed — picked up on each translation.
+
+English
+German
+Lithuanian

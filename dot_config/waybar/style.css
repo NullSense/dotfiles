@@ -288,22 +288,33 @@ window#waybar.hidden { opacity: 0; }
      * module text; the pill chrome just gets a red border for emphasis. */
     border-color: @red;
 }
+/* Sudo state palette — chosen so each state is recognisable by colour
+ * alone, not just glyph. Lock-glyph carries the auth state, colour
+ * carries the urgency:
+ *   idle    closed lock   gray   neutral, locked
+ *   prompt  closed+...    yellow blink — needs your action
+ *   active  open lock     green  — privileged command running RIGHT NOW
+ *   cached  open lock     blue   — auth cached, no command running
+ *   failed  closed lock   red    brief flash — auth attempt rejected
+ */
 #custom-sudo.active {
-    color: @yellow;
-    border-color: @yellow;
+    color: @green;
+    border-color: @green;
 }
-/* auth_prompt — flash for attention. */
 #custom-sudo.prompt {
     color: @yellow;
     border-color: @yellow;
     animation: blink 0.8s ease-in-out infinite alternate;
 }
-/* cached — sudo done but auth cache still warm. Dim so the bar is
- * subtle but the user can still tell they don't need to re-type. */
 #custom-sudo.cached {
-    color: @yellow;
+    color: @blue;
     border-color: @bg3;
-    opacity: 0.55;
+    opacity: 0.6;
+}
+#custom-sudo.failed {
+    color: @red;
+    border-color: @red;
+    animation: blink 0.4s linear 4 alternate;  /* 4 fast pulses then idles */
 }
 
 /* hyprland workspace urgency (xdg-activation-driven) */

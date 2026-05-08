@@ -47,6 +47,19 @@ case "${1:-}" in
     ;;
   ""|check)
     if read_flag; then
+      # failed = sudo daemon detected prompt→idle without running.
+      # Brief red flash, self-expires after 3s.
+      if [[ "${F[type]:-}" == "failed" ]]; then
+        if (( AGE > 3 )); then
+          rm -f "$flag" 2>/dev/null || true
+          printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"sudo locked"}\n'
+          exit 0
+        fi
+        printf '{"text":"󰌾 ✗","alt":"failed","class":"failed","tooltip":"sudo authentication failed\\nuser: %s\\ntty:  %s"}\n' \
+          "${F[user]:-?}" "${F[tty]:-?}"
+        exit 0
+      fi
+
       # auth_prompt = sudo is asking for password right now. Two ways to
       # clear: (1) sudo PID disappears (Ctrl+C, terminal closed, sudo
       # exited with auth fail), (2) prompt has been pending too long
@@ -55,19 +68,32 @@ case "${1:-}" in
         prompt_ttl=${SUDO_PROMPT_TTL:-60}
         sudo_pid=${F[sudo_pid]:-}
         if [[ -n "$sudo_pid" ]] && ! kill -0 "$sudo_pid" 2>/dev/null; then
-          # sudo process gone → user cancelled / terminal closed.
           rm -f "$flag" 2>/dev/null || true
-          printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
+          printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"sudo locked"}\n'
           exit 0
         fi
         if (( AGE > prompt_ttl )); then
-          # Stuck prompt — fall back to idle to avoid permanent flash.
           rm -f "$flag" 2>/dev/null || true
-          printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
+          printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"sudo locked"}\n'
           exit 0
         fi
-        printf '{"text":"󰌾 …","alt":"prompt","class":"prompt","tooltip":"sudo is asking for your password\\nuser: %s\\ntty:  %s"}\n' \
-          "${F[user]:-?}" "${F[tty]:-?}"
+        # Closed lock + ellipsis. Workspace badge if known so user sees
+        # which terminal is asking — captured by /usr/local/bin/sudo-prompt.sh.
+        ws=${F[ws]:-}
+        ws_label=""
+        [[ -n "$ws" ]] && case "$ws" in
+          special:*) ws_label="scratch:${ws#special:}" ;;
+          *)         ws_label="ws$ws" ;;
+        esac
+        if [[ -n "$ws_label" ]]; then text="󰌾 $ws_label …"; else text="󰌾 …"; fi
+        tt="sudo asking for password"
+        [[ -n "$ws_label" ]] && tt+="\\nws:   $ws"
+        tt+="\\nuser: ${F[user]:-?}"
+        [[ -n "${F[tty]:-}" && "${F[tty]:-}" != "?" ]] && tt+="\\ntty:  ${F[tty]}"
+        text_json=$(jq -Rn --arg t "$text" '$t')
+        tooltip_json=$(jq -Rn --arg t "$tt" '$t' | sed 's/\\\\n/\\n/g')
+        printf '{"text":%s,"alt":"prompt","class":"prompt","tooltip":%s}\n' \
+          "$text_json" "$tooltip_json"
         exit 0
       fi
 
@@ -87,15 +113,17 @@ case "${1:-}" in
       esac
 
       if [[ "$kind" == "close_session" ]]; then
-        # Cache active but no command running → dim, no workspace.
-        text="󰌾"
+        # Cache warm but no command running → OPEN lock (privileged
+        # access available), dim, no workspace.
+        text="󰿆"
         class="cached"
         tt="sudo cache active — ~${rem_min}m ${rem_sec}s left\\n(no command running)"
       else
-        # open_session, running.
-        if [[ -n "$ws_label" ]]; then text="󰌾 $ws_label"; else text="󰌾"; fi
+        # open_session — command actually running with elevated privs.
+        # OPEN lock + green to make "actively using sudo" obvious.
+        if [[ -n "$ws_label" ]]; then text="󰿆 $ws_label"; else text="󰿆"; fi
         class="active"
-        tt="sudo running — cache valid ~${rem_min}m ${rem_sec}s"
+        tt="sudo running with elevated privs — cache ~${rem_min}m ${rem_sec}s"
         tt+="\\nuser: ${F[user]:-?}"
         [[ -n "${F[tty]:-}" && "${F[tty]:-}" != "?" ]] && tt+="\\ntty:  ${F[tty]}"
         [[ -n "$ws" ]] && tt+="\\nws:   $ws"
@@ -108,10 +136,8 @@ case "${1:-}" in
         "$text_json" "$class" "$class" "$tooltip_json"
       exit 0
     fi
-    # Idle pill: emit a dim lock glyph so the chrome stays visible
-    # whether sudo is active or not. Empty `text` would render as a
-    # zero-width module → looks "missing". CSS dims via #custom-sudo.idle.
-    printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
+    # Idle: closed lock, dim. Means "sudo will require password if invoked".
+    printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"sudo locked — password required for next sudo"}\n'
     ;;
   *)
     echo "usage: $0 [check|focus]" >&2

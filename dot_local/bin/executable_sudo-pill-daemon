@@ -206,6 +206,7 @@ current_state() {
       auth_prompt)   echo prompt;  return ;;
       open_session)  (( AGE < ttl )) && { echo running; return; } ;;
       close_session) (( AGE < ttl )) && { echo cached;  return; } ;;
+      failed)        (( AGE < 3 ))   && { echo failed;  return; } ;;
     esac
   fi
   echo idle

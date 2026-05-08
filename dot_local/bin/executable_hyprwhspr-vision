@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# hyprwhspr-vision — multimodal screen Q&A via the Gemma 4 vision pipeline
+# already loaded for dictation rewrite.
+#
+# Subcommands (each prints the LLM answer to stdout; caller handles disposal):
+#   summarize-screen   full screen → "summarize what's visible"
+#   explain-region     drag region → "explain what this is"
+#   ask-region         drag region → walker prompts for a question → answer
+#   edit-last          open the most recent screenshot in satty (no AI)
+#
+# Pre-flight: we reuse the rewrite hook's state check via /api/v0/models. If
+# Gemma isn't loaded we fire a background warmup ping and notify the user
+# instead of timing out (vision calls take 3-5s warm; cold loads exceed that).
+#
+# Image bytes are passed to LM Studio via the OpenAI vision API format:
+#   messages: [{ role: user, content: [
+#     {type: image_url, image_url: {url: "data:image/png;base64,..."}},
+#     {type: text,      text: "<prompt>"}
+#   ]}]
+
+set -euo pipefail
+
+LMS_URL_BASE="${HYPRWHSPR_LMS_URL_BASE:-http://127.0.0.1:1234}"
+LMS_MODEL="${HYPRWHSPR_LMS_MODEL:-google_gemma-4-e4b-it}"
+TIMEOUT=30
+SHOTS_DIR="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures/Screenshots}}"
+
+WALKER="$(command -v omarchy-launch-walker || command -v walker)"
+WDIMS=(--width 295 --minheight 1 --maxheight 630)
+
+notify() {
+  command -v notify-send >/dev/null && \
+    notify-send -a hyprwhspr-vision "$@" 2>/dev/null || true
+}
+
+walker_input() {
+  printf '' | "$WALKER" --dmenu -I "${WDIMS[@]}" -p "${1}…" 2>/dev/null || true
+}
+
+# --- Pre-flight: model loaded? -----------------------------------------------
+preflight() {
+  local state
+  state="$(curl -fsS --max-time 1 "${LMS_URL_BASE}/api/v0/models" 2>/dev/null \
+    | jq -r --arg id "$LMS_MODEL" '.data[] | select(.id == $id) | .state' 2>/dev/null)"
+  case "$state" in
+    loaded) return 0 ;;
+    ""|null)
+      notify -u normal -t 4000 "LM Studio unavailable" \
+        "Cannot reach :1234 or model '${LMS_MODEL}' not registered"
+      return 1
+      ;;
+    *)
+      notify -u normal -t 4500 "Loading vision model" \
+        "${LMS_MODEL} is ${state}. Triggering background load — try again in a few seconds."
+      ( setsid "$HOME/.local/bin/hyprwhspr-warmup" >/dev/null 2>&1 & ) &
+      return 1
+      ;;
+  esac
+}
+
+# --- Capture helpers ---------------------------------------------------------
+capture_full() {
+  # Single monitor only — grim with no -o would grab every output stitched
+  # together, producing a multi-thousand-pixel image and a ~2000-vision-token
+  # prefill cost that's death on a 4.5B-effective model. Pick the focused
+  # monitor (or fall back to the first if no focused detection).
+  local mon f
+  mon="$(hyprctl monitors -j 2>/dev/null \
+    | jq -r '(.[] | select(.focused == true) | .name) // .[0].name // ""')"
+  f="$(mktemp --suffix=.png)"
+  if [[ -n "$mon" ]]; then
+    grim -o "$mon" "$f" 2>/dev/null && printf '%s' "$f"
+  else
+    grim "$f" 2>/dev/null && printf '%s' "$f"
+  fi
+}
+
+capture_region() {
+  local geom; geom="$(slurp -d -b 28282880 -c fabd2fee -w 2 2>/dev/null)" || return 1
+  [[ -z "$geom" ]] && return 1
+  local f; f="$(mktemp --suffix=.png)"
+  grim -g "$geom" "$f" 2>/dev/null && printf '%s' "$f"
+}
+
+# --- Vision call -------------------------------------------------------------
+vision_call() {
+  local image_path="$1" prompt="$2"
+  local b64file body
+  b64file="$(mktemp)"; body="$(mktemp)"
+  base64 -w0 "$image_path" > "$b64file"
+  jq -n --rawfile b "$b64file" --arg model "$LMS_MODEL" --arg prompt "$prompt" '
+    {model: $model,
+     messages: [{role:"user", content:[
+       {type:"image_url", image_url:{url:"data:image/png;base64,\($b)"}},
+       {type:"text", text:$prompt}
+     ]}],
+     max_tokens: 768,
+     temperature: 0.5,
+     stream: false}' > "$body"
+  local resp
+  resp="$(curl -fsS --max-time "$TIMEOUT" -H 'Content-Type: application/json' \
+    --data-binary "@${body}" "${LMS_URL_BASE}/v1/chat/completions" 2>/dev/null)" || {
+    rm -f "$b64file" "$body"
+    notify -u normal "Vision call failed" "Request to LM Studio errored or timed out (${TIMEOUT}s)"
+    return 1
+  }
+  rm -f "$b64file" "$body"
+  printf '%s' "$resp" | jq -r '.choices[0].message.content // ""'
+}
+
+# --- Subcommands -------------------------------------------------------------
+case "${1:-}" in
+  summarize-screen)
+    preflight || exit 0
+    notify -u low -t 1000 "Capturing screen…"
+    img="$(capture_full)" || { notify -u normal "Capture failed"; exit 1; }
+    notify -u low -t 2000 "Asking Gemma 4…"
+    vision_call "$img" "Summarize what's visible on this screen in 2-4 short sentences. If there's a clear primary task or content (an article, an error, a UI dialog), focus on that. Be concrete: name what you see. Output plain text, no markdown."
+    rm -f "$img"
+    ;;
+
+  explain-region)
+    preflight || exit 0
+    img="$(capture_region)" || { notify -u low "Region capture cancelled"; exit 0; }
+    notify -u low -t 2000 "Asking Gemma 4…"
+    vision_call "$img" "Explain what's shown in this region. If it's an error or stack trace, decode the cause. If it's a UI element, describe what it does. If it's text, summarize it. If it's a chart or diagram, describe the data. Be concise — 2-4 sentences."
+    rm -f "$img"
+    ;;
+
+  ask-region)
+    img="$(capture_region)" || { notify -u low "Region capture cancelled"; exit 0; }
+    q="$(walker_input 'Question about this region')"
+    if [[ -z "$q" ]]; then rm -f "$img"; exit 0; fi
+    preflight || { rm -f "$img"; exit 0; }
+    notify -u low -t 2000 "Asking Gemma 4…"
+    vision_call "$img" "$q"
+    rm -f "$img"
+    ;;
+
+  edit-last)
+    last="$(/usr/bin/ls -t "${SHOTS_DIR}"/*.png 2>/dev/null | /usr/bin/head -1)"
+    if [[ -z "$last" || ! -f "$last" ]]; then
+      notify -u normal "No screenshots found" "Looked in ${SHOTS_DIR}"; exit 0
+    fi
+    setsid satty --filename "$last" --output-filename "$last" \
+      --early-exit --copy-command 'wl-copy' >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+    ;;
+
+  *)
+    cat >&2 <<'EOF'
+hyprwhspr-vision — Gemma 4 multimodal screen Q&A
+
+Usage:
+  hyprwhspr-vision summarize-screen   full screen → AI summary
+  hyprwhspr-vision explain-region     drag region → AI explanation
+  hyprwhspr-vision ask-region         drag region + walker question → AI answer
+  hyprwhspr-vision edit-last          open most recent screenshot in satty
+EOF
+    exit 2
+    ;;
+esac

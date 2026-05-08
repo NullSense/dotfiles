@@ -7,6 +7,12 @@
 #
 # State file /tmp/hdr-state holds "on" when forced; absent/anything-else
 # means default. Hyprland's `hyprctl keyword` rewrites the live config.
+#
+# `cm, hdr` (BT.2100 PQ with textbook D65) is used instead of `cm, hdredid`
+# because the FO32U2's EDID-claimed primaries skew warm — using them as the
+# conversion target makes sRGB content render with a visible red tint.
+# Generic BT.2100 sidesteps the EDID and is closer to what the panel
+# actually displays for sRGB-mapped-to-HDR content.
 
 set -eu
 
@@ -18,7 +24,7 @@ if [ "$(cat "$STATE" 2>/dev/null)" = "on" ]; then
     rm -f "$STATE"
     notify-send -u low "HDR" "Auto (SDR desktop, HDR on fullscreen)"
 else
-    hyprctl keyword monitor "$MON, 3840x2160@240, 0x0, 2.0, bitdepth, 10, cm, hdredid" >/dev/null
+    hyprctl keyword monitor "$MON, 3840x2160@240, 0x0, 2.0, bitdepth, 10, cm, hdr" >/dev/null
     echo on >"$STATE"
     notify-send -u low "HDR" "Forced on (whole desktop)"
 fi

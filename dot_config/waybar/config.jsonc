@@ -163,7 +163,7 @@
     "custom/sudo": {
         "exec": "$HOME/.config/waybar/sudo-watch.sh",
         "return-type": "json",
-        "interval": "once",
+        "restart-interval": 1,
         "format": "{}",
         "tooltip": true,
         "escape": false,

@@ -111,3 +111,8 @@ yy() {
 # warns if any later sourced file (aliases, hooks, secrets) registers chpwd
 # after it. Keep this at the very bottom of zshrc.
 command -v zoxide   &>/dev/null && eval "$(zoxide init zsh --cmd cd)"
+
+# Added by LM Studio CLI (lms)
+export PATH="$PATH:/home/nullsense/.lmstudio/bin"
+# End of LM Studio CLI section
+

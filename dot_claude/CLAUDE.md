@@ -81,3 +81,5 @@ Cross-project knowledge lives in `~/.claude/memory/`:
 When you learn a cross-project convention, write it to the appropriate file here
 instead of expanding this CLAUDE.md. Keep this file focused on top-level
 preferences only — concise indexes age better than sprawling ones.
+
+@RTK.md

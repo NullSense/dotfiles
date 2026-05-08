@@ -10,3 +10,8 @@ export MOZ_ENABLE_WAYLAND=1         # Firefox native Wayland
 export QT_QPA_PLATFORM=wayland      # Qt apps use Wayland
 export SDL_VIDEODRIVER=wayland      # SDL games use Wayland
 export _JAVA_AWT_WM_NONREPARENTING=1 # Fix Java apps
+
+# Added by LM Studio CLI (lms)
+export PATH="$PATH:/home/nullsense/.lmstudio/bin"
+# End of LM Studio CLI section
+

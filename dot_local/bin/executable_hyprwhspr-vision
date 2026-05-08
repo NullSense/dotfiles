@@ -147,6 +147,16 @@ case "${1:-}" in
     disown 2>/dev/null || true
     ;;
 
+  analyze-file)
+    # Analyze an arbitrary image file (used by the post-capture walker
+    # to send a just-taken screenshot to Gemma for explanation).
+    file="${2:?file required}"; prompt="${3:-Explain what is shown in this image. Be concise.}"
+    [[ -f "$file" ]] || { notify -u normal "File not found" "$file"; exit 1; }
+    preflight || exit 0
+    notify -u low -t 2000 "Asking Gemma 4…"
+    vision_call "$file" "$prompt"
+    ;;
+
   *)
     cat >&2 <<'EOF'
 hyprwhspr-vision — Gemma 4 multimodal screen Q&A

@@ -119,25 +119,100 @@ ai_dispose() {
 }
 
 show_capture_menu() {
-  case $(menu "Capture" "  Screenshot…\n  Screen record…\n  Text extraction (OCR)\n  Color picker\n󰋩  AI: Summarize screen\n󰋩  AI: Explain region\n󰋩  AI: Ask about region\n󰏫  Edit last screenshot") in
-  *Screenshot…*)        show_screenshot_submenu ;;
-  *Screen*record…*)     show_screenrecord_submenu ;;
-  *Text*extraction*|*OCR*) omarchy-capture-text-extraction ;;
-  *Color*picker*)       pkill hyprpicker || setsid hyprpicker -a >/dev/null 2>&1 & ;;
-  *AI*Summarize*screen*) ai_dispose "$(hyprwhspr-vision summarize-screen)" ;;
-  *AI*Explain*region*)   ai_dispose "$(hyprwhspr-vision explain-region)" ;;
-  *AI*Ask*about*region*) ai_dispose "$(hyprwhspr-vision ask-region)" ;;
-  *Edit*last*screenshot*) hyprwhspr-vision edit-last ;;
+  # Stop entry only appears while gpu-screen-recorder is alive — saves
+  # menu real estate when not recording, doubles as a recording indicator.
+  local stop_entry=""
+  if pgrep -x gpu-screen-recorder >/dev/null 2>&1; then
+    stop_entry='󰓛  Stop recording\n'
+  fi
+  # Icons chosen for representativeness (Font Awesome + MDI):
+  #     screenshot (image-icon)        screenshot regions (object-group)
+  #     window-restore                 desktop / monitor
+  #     video / film  󰓛 stop-circle    file-text-o (OCR)
+  #     eyedropper                  brain (AI)            pencil-square (edit)
+  case $(menu "Capture" "${stop_entry}  Screenshot (smart)\n  Region screenshot\n  Window screenshot\n  Full-screen screenshot\n  Start screen record…\n  Text extraction (OCR)\n  Color picker\n  AI: Summarize screen\n  AI: Explain region\n  AI: Ask about region\n  Edit last screenshot") in
+  *Stop*recording*)
+    omarchy-capture-screenrecording --stop-recording
+    ;;
+  *Screenshot*smart*)            capture_with_disposal smart ;;
+  *Region*screenshot*)           capture_with_disposal region ;;
+  *Window*screenshot*)           capture_with_disposal windows ;;
+  *Full-screen*screenshot*)      capture_with_disposal fullscreen ;;
+  *Start*screen*record*)         show_screenrecord_submenu ;;
+  *Text*extraction*|*OCR*)       omarchy-capture-text-extraction ;;
+  *Color*picker*)                pkill hyprpicker || setsid hyprpicker -a >/dev/null 2>&1 & ;;
+  *AI*Summarize*screen*)         ai_dispose "$(hyprwhspr-vision summarize-screen)" ;;
+  *AI*Explain*region*)           ai_dispose "$(hyprwhspr-vision explain-region)" ;;
+  *AI*Ask*about*region*)         ai_dispose "$(hyprwhspr-vision ask-region)" ;;
+  *Edit*last*screenshot*)        hyprwhspr-vision edit-last ;;
   *) back_to show_main_menu ;;
   esac
 }
 
-show_screenshot_submenu() {
-  case $(menu "Screenshot" "  Region\n  Window\n  Full screen") in
-  *Region*)      omarchy-capture-screenshot region ;;
-  *Window*)      omarchy-capture-screenshot windows ;;
-  *Full*screen*) omarchy-capture-screenshot fullscreen ;;
-  *) back_to show_capture_menu ;;
+# Run an omarchy screenshot in the requested mode, then offer a disposal
+# walker with the just-saved file. omarchy-capture-screenshot saves to
+# clipboard + file unconditionally; we layer additional actions on top
+# (edit / re-copy / save elsewhere / AI explain / AI ask / open / done).
+capture_with_disposal() {
+  local mode="$1"
+  omarchy-capture-screenshot "$mode" || return
+  local shots_dir="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures/Screenshots}}"
+  local file
+  file="$(/usr/bin/ls -t "${shots_dir}"/*.png 2>/dev/null | /usr/bin/head -1)"
+  [[ -z "$file" || ! -f "$file" ]] && return
+  capture_dispose "$file"
+}
+
+# Post-capture walker for screenshots. The screenshot is already saved +
+# clipboard'd by omarchy; this menu offers extra actions.
+capture_dispose() {
+  local file="$1"
+  local label="${file##*/}"
+  case $(menu "Captured: $label" "  Edit in satty\n  Re-copy to clipboard\n  Save to specific location\n  Analyze: explain\n  Analyze: ask custom question\n  Open in image viewer\n  Discard (delete file)\n  Done") in
+  *Edit*in*satty*)
+    setsid satty --filename "$file" --output-filename "$file" \
+      --early-exit --copy-command 'wl-copy' >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+    ;;
+  *Re-copy*to*clipboard*)
+    wl-copy < "$file"
+    notify-send -a omarchy-menu -u low -t 2000 "Re-copied to clipboard" "$label"
+    ;;
+  *Save*to*specific*)
+    local target dst
+    target="$(omarchy-launch-walker --dmenu -I --width 295 --minheight 1 --maxheight 630 \
+      -p 'Save as (path or filename)…' 2>/dev/null)"
+    [[ -z "$target" ]] && return
+    # If user gave a bare filename, drop it into ~/Documents/screenshots/
+    if [[ "$target" != /* && "$target" != ~* ]]; then
+      mkdir -p "$HOME/Documents/screenshots"
+      dst="$HOME/Documents/screenshots/$target"
+    else
+      dst="${target/#~/$HOME}"
+      mkdir -p "$(dirname "$dst")"
+    fi
+    [[ "$dst" != *.png ]] && dst="${dst}.png"
+    cp "$file" "$dst" && notify-send -a omarchy-menu -u low -t 3000 "Saved" "$dst"
+    ;;
+  *Analyze*explain*)
+    ai_dispose "$(hyprwhspr-vision analyze-file "$file" \
+      'Explain what is shown in this screenshot. If it is an error or stack trace, decode the cause. If it is a UI, describe what it does. If it is text, summarize. Be concise — 2 to 4 sentences.')"
+    ;;
+  *Analyze*ask*custom*)
+    local q
+    q="$(omarchy-launch-walker --dmenu -I --width 295 --minheight 1 --maxheight 630 \
+      -p 'Question about this screenshot…' 2>/dev/null)"
+    [[ -z "$q" ]] && return
+    ai_dispose "$(hyprwhspr-vision analyze-file "$file" "$q")"
+    ;;
+  *Open*in*image*viewer*)
+    setsid xdg-open "$file" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+    ;;
+  *Discard*delete*)
+    rm -f "$file" && notify-send -a omarchy-menu -u low -t 2000 "Deleted" "$label"
+    ;;
+  *Done*|*) : ;;
   esac
 }
 

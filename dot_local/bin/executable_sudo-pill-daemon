@@ -61,36 +61,69 @@ NOTIFY_ID=$(( ( $$ % 65000 ) + 1000 ))
 
 notify_transition() {
   local from="$1" to="$2"
+  # Pick a stable icon: prefer Adwaita's system-lock-screen vector
+  # (always present on glibc systems with default icon theme), fall back
+  # to icon-name lookup so mako resolves whatever the active theme has.
+  local lock_icon=system-lock-screen
+  for cand in \
+      /usr/share/icons/Adwaita/symbolic/status/system-lock-screen-symbolic.svg \
+      /usr/share/icons/Adwaita/scalable/devices/system-lock-screen-symbolic.svg \
+      /usr/share/icons/breeze/status/22/system-lock-screen.svg; do
+    [[ -f "$cand" ]] && { lock_icon="$cand"; break; }
+  done
+  local ws_label=""
+  if [[ -n "${F[ws]:-}" ]]; then
+    case "${F[ws]}" in
+      special:*) ws_label="scratch:${F[ws]#special:}" ;;
+      *)         ws_label="ws${F[ws]}" ;;
+    esac
+  fi
+
   case "$from→$to" in
     *→prompt)
-      # Sudo is asking for your password — high urgency, replaceable so
-      # repeated prompts overwrite rather than pile up.
+      # Sudo asking for password — high urgency, persistent until replaced.
+      local detail="tty: ${F[tty]:-?}"
+      [[ -n "$ws_label" ]] && detail+="   $ws_label"
+      [[ -n "${F[user]:-}" ]] && detail+="   user: ${F[user]}"
       notify-send \
         --urgency=critical \
         --replace-id="$NOTIFY_ID" \
-        --icon=system-lock-screen \
+        --icon="$lock_icon" \
         --app-name=sudo \
         --hint=string:x-canonical-private-synchronous:sudo-pill \
         "Sudo wants your password" \
-        "tty: ${F[tty]:-?}    user: ${F[user]:-?}" \
+        "$detail" \
         2>/dev/null || true
       ;;
-    prompt→active)
-      # Auth succeeded — confirm briefly and quietly.
+    prompt→running|*→running)
+      # Auth succeeded → command running. Quick confirm.
       notify-send \
         --urgency=low \
         --replace-id="$NOTIFY_ID" \
-        --icon=security-high \
+        --icon="$lock_icon" \
         --app-name=sudo \
         --hint=string:x-canonical-private-synchronous:sudo-pill \
-        --expire-time=2000 \
+        --expire-time=1500 \
         "Sudo authenticated" \
+        "${ws_label:-} ${ws_label:+·} command running" \
+        2>/dev/null || true
+      ;;
+    running→cached)
+      # Command finished but auth cache still warm. Brief, non-disruptive
+      # confirmation that you can sudo again without re-entering the password.
+      notify-send \
+        --urgency=low \
+        --replace-id="$NOTIFY_ID" \
+        --icon="$lock_icon" \
+        --app-name=sudo \
+        --hint=string:x-canonical-private-synchronous:sudo-pill \
+        --expire-time=1200 \
+        "Sudo done" \
         "cache active for 5 min" \
         2>/dev/null || true
       ;;
-    prompt→idle)
-      # Cancelled / wrong password / timed out — clear any open prompt
-      # notification, no new alert.
+    prompt→idle|cached→idle|running→idle)
+      # Cancelled / wrong pwd / cache expired — clear any open notification.
       notify-send \
         --replace-id="$NOTIFY_ID" \
         --hint=string:x-canonical-private-synchronous:sudo-pill \
@@ -169,12 +202,11 @@ expire_stale_flag() {
 
 current_state() {
   if read_flag; then
-    if [[ "${F[type]:-}" == "auth_prompt" ]]; then
-      echo prompt; return
-    fi
-    if (( AGE < ttl )); then
-      echo active; return
-    fi
+    case "${F[type]:-}" in
+      auth_prompt)   echo prompt;  return ;;
+      open_session)  (( AGE < ttl )) && { echo running; return; } ;;
+      close_session) (( AGE < ttl )) && { echo cached;  return; } ;;
+    esac
   fi
   echo idle
 }

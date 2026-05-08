@@ -86,22 +86,27 @@ case "$action" in
   *)     echo "usage: $0 {set|clear} [agent-id]" >&2; exit 2 ;;
 esac
 
-# Desktop notification (mako/dunst/whatever org.freedesktop.Notifications
-# is registered). Per-agent replace-id so repeated firings for the same
-# agent overwrite rather than stack. On `clear`, send a 1ms expire-time
-# empty notification with the same id to dismiss any open one.
+# Desktop notification with the actual brand SVG/PNG that aiquota's
+# build pipeline already rasterised at 128px from simple-icons. Same
+# logo the user sees in the waybar bar — DRY across the system.
+# Per-agent replace-id so repeats overwrite rather than stack.
 notify_id=$(( $(printf '%s' "$agent_id" | cksum | awk '{print $1}') % 65000 + 30000 ))
+brand_icon_dir="$HOME/code/aiquota/assets/logos"
 case "$action" in
   set)
     case "$agent_id" in
-      claude)   icon=face-monkey;     pretty="Claude" ;;
-      codex)    icon=applications-development; pretty="Codex" ;;
-      opencode) icon=applications-development; pretty="OpenCode" ;;
-      gemini)   icon=face-cool;       pretty="Gemini" ;;
-      copilot)  icon=face-smile;      pretty="Copilot" ;;
-      aider)    icon=applications-development; pretty="Aider" ;;
-      *)        icon=dialog-information; pretty="$agent_id" ;;
+      claude)   pretty="Claude"   ;;
+      codex)    pretty="Codex"    ;;
+      opencode) pretty="OpenCode" ;;
+      gemini)   pretty="Gemini"   ;;
+      copilot)  pretty="GitHub Copilot" ;;
+      aider)    pretty="Aider"    ;;
+      *)        pretty="$agent_id" ;;
     esac
+    # Brand PNG if available (aiquota bundles them); fall back to a
+    # generic terminal icon name so mako always has something to show.
+    icon="$brand_icon_dir/$agent_id.png"
+    [[ -f "$icon" ]] || icon=utilities-terminal
     notify-send \
       --urgency=normal \
       --replace-id="$notify_id" \
@@ -113,7 +118,6 @@ case "$action" in
       2>/dev/null || true
     ;;
   clear)
-    # Close any open notification for this agent without queuing a new one.
     notify-send \
       --replace-id="$notify_id" \
       --hint="string:x-canonical-private-synchronous:agent-$agent_id" \

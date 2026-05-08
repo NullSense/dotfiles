@@ -75,31 +75,37 @@ case "${1:-}" in
       rem_min=$(( remaining / 60 ))
       rem_sec=$(( remaining % 60 ))
 
-      # Bar text: lock + workspace badge if we captured one.
+      # Bar text + class differ for "running now" vs "cache active":
+      #   open_session  → running   bright + ws label
+      #   close_session → cached    dim,    no ws (sudo done, cache warm)
+      kind=${F[type]:-}
       ws=${F[ws]:-}
-      if [[ -n "$ws" ]]; then
-        # Strip 'special:' prefix for compactness; show as e.g. ws3 or scratch
-        case "$ws" in
-          special:*) ws_label="scratch:${ws#special:}" ;;
-          *)         ws_label="ws$ws" ;;
-        esac
-        text="󰌾 $ws_label"
-      else
+      ws_label=""
+      [[ -n "$ws" ]] && case "$ws" in
+        special:*) ws_label="scratch:${ws#special:}" ;;
+        *)         ws_label="ws$ws" ;;
+      esac
+
+      if [[ "$kind" == "close_session" ]]; then
+        # Cache active but no command running → dim, no workspace.
         text="󰌾"
+        class="cached"
+        tt="sudo cache active — ~${rem_min}m ${rem_sec}s left\\n(no command running)"
+      else
+        # open_session, running.
+        if [[ -n "$ws_label" ]]; then text="󰌾 $ws_label"; else text="󰌾"; fi
+        class="active"
+        tt="sudo running — cache valid ~${rem_min}m ${rem_sec}s"
+        tt+="\\nuser: ${F[user]:-?}"
+        [[ -n "${F[tty]:-}" && "${F[tty]:-}" != "?" ]] && tt+="\\ntty:  ${F[tty]}"
+        [[ -n "$ws" ]] && tt+="\\nws:   $ws"
+        [[ -n "${F[addr]:-}" ]] && tt+="\\naddr: ${F[addr]}"
       fi
 
-      # Tooltip — full breakdown.
-      tt="sudo cache active — ~${rem_min}m ${rem_sec}s left"
-      tt+="\\nuser: ${F[user]:-?}"
-      [[ -n "${F[tty]:-}" && "${F[tty]:-}" != "?" ]] && tt+="\\ntty:  ${F[tty]}"
-      [[ -n "$ws" ]] && tt+="\\nws:   $ws"
-      [[ -n "${F[addr]:-}" ]] && tt+="\\naddr: ${F[addr]}"
-
-      # JSON-encode safely (text + tooltip may contain special chars).
       text_json=$(jq -Rn --arg t "$text" '$t')
       tooltip_json=$(jq -Rn --arg t "$tt" '$t' | sed 's/\\\\n/\\n/g')
-      printf '{"text":%s,"alt":"active","class":"active","tooltip":%s}\n' \
-        "$text_json" "$tooltip_json"
+      printf '{"text":%s,"alt":"%s","class":"%s","tooltip":%s}\n' \
+        "$text_json" "$class" "$class" "$tooltip_json"
       exit 0
     fi
     # Idle pill: emit a dim lock glyph so the chrome stays visible

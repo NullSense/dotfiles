@@ -292,13 +292,18 @@ window#waybar.hidden { opacity: 0; }
     color: @yellow;
     border-color: @yellow;
 }
-/* auth_prompt: sudo is currently asking for the password — flash to
- * draw attention, then settles to solid yellow on auth success or
- * decays to idle on cancel / wrong password. */
+/* auth_prompt — flash for attention. */
 #custom-sudo.prompt {
     color: @yellow;
     border-color: @yellow;
     animation: blink 0.8s ease-in-out infinite alternate;
+}
+/* cached — sudo done but auth cache still warm. Dim so the bar is
+ * subtle but the user can still tell they don't need to re-type. */
+#custom-sudo.cached {
+    color: @yellow;
+    border-color: @bg3;
+    opacity: 0.55;
 }
 
 /* hyprland workspace urgency (xdg-activation-driven) */

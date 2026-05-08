@@ -1,0 +1,14 @@
+[Unit]
+Description=Periodic warmup ping for hyprwhspr rewrite model
+
+[Timer]
+# First fire 30s after login (gives LM Studio time to come up).
+OnBootSec=30s
+# Re-fire every 20 minutes — JIT TTL in LM Studio is 60min, so this keeps
+# the model resident with comfortable margin.
+OnUnitActiveSec=20min
+Unit=hyprwhspr-warmup.service
+Persistent=false
+
+[Install]
+WantedBy=timers.target

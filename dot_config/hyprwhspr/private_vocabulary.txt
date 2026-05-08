@@ -1,0 +1,21 @@
+Bartowski
+Bitwarden
+Claude
+Codex
+Cortiq
+Exa
+Gemma
+Helium
+Hyprland
+hyprwhspr
+kubectl
+LM Studio
+Matas
+neovim
+omarchy
+Parakeet
+Tensil
+Tmux
+Vicinae
+Vulkan
+Walker

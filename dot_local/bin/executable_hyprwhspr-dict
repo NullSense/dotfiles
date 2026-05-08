@@ -1,0 +1,313 @@
+#!/usr/bin/env bash
+# hyprwhspr-dict — manage hyprwhspr's two-tier dictionary system.
+#
+# Two mechanisms (mirroring Wispr Flow's Dictionary architecture):
+#
+# 1. REPLACEMENTS  (deterministic, fast)
+#    Stored in ~/.config/hyprwhspr/config.json under `word_overrides`.
+#    Applied at text_injector.py:443-511 — exact string find-and-replace
+#    AFTER Parakeet transcription, BEFORE the LLM rewrite hook.
+#    Use when Parakeet *consistently* mishears X as Y. FROM=Y, TO=X.
+#
+# 2. VOCABULARY  (fuzzy, LLM-driven)
+#    Stored in ~/.config/hyprwhspr/vocabulary.txt — one word per line.
+#    Read by ~/.local/bin/hyprwhspr-rewrite and injected into the Gemma 4
+#    system prompt. The LLM corrects near-miss spellings to the canonical
+#    form. Use when you don't know exactly how Parakeet mishears the word
+#    (or when it varies). Single-word adds, no FROM needed.
+#
+# Why two layers? Wispr Flow trains its own ASR with built-in vocabulary
+# biasing. Parakeet TDT v3 (onnx-asr backend) has no biasing API exposed,
+# so we approximate it with the LLM stage. Replacements are still useful
+# for high-frequency, deterministic mishears where you don't want to pay
+# even the small LLM cost.
+#
+# Usage:
+#   hyprwhspr-dict                       walker menu
+#   hyprwhspr-dict add FROM TO           add a replacement (CLI)
+#   hyprwhspr-dict rm FROM               remove a replacement
+#   hyprwhspr-dict list                  list replacements
+#   hyprwhspr-dict vocab-add WORD        add a vocabulary word (CLI)
+#   hyprwhspr-dict vocab-rm WORD         remove a vocabulary word
+#   hyprwhspr-dict vocab-list            list vocabulary
+
+set -euo pipefail
+
+CFG="$HOME/.config/hyprwhspr/config.json"
+VOCAB="$HOME/.config/hyprwhspr/vocabulary.txt"
+
+die() { printf 'hyprwhspr-dict: %s\n' "$*" >&2; exit 1; }
+
+restart_daemon() {
+  if systemctl --user restart hyprwhspr 2>/dev/null; then
+    notify-send -a hyprwhspr-dict -u low -t 2000 "Dictionary updated" "hyprwhspr restarted"
+  else
+    notify-send -a hyprwhspr-dict -u normal -t 4000 "Dictionary updated" \
+      "Could not restart hyprwhspr — restart manually with: systemctl --user restart hyprwhspr"
+  fi
+  chezmoi_resync "$CFG"
+}
+
+# Sync chezmoi source from target after a live edit, so the dotfiles repo
+# stays current. No-op if the file isn't chezmoi-managed.
+chezmoi_resync() {
+  local target="$1"
+  command -v chezmoi >/dev/null || return 0
+  chezmoi managed 2>/dev/null | grep -Fq -- "${target#$HOME/}" || return 0
+  chezmoi re-add --force "$target" >/dev/null 2>&1 || true
+}
+
+# --- Replacements (word_overrides in config.json) ---------------------------
+list_entries() {
+  jq -r '.word_overrides // {} | to_entries[] | "\(.key) → \(.value)"' "$CFG"
+}
+
+add_entry() {
+  local from="$1" to="$2"
+  [[ -z "$from" || -z "$to" ]] && die "add requires non-empty FROM and TO"
+  # Detect overwrite (a JSON map can't have duplicate keys; warn if existing).
+  local existing
+  existing="$(jq -r --arg f "$from" '.word_overrides[$f] // ""' "$CFG")"
+  if [[ -n "$existing" && "$existing" != "$to" ]]; then
+    notify-send -a hyprwhspr-dict -u normal -t 4000 \
+      "Replacement overwritten" "${from} → ${existing}  becomes  ${from} → ${to}"
+  elif [[ "$existing" == "$to" ]]; then
+    notify-send -a hyprwhspr-dict -u low \
+      "Replacement already exists" "${from} → ${to} (no change)"
+    return 0
+  fi
+  local tmp; tmp="$(mktemp)"
+  jq --arg f "$from" --arg t "$to" \
+    '.word_overrides = (.word_overrides // {}) | .word_overrides[$f] = $t' \
+    "$CFG" > "$tmp"
+  mv "$tmp" "$CFG"
+  restart_daemon
+}
+
+rm_entry() {
+  local from="$1"
+  [[ -z "$from" ]] && die "rm requires non-empty FROM"
+  local tmp; tmp="$(mktemp)"
+  jq --arg f "$from" 'del(.word_overrides[$f])' "$CFG" > "$tmp"
+  mv "$tmp" "$CFG"
+  restart_daemon
+}
+
+# --- Vocabulary (single-word list, read by the rewrite hook) ----------------
+vocab_list() {
+  [[ -f "$VOCAB" ]] || return 0
+  grep -vE '^\s*(#|$)' "$VOCAB" 2>/dev/null | sort -u
+}
+
+vocab_add() {
+  local raw="$1"
+  [[ -z "$raw" ]] && die "vocab-add requires at least one word"
+  mkdir -p "$(dirname "$VOCAB")"
+  touch "$VOCAB"
+
+  # Split on commas. Each entry: trim leading/trailing whitespace, KEEP
+  # internal spaces (so 'LM Studio' is one entry). Skip empty + duplicates.
+  local added=0 skipped=0 word
+  local IFS=','
+  for word in $raw; do
+    word="${word#"${word%%[![:space:]]*}"}"
+    word="${word%"${word##*[![:space:]]}"}"
+    [[ -z "$word" ]] && continue
+    if grep -Fxq -- "$word" "$VOCAB" 2>/dev/null; then
+      skipped=$((skipped + 1))
+    else
+      printf '%s\n' "$word" >> "$VOCAB"
+      added=$((added + 1))
+    fi
+  done
+
+  # Belt + braces: ensure file is sorted and deduped.
+  sort -u "$VOCAB" -o "$VOCAB"
+  chezmoi_resync "$VOCAB"
+
+  if (( added == 0 && skipped > 0 )); then
+    notify-send -a hyprwhspr-dict -u low "Already in vocabulary" \
+      "${skipped} duplicate(s) skipped — nothing added"
+  elif (( skipped == 0 )); then
+    notify-send -a hyprwhspr-dict -u low "Vocabulary updated" \
+      "Added ${added} (no daemon restart needed)"
+  else
+    notify-send -a hyprwhspr-dict -u low "Vocabulary updated" \
+      "Added ${added}, skipped ${skipped} duplicate(s)"
+  fi
+}
+
+vocab_rm() {
+  local raw="$1"
+  [[ -z "$raw" ]] && die "vocab-rm requires at least one word"
+  [[ -f "$VOCAB" ]] || return 0
+
+  # Comma-separated removal supported.
+  local removed=0 missed=0 word
+  local IFS=','
+  for word in $raw; do
+    word="${word#"${word%%[![:space:]]*}"}"
+    word="${word%"${word##*[![:space:]]}"}"
+    [[ -z "$word" ]] && continue
+    if grep -Fxq -- "$word" "$VOCAB" 2>/dev/null; then
+      local tmp; tmp="$(mktemp)"
+      grep -vFx -- "$word" "$VOCAB" > "$tmp" || true
+      mv "$tmp" "$VOCAB"
+      removed=$((removed + 1))
+    else
+      missed=$((missed + 1))
+    fi
+  done
+
+  if (( removed > 0 )); then
+    notify-send -a hyprwhspr-dict -u low "Vocabulary updated" \
+      "Removed ${removed}$([[ $missed -gt 0 ]] && echo ", ${missed} not found")"
+    chezmoi_resync "$VOCAB"
+  else
+    notify-send -a hyprwhspr-dict -u low "Vocabulary unchanged" \
+      "${missed} not found"
+  fi
+}
+
+# --- Walker UI helpers ------------------------------------------------------
+WALKER="$(command -v omarchy-launch-walker || command -v walker)"
+WALKER_DIMS=(--width 295 --minheight 1 --maxheight 630)
+
+walker_input() {
+  local placeholder="$1"
+  printf '' | "$WALKER" --dmenu -I "${WALKER_DIMS[@]}" -p "${placeholder}…" 2>/dev/null || true
+}
+
+walker_pick() {
+  local placeholder="$1"
+  "$WALKER" --dmenu "${WALKER_DIMS[@]}" -p "${placeholder}…" 2>/dev/null || true
+}
+
+walker_menu() {
+  [[ -n "$WALKER" ]] || die "walker not found in PATH"
+  # Icon set (Material Design Icons via nerd-fonts):
+  #   󰂽  book-plus-outline       (add vocab — fuzzy LLM)
+  #   󰗐  book-minus              (remove vocab)
+  #   󰂺  book-open-variant       (list vocab)
+  #     exchange / swap-horizontal (add replacement — exact map)
+  #     undo                     (remove replacement)
+  #     clipboard-list           (list replacements)
+  #     microphone               (test mic)
+  #     refresh / sync           (restart daemon)
+  #   󰏫  pencil                  (edit config)
+  local action
+  action="$(printf '%b' \
+    '󰂽  Add vocabulary word\n󰗐  Remove vocabulary word\n󰂺  List vocabulary\n  Add replacement (FROM → TO)\n  Remove replacement\n  List replacements\n  Test mic\n  Restart daemon\n󰏫  Edit config\n' \
+    | walker_pick 'Voice')"
+  case "$action" in
+    *Add*vocabulary*word*)
+      # Vocabulary: word-level add. The LLM rewrite hook reads this list and
+      # fuzzy-corrects near-misses to the canonical form.
+      local input
+      input="$(walker_input 'Word(s) — comma-separated for multiple. Spaces inside an entry are kept (e.g. "Cortiq, Tensil, LM Studio"). Duplicates skipped.')"
+      [[ -z "$input" ]] && exit 0
+      vocab_add "$input"
+      ;;
+    *Remove*vocabulary*word*)
+      # Walker picker only allows selecting one entry, so single-pick from list.
+      local picked
+      picked="$(vocab_list | walker_pick 'remove which vocabulary word?')"
+      [[ -z "$picked" ]] && exit 0
+      vocab_rm "$picked"
+      ;;
+    *List*vocabulary*)
+      vocab_list | walker_pick 'vocabulary (read-only)' >/dev/null
+      ;;
+    *Add*replacement*)
+      # Deterministic string-replace. Use when Parakeet always mishears X
+      # the same way (e.g. "tensile" → "Tensil").
+      local from to
+      from="$(walker_input 'FROM — what Parakeet transcribes (single phrase, spaces allowed, no commas)')"
+      [[ -z "$from" ]] && exit 0
+      to="$(walker_input "TO — replace \"$from\" with…")"
+      [[ -z "$to" ]] && exit 0
+      add_entry "$from" "$to"
+      ;;
+    *Remove*replacement*)
+      local picked
+      picked="$(list_entries | walker_pick 'remove which replacement?')"
+      [[ -z "$picked" ]] && exit 0
+      rm_entry "${picked% → *}"
+      ;;
+    *List*replacements*)
+      list_entries | walker_pick 'replacements (read-only)' >/dev/null
+      ;;
+    *Test*mic*)
+      if command -v omarchy-launch-floating-terminal-with-presentation >/dev/null; then
+        omarchy-launch-floating-terminal-with-presentation "hyprwhspr test --mic-only"
+      else
+        notify-send -a hyprwhspr-dict -u low "Run from a terminal:" "hyprwhspr test --mic-only"
+      fi
+      ;;
+    *Restart*daemon*)
+      restart_daemon
+      ;;
+    *Edit*config*)
+      if command -v omarchy-launch-editor >/dev/null; then
+        omarchy-launch-editor "$CFG"
+      else
+        ${EDITOR:-${VISUAL:-vi}} "$CFG" &
+      fi
+      ;;
+    "")
+      exit 0
+      ;;
+  esac
+}
+
+case "${1:-menu}" in
+  add)            shift; [[ $# -ge 2 ]] || die "usage: hyprwhspr-dict add FROM TO"; add_entry "$1" "$2" ;;
+  rm|remove|del)  shift; [[ $# -ge 1 ]] || die "usage: hyprwhspr-dict rm FROM"; rm_entry "$1" ;;
+  list|ls)        list_entries ;;
+  vocab-add)      shift; [[ $# -ge 1 ]] || die "usage: hyprwhspr-dict vocab-add WORD"; vocab_add "$1" ;;
+  vocab-rm)       shift; [[ $# -ge 1 ]] || die "usage: hyprwhspr-dict vocab-rm WORD"; vocab_rm "$1" ;;
+  vocab-list|vocab) vocab_list ;;
+  menu|"")        walker_menu ;;
+  -h|--help)
+    cat <<'EOF'
+hyprwhspr-dict — manage hyprwhspr's two-tier dictionary
+
+Two layers (loosely mirroring Wispr Flow's Dictionary):
+
+  VOCABULARY  (fuzzy, LLM-driven)
+    Single-word list. The Gemma 4 rewrite hook reads it and fuzzy-corrects
+    near-miss spellings to the canonical form. Use when Parakeet mishears
+    a proper noun *inconsistently* (different spellings each time).
+
+  REPLACEMENTS  (deterministic, exact-match)
+    word_overrides map: FROM → TO. Applied before the LLM stage.
+    Use when Parakeet *always* mishears X the same way and you want a
+    zero-cost fix that doesn't depend on the LLM.
+
+Usage:
+  hyprwhspr-dict                            walker menu
+  hyprwhspr-dict vocab-add WORD[,WORD…]     add one or more vocab words (comma-separated)
+  hyprwhspr-dict vocab-rm WORD[,WORD…]      remove one or more vocab words
+  hyprwhspr-dict vocab-list                 print vocabulary to stdout
+  hyprwhspr-dict add FROM TO                add a replacement (single pair)
+  hyprwhspr-dict rm FROM                    remove a replacement
+  hyprwhspr-dict list                       print replacements to stdout
+
+Input rules:
+  Vocabulary entries:
+    - Comma separates multiple entries; each is trimmed of surrounding spaces.
+    - Internal spaces are KEPT (e.g. "LM Studio" is one entry).
+    - Duplicates are silently skipped (you'll see "skipped N duplicate(s)").
+  Replacements:
+    - One pair at a time. FROM and TO can contain spaces but NOT commas
+      via the menu (CLI form takes them as separate args, no ambiguity).
+    - Re-adding the same FROM with a new TO overwrites (you'll be notified).
+    - Re-adding the exact same FROM=TO is a no-op.
+
+Storage:
+  Vocabulary:    ~/.config/hyprwhspr/vocabulary.txt  (no daemon restart needed)
+  Replacements:  ~/.config/hyprwhspr/config.json     (daemon auto-restarts)
+EOF
+    ;;
+  *) die "unknown subcommand: $1 (try --help)" ;;
+esac

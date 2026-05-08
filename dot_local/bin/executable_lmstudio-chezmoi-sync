@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Re-add LM Studio config files to chezmoi when LM Studio writes to them.
+# Triggered by lmstudio-chezmoi-sync.path (systemd path watcher) on changes
+# in the user-concrete-model-default-config/ and config-presets/ dirs.
+#
+# Idempotent: chezmoi re-add is a no-op if the file matches the source.
+# No-op if a file isn't already chezmoi-managed (use `chezmoi add` once
+# manually to bring a new file under management).
+
+set -uo pipefail
+
+PRESETS="$HOME/.lmstudio/config-presets"
+DEFAULTS="$HOME/.lmstudio/.internal/user-concrete-model-default-config"
+
+resync() {
+  local path="$1"
+  [[ -f "$path" ]] || return 0
+  # Only act if chezmoi already manages this file.
+  chezmoi managed 2>/dev/null | grep -Fq -- "${path#$HOME/}" || return 0
+  chezmoi re-add --force "$path" >/dev/null 2>&1 || true
+}
+
+# Walk every JSON file under the watched dirs.
+shopt -s globstar nullglob
+for f in "$PRESETS"/*.json "$DEFAULTS"/**/*.json; do
+  resync "$f"
+done

@@ -1,0 +1,11 @@
+{
+  "identifier": "@local:qwen3.6-35-b-a3-b-thinking-general",
+  "name": "Qwen3.6-35B-A3B-thinking-general",
+  "changed": false,
+  "operation": {
+    "fields": []
+  },
+  "load": {
+    "fields": []
+  }
+}

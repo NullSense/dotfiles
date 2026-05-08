@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch LM Studio config files for changes and re-add to chezmoi
+
+[Path]
+# Per-model load defaults (FA, KV cache quant, GPU offload, ctx).
+PathChanged=%h/.lmstudio/.internal/user-concrete-model-default-config
+# Named sampling presets (system prompt, sampling params).
+PathChanged=%h/.lmstudio/config-presets
+Unit=lmstudio-chezmoi-sync.service
+
+[Install]
+WantedBy=default.target

@@ -1,3 +1,5 @@
+agent-vault
+Aorus
 Bartowski
 Bitwarden
 Claude
@@ -6,16 +8,24 @@ Cortiq
 Exa
 Gemma
 Helium
+Hermes
 Hyprland
 hyprwhspr
 kubectl
 LM Studio
 Matas
+MITM
 neovim
+Nous
 omarchy
+OpenRouter
 Parakeet
+proxy
+Qwen
+sudo
 Tensil
 Tmux
+vault
 Vicinae
 Vulkan
 Walker

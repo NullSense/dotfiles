@@ -52,6 +52,34 @@ if [[ "$LMS_MODEL" == "auto" ]]; then
 fi
 LMS_MODEL_LC="${LMS_MODEL,,}"
 
+# --- Pre-flight: ensure model is loaded ---------------------------------------
+# Hits /api/v0/models for state. If the target model isn't `loaded`, fires the
+# warmup script in the background (which triggers JIT load via a tiny ping)
+# and passthroughs the current dictation. The user gets a notification so they
+# know the next dictation will be rewritten.
+state="$(curl -fsS --max-time 1 "${LMS_URL_BASE}/api/v0/models" 2>/dev/null \
+  | jq -r --arg id "$LMS_MODEL" '.data[] | select(.id == $id) | .state' 2>/dev/null)"
+case "$state" in
+  loaded)
+    : # ready, continue
+    ;;
+  ""|null)
+    # Either LM Studio is down OR the model id isn't even listed.
+    notify-send -a hyprwhspr-rewrite -u normal -t 4000 \
+      "LM Studio unavailable" "Cannot reach :1234 or model '${LMS_MODEL}' not registered — pasting raw" 2>/dev/null || true
+    printf '[%s] LMS unreachable or model not listed | raw=%q\n' "$(date -Iseconds)" "$raw" >>"$LOG"
+    printf '%s' "$raw"; exit 0
+    ;;
+  *)
+    # State is "not-loaded" or "loading" — kick off background load.
+    notify-send -a hyprwhspr-rewrite -u normal -t 4500 \
+      "Loading rewrite model" "${LMS_MODEL} is ${state}. Background load triggered — next dictation will be rewritten." 2>/dev/null || true
+    ( setsid "$HOME/.local/bin/hyprwhspr-warmup" >/dev/null 2>&1 & ) &
+    printf '[%s] Model %s — background load fired | raw=%q\n' "$(date -Iseconds)" "$state" "$raw" >>"$LOG"
+    printf '%s' "$raw"; exit 0
+    ;;
+esac
+
 # --- 1. Detect target app via Hyprland ----------------------------------------
 class=""
 title=""
@@ -158,9 +186,10 @@ Universal rules:
 - DO NOT TRANSLATE. Preserve the original language. English stays English, Polish stays Polish, etc.
 - DO NOT add introductions, commentary, explanations, quotes, or markdown fences.
 - DO NOT say \"Sure\", \"Here is\", \"Of course\", or anything except the rewritten text.
-- Preserve meaning exactly — never add information, never omit content, never change names, numbers, dates, identifiers, or technical terms.
+- Preserve meaning exactly — never add information, never omit content, never change names, dates, identifiers, or technical terms.
 - Fix grammar, punctuation, capitalization, run-ons, false starts, repeated words, and obvious filler (um, uh, like, you know).
 - Preserve proper nouns and technical terms verbatim. If a proper noun was misheard by the transcriber, leave it as-is — do not guess.
+- Number + unit normalization: when a spoken number is paired with a technical unit (GB, MB, KB, TB, MHz, GHz, Hz, ms, %, px, etc.), convert the number to digits and concatenate without space. Examples: \"twelve gigabytes\" -> \"12GB\"; \"sixty-four gigabytes\" -> \"64GB\"; \"two hundred milliseconds\" -> \"200ms\"; \"fifty percent\" -> \"50%\"; \"three point two gigahertz\" -> \"3.2GHz\". Keep prose numbers as words: \"a thousand reasons\" stays \"a thousand reasons\"; \"three of us\" stays \"three of us\".
 - If the input is already clean, return it unchanged.
 
 [App context]
@@ -179,6 +208,12 @@ Output: Give me a URL for Apple support.
 
 Input:  [TEXT START]so um basically i was thinking like we should probably refactor the auth module you know[TEXT END]
 Output: We should probably refactor the auth module.
+
+Input:  [TEXT START]i have sixty four gigabytes of ram and twelve gigabytes of vram on this box[TEXT END]
+Output: I have 64GB of RAM and 12GB of VRAM on this box.
+
+Input:  [TEXT START]bumped the timeout from five hundred milliseconds to two seconds[TEXT END]
+Output: Bumped the timeout from 500ms to 2s.
 
 Output ONLY the rewritten text. No preamble. No fences. No explanation."
 

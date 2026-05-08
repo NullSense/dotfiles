@@ -1,0 +1,49 @@
+{
+  "identifier": "@local:qwen3.6-35-b-a3-b-thinking-coding",
+  "name": "Qwen3.6-35B-A3B-thinking coding",
+  "changed": true,
+  "operation": {
+    "fields": [
+      {
+        "key": "llm.prediction.temperature",
+        "value": 0.6
+      },
+      {
+        "key": "llm.prediction.topKSampling",
+        "value": 20
+      },
+      {
+        "key": "llm.prediction.minPSampling",
+        "value": {
+          "checked": true,
+          "value": 0
+        }
+      },
+      {
+        "key": "llm.prediction.llama.presencePenalty",
+        "value": {
+          "checked": true,
+          "value": 1.5
+        }
+      },
+      {
+        "key": "llm.prediction.repeatPenalty",
+        "value": {
+          "checked": false,
+          "value": 1.1
+        }
+      },
+      {
+        "key": "llm.prediction.llama.cpuThreads",
+        "value": 6
+      },
+      {
+        "key": "llm.prediction.systemPrompt",
+        "value": "You are a careful, precise software engineer. Think step by step about the problem before answering. Prefer correctness over brevity. When showing code, include enough surrounding context that the change can be applied without ambiguity."
+      }
+    ]
+  },
+  "load": {
+    "fields": []
+  }
+}

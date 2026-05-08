@@ -1,0 +1,8 @@
+[Unit]
+Description=Re-add LM Studio config files to chezmoi after GUI edits
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/lmstudio-chezmoi-sync
+# Coalesce bursts of writes from the GUI saving multiple files at once.
+RestartSec=2

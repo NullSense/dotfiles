@@ -1,0 +1,20 @@
+[Unit]
+Description=hyprwhspr-ai coordinator daemon (rewrite + vision + translate)
+Documentation=https://github.com/goodroot/hyprwhspr
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/hyprwhspr-ai/.venv/bin/python -m src.daemon
+WorkingDirectory=%h/.local/share/hyprwhspr-ai
+Restart=on-failure
+RestartSec=5
+# Soft cap — not a hard limit. Daemon should idle around 30-50MB.
+MemoryHigh=200M
+# Hard kill if it ever goes runaway.
+MemoryMax=500M
+# Inherit the user session env (HYPRLAND_INSTANCE_SIGNATURE, XDG_RUNTIME_DIR).
+PassEnvironment=HYPRLAND_INSTANCE_SIGNATURE XDG_RUNTIME_DIR
+
+[Install]
+WantedBy=default.target

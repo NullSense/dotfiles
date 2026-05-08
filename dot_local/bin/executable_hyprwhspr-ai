@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# hyprwhspr-ai — thin launcher for the Python CLI client.
+#
+# The actual logic is in ~/.local/share/hyprwhspr-ai/src/client.py. This
+# wrapper just runs it with the project's pinned Python. Keeps the CLI
+# fast (no `mise exec` overhead per invocation) and makes the entry
+# point discoverable via PATH.
+
+VENV_PY="$HOME/.local/share/hyprwhspr-ai/.venv/bin/python"
+SRC_DIR="$HOME/.local/share/hyprwhspr-ai"
+
+if [[ ! -x "$VENV_PY" ]]; then
+  echo "hyprwhspr-ai: venv not found. Run: $SRC_DIR/setup.sh" >&2
+  exit 2
+fi
+
+exec "$VENV_PY" -m src.client "$@"

@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# hyprwhspr-translate — local translation via Gemma 4 (140+ pre-trained
-# languages, 35+ first-class). Runs against the same LM Studio instance
-# the rewrite hook uses; no API key needed.
+# hyprwhspr-translate — translation pipeline.
+#
+# Translation engine: NLLB-200 distilled-1.3B (INT8 CTranslate2) via the
+# local hyprwhspr-nllb server (Unix socket, lazy-loaded, idle-exits after
+# 10 min). Specialized NMT model — better quality on low-resource targets
+# (Lithuanian, Latvian, Estonian, etc.) than running translation through
+# a general LLM, with smaller VRAM footprint (~1.5GB on CPU).
 #
 # Subcommands:
-#   region          drag a region → vision-translate the text in it
-#   clipboard       translate current wl-clipboard contents (text-only call)
-#   text "<txt>"    translate stdin or arg text directly
+#   region          drag a region → Gemma 4 OCRs the image → NLLB translates
+#   clipboard       translate current wl-clipboard contents directly
+#   text "<txt>"    translate stdin or arg text
 #
-# Target language UX (Raycast-multi-translate inspired): favorites at top
-# (from ~/.config/hyprwhspr/languages.txt), "Other…" at bottom opens a
-# walker input for free-text language. Gemma handles names + ISO codes.
-#
-# Source language: always auto-detected by Gemma. The system prompt makes
-# it explicit so users can override by prefixing input with "[from XX]"
-# if needed.
+# Target language UX: favorites at top (from ~/.config/hyprwhspr/languages.txt),
+# "Other…" at bottom opens a walker input for free-text. The picker takes
+# human names ("Lithuanian") or NLLB BCP-47-ish codes ("lit_Latn") — we
+# map names → codes via a hardcoded table (top ~35 languages).
 
 set -euo pipefail
 
@@ -22,6 +23,42 @@ LMS_URL_BASE="${HYPRWHSPR_LMS_URL_BASE:-http://127.0.0.1:1234}"
 LMS_MODEL="${HYPRWHSPR_LMS_MODEL:-google_gemma-4-e4b-it}"
 LANGS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/hyprwhspr/languages.txt"
 TIMEOUT=30
+
+# Language name → NLLB code (BCP-47-ish: ISO 639-3 + script). Covers the
+# 35+ first-class NLLB languages plus common ones the user mentioned.
+# Lookup is case-insensitive on the human name; codes pass through.
+declare -A LANG_CODE=(
+  [english]=eng_Latn   [german]=deu_Latn        [lithuanian]=lit_Latn
+  [latvian]=lav_Latn   [estonian]=est_Latn      [polish]=pol_Latn
+  [russian]=rus_Cyrl   [french]=fra_Latn        [spanish]=spa_Latn
+  [italian]=ita_Latn   [portuguese]=por_Latn    [dutch]=nld_Latn
+  [czech]=ces_Latn     [slovak]=slk_Latn        [hungarian]=hun_Latn
+  [romanian]=ron_Latn  [bulgarian]=bul_Cyrl     [croatian]=hrv_Latn
+  [serbian]=srp_Cyrl   [slovenian]=slv_Latn     [ukrainian]=ukr_Cyrl
+  [greek]=ell_Grek     [turkish]=tur_Latn       [arabic]=arb_Arab
+  [hebrew]=heb_Hebr    [hindi]=hin_Deva         [bengali]=ben_Beng
+  [vietnamese]=vie_Latn [thai]=tha_Thai          [indonesian]=ind_Latn
+  [malay]=zsm_Latn     [japanese]=jpn_Jpan      [korean]=kor_Hang
+  [chinese]=zho_Hans   [mandarin]=zho_Hans      [cantonese]=yue_Hant
+  ["chinese (simplified)"]=zho_Hans  ["chinese (traditional)"]=zho_Hant
+  [swedish]=swe_Latn   [norwegian]=nob_Latn     [danish]=dan_Latn
+  [finnish]=fin_Latn   [icelandic]=isl_Latn
+  [persian]=pes_Arab   [farsi]=pes_Arab         [urdu]=urd_Arab
+  [swahili]=swh_Latn   [zulu]=zul_Latn          [afrikaans]=afr_Latn
+)
+
+# Resolve a human name or pass-through code to an NLLB code.
+# Returns empty string if unknown.
+to_nllb_code() {
+  local input="$1"
+  # Already an NLLB code? (xxx_Yyyy pattern)
+  if [[ "$input" =~ ^[a-z]{3}_[A-Z][a-z]{3}$ ]]; then
+    printf '%s' "$input"; return
+  fi
+  local key
+  key="$(printf '%s' "$input" | /usr/bin/tr '[:upper:]' '[:lower:]')"
+  printf '%s' "${LANG_CODE[$key]:-}"
+}
 
 WALKER="$(command -v omarchy-launch-walker || command -v walker)"
 WDIMS=(--width 295 --minheight 1 --maxheight 630)
@@ -79,40 +116,32 @@ capture_region() {
 }
 
 # --- LLM calls ---------------------------------------------------------------
-SYSTEM_TRANSLATE="You are a precision translator. Translate the user's input to the target language they specify. Output ONLY the translation — no preamble, no quotes, no commentary, no explanations. Preserve formatting (paragraphs, lists, code blocks) exactly. Preserve proper nouns, names, identifiers, technical terms, numbers, dates, and code verbatim. Auto-detect the source language. If the input is already in the target language, return it unchanged. Match register: casual stays casual, formal stays formal."
-
+# Translate text via NLLB (auto-starts the server, idle-exits after 10min).
+# Source language defaults to eng_Latn. NLLB doesn't auto-detect, but for
+# our use case (mostly EN→other) this is fine. Future: add a detection
+# step (Gemma can do "detect the language of: ...") if it matters.
 translate_text() {
-  local target="$1" text="$2"
-  local body; body="$(mktemp)"
-  jq -n --arg model "$LMS_MODEL" --arg sys "$SYSTEM_TRANSLATE" \
-        --arg user "Translate to ${target}:
-
-${text}" '
-    {model: $model,
-     messages: [{role:"system",content:$sys},{role:"user",content:$user}],
-     max_tokens: 1024, temperature: 0.3, stream: false}' > "$body"
-  curl -fsS --max-time "$TIMEOUT" -H 'Content-Type: application/json' \
-    --data-binary "@${body}" "${LMS_URL_BASE}/v1/chat/completions" 2>/dev/null \
-    | jq -r '.choices[0].message.content // ""'
-  rm -f "$body"
+  local tgt_code="$1" text="$2"
+  local src_code="${HYPRWHSPR_TRANSLATE_SRC:-eng_Latn}"
+  printf '%s' "$text" | hyprwhspr-nllb "$src_code" "$tgt_code" 2>&1
 }
 
-translate_image() {
-  local image_path="$1" target="$2"
+# OCR an image via Gemma 4 vision (already loaded for the rewrite pipeline),
+# then send extracted text to NLLB. Two-stage so each model does what it's
+# best at — Gemma reads pixels, NLLB translates.
+ocr_image() {
+  local image_path="$1"
   local b64file body
   b64file="$(mktemp)"; body="$(mktemp)"
   base64 -w0 "$image_path" > "$b64file"
-  jq -n --rawfile b "$b64file" --arg model "$LMS_MODEL" \
-        --arg sys "$SYSTEM_TRANSLATE" \
-        --arg target "$target" '
+  jq -n --rawfile b "$b64file" --arg model "$LMS_MODEL" '
     {model: $model,
      messages: [
-       {role:"system", content:$sys},
        {role:"user", content:[
          {type:"image_url", image_url:{url:"data:image/png;base64,\($b)"}},
-         {type:"text", text:"Translate the text visible in this image to \($target). Output ONLY the translation."}
+         {type:"text", text:"Extract the text visible in this image verbatim. Preserve line breaks and structure. Output ONLY the extracted text — no preamble, no quotes, no commentary."}
        ]}],
-     max_tokens: 1024, temperature: 0.3, stream: false}' > "$body"
+     max_tokens: 1024, temperature: 0.0, stream: false}' > "$body"
   curl -fsS --max-time "$TIMEOUT" -H 'Content-Type: application/json' \
     --data-binary "@${body}" "${LMS_URL_BASE}/v1/chat/completions" 2>/dev/null \
     | jq -r '.choices[0].message.content // ""'
@@ -120,23 +149,39 @@ translate_image() {
 }
 
 # --- Subcommands -------------------------------------------------------------
+# Resolve picked language → NLLB code. Returns empty string + notifies on
+# unknown name. Echoes the code on success.
+resolve_target() {
+  local picked="$1"
+  local code; code="$(to_nllb_code "$picked")"
+  if [[ -z "$code" ]]; then
+    notify -u normal "Unknown language" "Could not map '${picked}' to an NLLB code. Try a name from languages.txt or a code like 'lit_Latn'."
+    return 1
+  fi
+  printf '%s' "$code"
+}
+
 case "${1:-}" in
   region)
     img="$(capture_region)" || { notify -u low "Region capture cancelled"; exit 0; }
-    target="$(pick_target_language)" || { rm -f "$img"; notify -u low "Translation cancelled"; exit 0; }
+    target_name="$(pick_target_language)" || { rm -f "$img"; notify -u low "Translation cancelled"; exit 0; }
+    target_code="$(resolve_target "$target_name")" || { rm -f "$img"; exit 0; }
     preflight || { rm -f "$img"; exit 0; }
-    notify -u low -t 2000 "Translating to ${target}…"
-    translate_image "$img" "$target"
+    notify -u low -t 2000 "Reading image with Gemma…"
+    text="$(ocr_image "$img")"
     rm -f "$img"
+    [[ -z "$text" ]] && { notify -u normal "OCR returned nothing" "Try again with a clearer region"; exit 1; }
+    notify -u low -t 2000 "Translating to ${target_name}…"
+    translate_text "$target_code" "$text"
     ;;
 
   clipboard)
     text="$(wl-paste 2>/dev/null)"
     [[ -z "$text" ]] && { notify -u normal "Clipboard empty" "Nothing to translate"; exit 0; }
-    target="$(pick_target_language)" || { notify -u low "Translation cancelled"; exit 0; }
-    preflight || exit 0
-    notify -u low -t 2000 "Translating to ${target}…"
-    translate_text "$target" "$text"
+    target_name="$(pick_target_language)" || { notify -u low "Translation cancelled"; exit 0; }
+    target_code="$(resolve_target "$target_name")" || exit 0
+    notify -u low -t 2000 "Translating to ${target_name}…"
+    translate_text "$target_code" "$text"
     ;;
 
   text)
@@ -147,10 +192,10 @@ case "${1:-}" in
       text="$(cat)"
     fi
     [[ -z "$text" ]] && { notify -u normal "No input" "Nothing to translate"; exit 1; }
-    target="$(pick_target_language)" || exit 0
-    preflight || exit 0
-    notify -u low -t 2000 "Translating to ${target}…"
-    translate_text "$target" "$text"
+    target_name="$(pick_target_language)" || exit 0
+    target_code="$(resolve_target "$target_name")" || exit 0
+    notify -u low -t 2000 "Translating to ${target_name}…"
+    translate_text "$target_code" "$text"
     ;;
 
   *)

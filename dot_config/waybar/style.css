@@ -276,9 +276,13 @@ window#waybar.hidden { opacity: 0; }
  *  bg/border so it visually matches the rest of the pill family.
  * ============================================================ */
 /* Idle pill stays visible (same chrome as the rest of the family),
- * just dimmed; pending swaps the border red so the blink reads. */
+ * dimmed via low-contrast color + reduced opacity so the chrome reads
+ * as "armed but quiet" rather than competing with active state. */
 #custom-agents.idle,
-#custom-sudo.idle  { color: @gray; }
+#custom-sudo.idle {
+    color: @gray;
+    opacity: 0.55;
+}
 #custom-agents.pending {
     /* Per-agent foreground colors come from inline Pango spans in the
      * module text; the pill chrome just gets a red border for emphasis. */

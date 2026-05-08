@@ -78,7 +78,10 @@ case "${1:-}" in
         "$text_json" "$tooltip_json"
       exit 0
     fi
-    printf '{"text":"","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
+    # Idle pill: emit a dim lock glyph so the chrome stays visible
+    # whether sudo is active or not. Empty `text` would render as a
+    # zero-width module → looks "missing". CSS dims via #custom-sudo.idle.
+    printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
     ;;
   *)
     echo "usage: $0 [check|focus]" >&2

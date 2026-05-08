@@ -122,8 +122,30 @@ notify_transition() {
         "cache active for 5 min" \
         2>/dev/null || true
       ;;
-    prompt→idle|cached→idle|running→idle)
-      # Cancelled / wrong pwd / cache expired — clear any open notification.
+    prompt→idle)
+      # Auth attempt that never reached running = failed (wrong password,
+      # 3-strike out, Ctrl+C). Notify, and write type=failed so the
+      # indicator paints red briefly (3s self-decay).
+      notify-send \
+        --urgency=normal \
+        --replace-id="$NOTIFY_ID" \
+        --icon="$lock_icon" \
+        --app-name=sudo \
+        --hint=string:x-canonical-private-synchronous:sudo-pill \
+        --expire-time=2500 \
+        "Sudo authentication failed" \
+        "wrong password / cancelled" \
+        2>/dev/null || true
+      {
+        echo "user=${F[user]:-$(id -un "$UID_")}"
+        echo "epoch=$(date +%s)"
+        echo "type=failed"
+        echo "tty=${F[tty]:-?}"
+      } > "$flag" 2>/dev/null || true
+      chown "$UID_" "$flag" 2>/dev/null || true
+      ;;
+    cached→idle|running→idle|failed→idle)
+      # Cache expired or failed-state self-decayed — silent dismiss.
       notify-send \
         --replace-id="$NOTIFY_ID" \
         --hint=string:x-canonical-private-synchronous:sudo-pill \

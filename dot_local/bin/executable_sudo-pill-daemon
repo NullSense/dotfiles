@@ -53,6 +53,53 @@ signal_waybar() {
   pkill -SIGRTMIN+10 -u "$UID_" waybar 2>/dev/null || true
 }
 
+# Mako notification IDs are 32-bit; we pick a stable one per daemon
+# instance so each new event with -r REPLACES the previous one rather
+# than stacking. Persistent across the daemon's lifetime; a fresh
+# daemon start picks a new id only because $$ changes.
+NOTIFY_ID=$(( ( $$ % 65000 ) + 1000 ))
+
+notify_transition() {
+  local from="$1" to="$2"
+  case "$from→$to" in
+    *→prompt)
+      # Sudo is asking for your password — high urgency, replaceable so
+      # repeated prompts overwrite rather than pile up.
+      notify-send \
+        --urgency=critical \
+        --replace-id="$NOTIFY_ID" \
+        --icon=system-lock-screen \
+        --app-name=sudo \
+        --hint=string:x-canonical-private-synchronous:sudo-pill \
+        "Sudo wants your password" \
+        "tty: ${F[tty]:-?}    user: ${F[user]:-?}" \
+        2>/dev/null || true
+      ;;
+    prompt→active)
+      # Auth succeeded — confirm briefly and quietly.
+      notify-send \
+        --urgency=low \
+        --replace-id="$NOTIFY_ID" \
+        --icon=security-high \
+        --app-name=sudo \
+        --hint=string:x-canonical-private-synchronous:sudo-pill \
+        --expire-time=2000 \
+        "Sudo authenticated" \
+        "cache active for 5 min" \
+        2>/dev/null || true
+      ;;
+    prompt→idle)
+      # Cancelled / wrong password / timed out — clear any open prompt
+      # notification, no new alert.
+      notify-send \
+        --replace-id="$NOTIFY_ID" \
+        --hint=string:x-canonical-private-synchronous:sudo-pill \
+        --expire-time=1 \
+        "" "" 2>/dev/null || true
+      ;;
+  esac
+}
+
 # ── flag introspection ─────────────────────────────────────────────────────
 read_flag() {
   declare -gA F=()
@@ -120,11 +167,29 @@ expire_stale_flag() {
   fi
 }
 
+current_state() {
+  if read_flag; then
+    if [[ "${F[type]:-}" == "auth_prompt" ]]; then
+      echo prompt; return
+    fi
+    if (( AGE < ttl )); then
+      echo active; return
+    fi
+  fi
+  echo idle
+}
+
 # ── main loop ──────────────────────────────────────────────────────────────
 # Flow: signal waybar (so it re-reads), check expiry, decide next deadline,
 # block on inotify with that timeout (or forever when idle).
+PREV_STATE="$(current_state)"
 while true; do
   expire_stale_flag
+  NEW_STATE="$(current_state)"
+  if [[ "$NEW_STATE" != "$PREV_STATE" ]]; then
+    notify_transition "$PREV_STATE" "$NEW_STATE"
+    PREV_STATE="$NEW_STATE"
+  fi
   signal_waybar
   spawn_pid_watcher
 

@@ -119,33 +119,47 @@ ai_dispose() {
 }
 
 show_capture_menu() {
-  # Stop entry only appears while gpu-screen-recorder is alive — saves
-  # menu real estate when not recording, doubles as a recording indicator.
-  local stop_entry=""
-  if pgrep -x gpu-screen-recorder >/dev/null 2>&1; then
-    stop_entry='󰓛  Stop recording\n'
-  fi
-  # Icons chosen for representativeness (Font Awesome + MDI):
-  #     screenshot (image-icon)        screenshot regions (object-group)
-  #     window-restore                 desktop / monitor
-  #     video / film  󰓛 stop-circle    file-text-o (OCR)
-  #     eyedropper                  brain (AI)            pencil-square (edit)
-  case $(menu "Capture" "${stop_entry}  Screenshot (smart)\n  Region screenshot\n  Window screenshot\n  Full-screen screenshot\n  Start screen record…\n  Text extraction (OCR)\n  Color picker\n  AI: Summarize screen\n  AI: Explain region\n  AI: Ask about region\n  Edit last screenshot") in
-  *Stop*recording*)
-    omarchy-capture-screenrecording --stop-recording
-    ;;
-  *Screenshot*smart*)            capture_with_disposal smart ;;
-  *Region*screenshot*)           capture_with_disposal region ;;
-  *Window*screenshot*)           capture_with_disposal windows ;;
-  *Full-screen*screenshot*)      capture_with_disposal fullscreen ;;
-  *Start*screen*record*)         show_screenrecord_submenu ;;
-  *Text*extraction*|*OCR*)       omarchy-capture-text-extraction ;;
-  *Color*picker*)                pkill hyprpicker || setsid hyprpicker -a >/dev/null 2>&1 & ;;
-  *AI*Summarize*screen*)         ai_dispose "$(hyprwhspr-vision summarize-screen)" ;;
-  *AI*Explain*region*)           ai_dispose "$(hyprwhspr-vision explain-region)" ;;
-  *AI*Ask*about*region*)         ai_dispose "$(hyprwhspr-vision ask-region)" ;;
-  *Edit*last*screenshot*)        hyprwhspr-vision edit-last ;;
+  # Flat top-level: one entry per category. Icons prepended consistently
+  # (Font Awesome) so every line reads at a glance:
+  #     Screenshot   (fa-image)
+  #     Recording    (fa-video)
+  #     OCR          (fa-file-text-o)
+  #     Color picker (fa-eyedropper)
+  #     AI           (fa-magic / sparkles)
+  #     Edit         (fa-pencil-square-o)
+  case $(menu "Capture" "  Screenshot\n  Recording\n  OCR\n  Color picker\n  AI…\n  Edit last screenshot") in
+  *Screenshot*)       capture_with_disposal smart ;;
+  *Recording*)        recording_action ;;
+  *OCR*)              omarchy-capture-text-extraction ;;
+  *Color*picker*)     pkill hyprpicker || setsid hyprpicker -a >/dev/null 2>&1 & ;;
+  *AI*)               show_ai_submenu ;;
+  *Edit*last*)        hyprwhspr-vision edit-last ;;
   *) back_to show_main_menu ;;
+  esac
+}
+
+# Single Recording entry — toggle behavior. If gpu-screen-recorder is
+# running, this stops it. Otherwise it asks for audio mode and starts.
+recording_action() {
+  if pgrep -x gpu-screen-recorder >/dev/null 2>&1; then
+    omarchy-capture-screenrecording --stop-recording
+    notify-send -a omarchy-menu -u low -t 2500 "Recording stopped" "Saved to ~/Videos"
+    return
+  fi
+  case $(menu "Start recording" "󰗇  No audio\n󰕾  Desktop audio\n󰍬  Desktop + microphone") in
+  *No*audio*)       omarchy-capture-screenrecording ;;
+  *Desktop*audio*)  omarchy-capture-screenrecording --with-desktop-audio ;;
+  *microphone*)     omarchy-capture-screenrecording --with-desktop-audio --with-microphone-audio ;;
+  *) back_to show_capture_menu ;;
+  esac
+}
+
+show_ai_submenu() {
+  case $(menu "AI vision" "  Summarize screen\n  Explain region\n  Ask about region") in
+  *Summarize*screen*)  ai_dispose "$(hyprwhspr-vision summarize-screen)" ;;
+  *Explain*region*)    ai_dispose "$(hyprwhspr-vision explain-region)" ;;
+  *Ask*about*region*)  ai_dispose "$(hyprwhspr-vision ask-region)" ;;
+  *) back_to show_capture_menu ;;
   esac
 }
 
@@ -216,14 +230,6 @@ capture_dispose() {
   esac
 }
 
-show_screenrecord_submenu() {
-  case $(menu "Screen record" "󰗅  No audio\n󰕾  Desktop audio\n󰍬  Desktop + microphone") in
-  *No*audio*)      omarchy-capture-screenrecording ;;
-  *Desktop*audio*) omarchy-capture-screenrecording --with-desktop-audio ;;
-  *microphone*)    omarchy-capture-screenrecording --with-desktop-audio --with-microphone-audio ;;
-  *) back_to show_capture_menu ;;
-  esac
-}
 
 # Wrap upstream go_to_menu: add *voice* and *capture* cases, delegate
 # everything else to the original. Keeps us robust if omarchy adds new

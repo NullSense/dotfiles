@@ -17,6 +17,7 @@ Matas
 MITM
 neovim
 Nous
+OCR
 omarchy
 OpenRouter
 Parakeet

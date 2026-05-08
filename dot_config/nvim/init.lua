@@ -16,4 +16,11 @@ require("config.keymaps")
 require("config.autocmds")
 
 -- Setup plugins
-require("lazy").setup("plugins")
+require("lazy").setup("plugins", {
+	rocks = {
+		-- No plugins in this config require luarocks; disable rocks
+		-- support entirely so :checkhealth stops looking for hererocks
+		-- or system luarocks/lua-5.1.
+		enabled = false,
+	},
+})

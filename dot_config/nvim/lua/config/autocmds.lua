@@ -2,6 +2,15 @@ local augroup = vim.api.nvim_create_augroup
 local autocmd = vim.api.nvim_create_autocmd
 
 -- ================================
+-- FILETYPE OVERRIDES
+-- ================================
+
+-- marksman declares 'markdown.mdx' as a supported filetype but Neovim
+-- doesn't ship that mapping. Without this, opening a .mdx file warns
+-- "Unknown filetype 'markdown.mdx'".
+vim.filetype.add({ extension = { mdx = "markdown.mdx" } })
+
+-- ================================
 -- COMPLETION & PREVIEW MANAGEMENT
 -- ================================
 

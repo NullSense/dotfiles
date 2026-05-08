@@ -71,6 +71,15 @@ return {
 		"folke/snacks.nvim",
 		priority = 1000,
 		lazy = false,
+		config = function(_, opts)
+			require("snacks").setup(opts)
+			-- Snacks.input enabled=true *should* auto-call Snacks.input.enable(),
+			-- but in this config it does not (likely because noice.nvim is loaded
+			-- with event=VeryLazy and may interfere). Wire both handlers
+			-- explicitly so :checkhealth snacks reports them as installed.
+			Snacks.input.enable()
+			vim.ui.select = Snacks.picker.select
+		end,
 		opts = {
 			image = { enabled = false },
 			bigfile = { enabled = true },

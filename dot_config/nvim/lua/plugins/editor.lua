@@ -41,53 +41,49 @@ return {
 	},
 	{
 		"nvim-treesitter/nvim-treesitter",
-		opts = {
-			ensure_installed = {
-				"python",
-				"javascript",
-				"vim",
-				"comment",
-				"awk",
-				"bash",
-				"cmake",
-				"css",
-				"diff",
-				"dockerfile",
-				"dot",
-				"gitconfig",
-				"gitignore",
-				"gitcommit",
-				"gitattributes",
-				"html",
-				"json",
-				"htmldjango",
-				"http",
-				"jq",
-				"jsdoc",
-				"json5",
-				"lua",
-				"luadoc",
-				"markdown_inline",
-				"regex",
-				"rust",
-				"sql",
-				"todotxt",
-				"typescript",
-				"yaml",
-			},
-			auto_install = true,
-			incremental_selection = { enable = true },
-			highlight = { enable = true },
-			rainbow = { enable = true },
-			autotag = { enable = true },
-			context_commentstring = { enable = true, enable_autocmd = false },
-			refactor = {
-				highlight_definitions = { enable = true },
-				highlight_current_scope = { enable = true },
-				smart_rename = { enable = false },
-			},
-		},
+		-- master branch is archived upstream; main is the canonical branch.
+		-- Main has a modular API: parsers via require('nvim-treesitter').install,
+		-- highlight via vim.treesitter.start() in a FileType autocmd.
+		branch = "main",
+		lazy = false,
 		build = ":TSUpdate",
+		config = function()
+			local parsers = {
+				"python", "javascript", "typescript", "tsx", "vim", "vimdoc",
+				"comment", "awk", "bash", "cmake", "css", "diff", "dockerfile",
+				"dot", "gitconfig", "gitignore", "gitcommit", "gitattributes",
+				"html", "json", "json5", "htmldjango", "http", "jq", "jsdoc",
+				"lua", "luadoc", "markdown", "markdown_inline", "regex", "rust",
+				"sql", "todotxt", "yaml", "toml", "query", "c",
+			}
+
+			require("nvim-treesitter").install(parsers)
+
+			-- Map filetypes to parsers Treesitter would not otherwise pick up
+			-- automatically (vim's filetype != parser name in some cases).
+			local ft_to_parser = {
+				htmldjango = "htmldjango",
+				gitcommit = "gitcommit",
+				["markdown.mdx"] = "markdown",
+			}
+
+			vim.api.nvim_create_autocmd("FileType", {
+				callback = function(args)
+					local ft = vim.bo[args.buf].filetype
+					local lang = ft_to_parser[ft] or vim.treesitter.language.get_lang(ft) or ft
+					if not lang or lang == "" then return end
+					-- Start syntax highlighting if a parser is available.
+					local ok = pcall(vim.treesitter.start, args.buf, lang)
+					if ok then
+						-- Treesitter-driven folding (built-in).
+						vim.wo.foldexpr = "v:lua.vim.treesitter.foldexpr()"
+						vim.wo.foldmethod = "expr"
+						-- Treesitter-driven indent (experimental, provided by main branch).
+						vim.bo[args.buf].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+					end
+				end,
+			})
+		end,
 	},
 	{
 		"hedyhli/outline.nvim",

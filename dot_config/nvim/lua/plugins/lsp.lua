@@ -2,18 +2,7 @@ return {
 	{ "neovim/nvim-lspconfig" },
 	{
 		"williamboman/mason.nvim",
-		opts = {
-			ensure_installed = {
-				"biome",
-				"marksman",
-				"markdownlint-cli2",
-				"selene",
-				"lua-language-server",
-				"stylua",
-				"clippy",
-				"ruff",
-			},
-		},
+		opts = {},
 	},
 	{
 		"williamboman/mason-lspconfig.nvim",
@@ -42,6 +31,25 @@ return {
 		},
 	},
 	{
+		-- mason.nvim itself doesn't accept ensure_installed for non-LSP tools.
+		-- mason-tool-installer drives installs of the formatters/linters used
+		-- by conform.nvim and nvim-lint below.
+		"WhoIsSethDaniel/mason-tool-installer.nvim",
+		dependencies = { "williamboman/mason.nvim" },
+		opts = {
+			ensure_installed = {
+				"biome",
+				"markdownlint-cli2",
+				"selene",
+				"stylua",
+				"ruff",
+				"prettierd",
+				"eslint_d",
+			},
+			run_on_start = true,
+		},
+	},
+	{
 		"stevearc/conform.nvim",
 		config = function()
 			require("conform").setup({
@@ -49,11 +57,11 @@ return {
 					lua = { "stylua" },
 					python = { "ruff" },
 					rust = { "rustfmt", lsp_format = "fallback" },
-					javascript = { "biome", "prettierd", "prettier", stop_after_first = true },
-					typescript = { "biome", "prettierd", "prettier", stop_after_first = true },
-					javascriptreact = { "biome", "prettierd", "prettier", stop_after_first = true },
-					typescriptreact = { "biome", "prettierd", "prettier", stop_after_first = true },
-					json = { "biome", "prettierd", "prettier", stop_after_first = true },
+					javascript = { "biome", "prettierd", stop_after_first = true },
+					typescript = { "biome", "prettierd", stop_after_first = true },
+					javascriptreact = { "biome", "prettierd", stop_after_first = true },
+					typescriptreact = { "biome", "prettierd", stop_after_first = true },
+					json = { "biome", "prettierd", stop_after_first = true },
 					html = { "prettierd" },
 					css = { "prettierd" },
 					markdown = { "prettierd" },

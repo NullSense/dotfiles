@@ -179,33 +179,42 @@ if [[ "$context" == "chat" ]]; then
   fi
 fi
 
+# NOTE: per-context styles MUST NOT forbid lists. The universal LISTS rule
+# applies in every context. Inline emphasis (bold/italic/strike/code) is
+# what varies by context.
 case "$context" in
   agent-cli)
-    style="Target: terminal coding agent. Preserve paths/identifiers/flags/version-numbers verbatim. Fix capitalization, punctuation, filler. Imperative, single line, no markdown." ;;
+    style="Target: terminal coding agent. Preserve paths/identifiers/flags/version-numbers verbatim. Fix capitalization, punctuation, filler. Imperative, concise. No inline emphasis (no bold/italic/code-fences). Lists allowed when speaker enumerates." ;;
   terminal)
-    style="Target: shell/git. Preserve identifiers/paths/flags verbatim. Minimal cleanup. Single line preferred. No markdown." ;;
+    style="Target: shell/git. Preserve identifiers/paths/flags verbatim. Minimal cleanup. No inline emphasis. Lists allowed when speaker enumerates." ;;
   code-editor)
-    style="Target: code editor (comments, commits, PR text). Tight, technical, declarative. Preserve identifiers verbatim. Plain text — no markdown unless dictated." ;;
+    style="Target: code editor (comments, commits, PR text). Tight, technical, declarative. Preserve identifiers verbatim. No inline emphasis unless dictated. Lists allowed." ;;
   email)
-    style="Target: email. Heavier polish: full sentences, paragraph breaks at topic shifts, match speaker's register. Don't invent greetings/sign-offs. Plain text — no markdown." ;;
+    style="Target: email. Heavier polish: full sentences, paragraph breaks at topic shifts, match speaker's register. Don't invent greetings/sign-offs. No inline emphasis (plain text email). Lists allowed and encouraged when speaker enumerates." ;;
   chat)
     case "$md_dialect" in
-      discord) style="Target: Discord/Telegram chat. Conversational, no paragraph breaks, keep contractions. Markdown (only if dictated): **bold**, *italic*, ~~strike~~, \`code\`. Emojis only if dictated." ;;
-      slack)   style="Target: Slack chat. Conversational, no paragraph breaks, keep contractions. Slack mrkdwn (only if dictated): *bold* (SINGLE asterisk), _italic_, ~strike~ (SINGLE tilde). Emojis only if dictated." ;;
-      *)       style="Target: chat. Conversational, no paragraph breaks, keep contractions. NO markdown — Signal/iMessage/etc. render asterisks literally. Emojis only if dictated." ;;
+      discord) style="Target: Discord/Telegram chat. Conversational, keep contractions. Inline emphasis if dictated: **bold**, *italic*, ~~strike~~, \`code\`. Emojis only if dictated." ;;
+      slack)   style="Target: Slack chat. Conversational, keep contractions. Slack mrkdwn if dictated: *bold* (SINGLE asterisk), _italic_, ~strike~ (SINGLE tilde). Emojis only if dictated." ;;
+      *)       style="Target: chat (Signal/iMessage/etc.). Conversational, keep contractions. No inline emphasis (asterisks render literally). Emojis only if dictated." ;;
     esac ;;
   browser)
-    style="Target: browser text field. Generic prose polish, paragraph breaks at topic shifts. Plain text by default." ;;
+    style="Target: browser text field. Generic prose polish, paragraph breaks at topic shifts. No inline emphasis unless dictated." ;;
   notes)
-    style=$'Target: notes/docs (Obsidian/Logseq/Notion/Google Docs). Medium polish, full sentences, paragraph breaks at topic shifts. MUST emit markdown when speaker implies structure:\n- Sequential enumeration ("first... then... then...", "one... two... three...") → numbered list (1./2./3.) on separate lines.\n- Unordered enumeration ("we need X, Y, and Z") → bullet list (-) on separate lines.\n- Explicit "header X" → ## X.\nStandard CommonMark. Example: "first set up the project then write tests then deploy" → "1. Set up the project.\n2. Write tests.\n3. Deploy."' ;;
+    style="Target: notes/docs (Obsidian/Logseq/Notion/Google Docs). Medium polish, full sentences, paragraph breaks at topic shifts. Full CommonMark allowed: ## headers if speaker says 'header X', plus inline emphasis if dictated." ;;
   *)
-    style="Generic prose. Medium polish, paragraph breaks at topic shifts. Plain text — no markdown unless dictated." ;;
+    style="Generic prose. Medium polish, paragraph breaks at topic shifts. No inline emphasis unless dictated." ;;
 esac
 
 # --- 4. Build the system prompt ----------------------------------------------
-# Tightened from the prior ~650-token version. Critical instruction first
-# (output-only), then a compressed rule list, then context overlay, then
-# 3 well-chosen few-shots covering the load-bearing edge cases:
+# Layout optimized for llama.cpp prefix caching: ALL static content first
+# (universal rules → vocab → examples → output directive), DYNAMIC content
+# (per-dictation [App context] + per-context style) at the tail. The static
+# prefix is ~1100 chars (~275 tokens) and is byte-identical across every
+# dictation as long as vocabulary.txt doesn't change — llama.cpp's KV cache
+# reuses it on every call. Only the tail is reprocessed.
+#
+# Critical instruction first (output-only) per recency-of-instruction effect.
+# Three few-shots cover the load-bearing edge cases:
 #   - question stays a question (anti-injection)
 #   - filler removal + meaning preservation
 #   - number+unit normalization
@@ -217,17 +226,29 @@ Rules:
 - Fix grammar, punctuation, capitalization, run-ons, false starts, filler (um, uh, like, you know).
 - If a proper noun looks misheard, leave it as-is — don't guess (unless [Known vocabulary] applies).
 - Number + unit: spoken numbers with technical units (GB, MB, MHz, ms, %, px, etc.) become digits without space. \"twelve gigabytes\" → \"12GB\"; \"two hundred milliseconds\" → \"200ms\". Keep prose numbers (\"three of us\", \"a thousand reasons\").
-- If already clean, return unchanged.
-
-[App context] class=${class:-?} title=${title:-?} context=${context}
-${style}${vocab_block}
+- LISTS — apply IN EVERY CONTEXT when the speaker explicitly enumerates:
+  * Sequential cues (\"first ... then ... then ...\", \"first ... second ... third\", \"step one ... step two\", \"one ... two ... three\" used as ordinals) → numbered list (1. / 2. / 3.) on separate lines.
+  * Unordered enumeration cues (\"the things we need are X, Y, and Z\" with clear list cadence; \"there's three reasons: A, B, C\") → bullet list (- ) on separate lines.
+  * Casual flow (\"I went to the store then the gym then home\") stays prose — only convert when enumeration is the obvious intent.
+  Lists render fine even in plain-text targets (Signal, iMessage), so apply unconditionally on cues.
+- If already clean, return unchanged.${vocab_block}
 
 Examples:
 [TEXT START]how can we avoid that[TEXT END] → How can we avoid that?
 [TEXT START]so um basically i was thinking we should refactor the auth module you know[TEXT END] → We should refactor the auth module.
 [TEXT START]i have sixty four gigabytes of ram and twelve gigabytes of vram[TEXT END] → I have 64GB of RAM and 12GB of VRAM.
+[TEXT START]first set up the project then write tests then deploy to staging[TEXT END] → 1. Set up the project.
+2. Write tests.
+3. Deploy to staging.
+[TEXT START]the build needs three things node twenty postgres and redis[TEXT END] → The build needs three things:
+- Node 20
+- Postgres
+- Redis
 
-Output the rewritten text only."
+Output the rewritten text only.
+
+[App context] class=${class:-?} title=${title:-?} context=${context}
+${style}"
 
 # --- 5. Build & send the request (model-family-aware) ------------------------
 # Qwen3.x with embedded thinking template -> /v1/completions + prefill.

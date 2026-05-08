@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+# Interactive aliases. Sourced from ~/.zshrc.
+#
+# Skip in any AI agent shell AND any non-interactive shell.
+#
+# Background: the 2026-05-08 incident happened because `alias ls=eza` got
+# captured into Claude Code's shell snapshot. eza prints `name -> target`
+# for symlinks even without -l; combined with `xargs -I {}` (unquoted
+# substitution into sh -c), the `->` was parsed as `> target` and truncated
+# ~600 user-writable files to their own absolute path. See
+# ~/the-night-an-ai-ate-my-home-directory.md for the postmortem.
+#
+# AGENT_VAULT_SESSION_TOKEN is set by `agent-vault vault run` for every
+# wrapped child (claude, codex, opencode, future agents). Since all our
+# agent invocations are wrapped through agent-vault, this single env var
+# is the universal "I'm running inside an AI agent" detector. New agents
+# auto-covered when added to the wrapper aliases below.
+[[ -n "${AGENT_VAULT_SESSION_TOKEN:-}" ]] && return 0
+[[ -o interactive ]] || return 0
 
 # Aliases
 # Pacman

@@ -1,0 +1,19 @@
+#!/bin/bash
+# Shadows upstream omarchy-restart-waybar.
+#
+# Upstream does `pkill -x waybar` + `setsid uwsm-app -- waybar &`. With our
+# setup that wires waybar via a systemd user unit (waybar.service, with
+# Restart=on-failure), the SIGTERM from pkill is treated as a clean exit, so
+# systemd does NOT restart the unit. The uwsm-app spawn then launches waybar
+# OUTSIDE the unit, leaving waybar.service dead and the bar running off-tree
+# (visible as an inconsistent state after every theme-set).
+#
+# Route through systemd when our unit is enabled. Falls back to upstream
+# behaviour on systems without the unit.
+
+if systemctl --user is-enabled waybar.service &>/dev/null; then
+    systemctl --user restart waybar.service
+else
+    pkill -x waybar
+    setsid uwsm-app -- waybar >/dev/null 2>&1 &
+fi

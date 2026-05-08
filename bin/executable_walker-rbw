@@ -1,21 +1,36 @@
 #!/usr/bin/env bash
 # Bitwarden picker over walker --dmenu (replaces rofi-rbw).
 #
-# Action:  copy   — copies password to clipboard, clears in 30s
-#          type   — types the password into the focused window via wtype
+# Action:  copy  — copies password to clipboard, clears in 30s
+#          type  — types the password into the focused window via wtype
 # Default: copy. First arg can be 'copy' or 'type'.
+#
+# Hardening (added 2026-05-08 after a hang investigation):
+#   * flock(1) keeps a single instance — repeated $mod+B presses no longer
+#     pile up zombie scripts when something downstream hangs.
+#   * `timeout 60 rbw unlock` bounds the pinentry wait. rbw uses pinentry-qt
+#     (see ~/.config/rbw/config.json) which surfaces reliably on Wayland;
+#     pinentry-gnome3's gcr-prompter dialog can silently fail to present on
+#     Hyprland, which is what wedged the original script.
 
 set -euo pipefail
 ACTION="${1:-copy}"
 
-# Make sure rbw is unlocked; if not, prompt for the master password.
+LOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/walker-rbw.lock"
+exec 9>"$LOCK"
+flock -n 9 || exit 0
+
 if ! rbw unlocked >/dev/null 2>&1; then
-    rbw unlock || { notify-send -u critical "Bitwarden" "Vault locked — couldn't unlock"; exit 1; }
+    if ! timeout 60 rbw unlock; then
+        notify-send -u critical "Bitwarden" "Vault locked — unlock failed or timed out"
+        exit 1
+    fi
 fi
 
 # Format: "Name  ·  Username" — fzf-friendly, walker dedupes on the full line.
-sel=$(rbw list --fields name,user | awk -F'\t' '{ printf "%s  ·  %s\n", $1, $2 }' \
-        | ~/bin/launch-walker --dmenu)
+sel=$(rbw list --fields name,user \
+        | awk -F'\t' '{ printf "%s  ·  %s\n", $1, $2 }' \
+        | ~/bin/launch-walker --dmenu -p " Bitwarden…") || exit 0
 [[ -z $sel ]] && exit 0
 
 name=${sel%%  ·  *}

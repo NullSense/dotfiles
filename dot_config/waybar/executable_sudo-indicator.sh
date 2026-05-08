@@ -47,11 +47,25 @@ case "${1:-}" in
     ;;
   ""|check)
     if read_flag; then
-      # auth_prompt = sudo is asking for password right now. Distinct state
-      # from active so CSS can flash yellow vs solid yellow. Short-lived;
-      # session_open will replace it within seconds on auth success, or
-      # TTL-decay (typically <30s) on user cancel/wrong password.
+      # auth_prompt = sudo is asking for password right now. Two ways to
+      # clear: (1) sudo PID disappears (Ctrl+C, terminal closed, sudo
+      # exited with auth fail), (2) prompt has been pending too long
+      # (PROMPT_TTL — covers stuck states / unreliable PID checks).
       if [[ "${F[type]:-}" == "auth_prompt" ]]; then
+        prompt_ttl=${SUDO_PROMPT_TTL:-60}
+        sudo_pid=${F[sudo_pid]:-}
+        if [[ -n "$sudo_pid" ]] && ! kill -0 "$sudo_pid" 2>/dev/null; then
+          # sudo process gone → user cancelled / terminal closed.
+          rm -f "$flag" 2>/dev/null || true
+          printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
+          exit 0
+        fi
+        if (( AGE > prompt_ttl )); then
+          # Stuck prompt — fall back to idle to avoid permanent flash.
+          rm -f "$flag" 2>/dev/null || true
+          printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
+          exit 0
+        fi
         printf '{"text":"󰌾 …","alt":"prompt","class":"prompt","tooltip":"sudo is asking for your password\\nuser: %s\\ntty:  %s"}\n' \
           "${F[user]:-?}" "${F[tty]:-?}"
         exit 0

@@ -163,7 +163,7 @@
     "custom/sudo": {
         "exec": "$HOME/.config/waybar/sudo-indicator.sh",
         "return-type": "json",
-        "interval": 5,
+        "interval": 2,
         "signal": 10,
         "format": "{}",
         "tooltip": true,

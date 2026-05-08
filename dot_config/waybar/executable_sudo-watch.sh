@@ -90,7 +90,10 @@ emit_state() {
       return 0
     fi
   fi
-  printf '{"text":"","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
+  # Idle state: emit a dim open-lock glyph so the pill stays visible
+  # (empty text would render as a zero-width module → looks "missing").
+  # CSS dims this in the .idle class.
+  printf '{"text":"󰿆","alt":"idle","class":"idle","tooltip":"no active sudo session"}\n'
 }
 
 # Event loop. emit_state happens on:

@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# sudo-pill-daemon — event-driven watcher for the sudo-active flag.
+#
+# Single long-lived process, runs as a systemd user service. Signals
+# waybar (SIGRTMIN+10) on every state transition. waybar's custom/sudo
+# module is configured with `interval: "once"` + `signal: 10`, so it
+# only re-runs sudo-indicator.sh when this daemon says something changed.
+# Zero polling anywhere in the pipeline.
+#
+# Event sources, all kernel-driven:
+#   inotifywait -t  → flag create/modify/delete  AND  TTL deadline.
+#                     The -t timeout doubles as a deadline timer (timerfd
+#                     under the hood). When the cache TTL expires with no
+#                     other event, inotifywait returns via timeout and we
+#                     signal waybar to flip the pill to idle.
+#   tail --pid      → sudo process death during auth_prompt. On exit it
+#                     touches a sentinel inside flag_dir, which trips the
+#                     same inotifywait → unified single primitive.
+#
+# Why a daemon (not a waybar streaming-exec):
+#   - Survives waybar restarts; one inotify watch on the flag dir at all
+#     times (no race where a brief watcher-less window misses an event).
+#   - waybar 0.15's `interval: "once"` and `restart-interval` neither
+#     reliably respawn the script after kill, so the streaming-exec
+#     pattern was leaking dead bars (one watcher per output, one died,
+#     one stayed → asymmetric pill state across monitors).
+#   - systemd's `Restart=always` is the canonical robust answer.
+set -u
+
+UID_=$(id -u)
+flag="/run/user/$UID_/sudo-active"
+flag_dir=$(dirname "$flag")
+pid_marker="$flag_dir/.sudo-pill-pid-died"
+ttl=${SUDO_CACHE_SEC:-300}
+prompt_ttl=${SUDO_PROMPT_TTL:-60}
+
+mkdir -p "$flag_dir"
+rm -f "$pid_marker" 2>/dev/null || true
+
+# Background subprocess registry — kill them all on exit.
+WATCHERS=()
+cleanup() {
+  local pid
+  for pid in "${WATCHERS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  rm -f "$pid_marker" 2>/dev/null || true
+}
+trap 'cleanup; exit 0' INT TERM
+trap cleanup EXIT
+
+signal_waybar() {
+  pkill -SIGRTMIN+10 -u "$UID_" waybar 2>/dev/null || true
+}
+
+# ── flag introspection ─────────────────────────────────────────────────────
+read_flag() {
+  declare -gA F=()
+  AGE=0
+  [[ -f "$flag" ]] || return 1
+  local mtime k v
+  mtime=$(stat -c %Y "$flag" 2>/dev/null || echo 0)
+  AGE=$(( $(date +%s) - mtime ))
+  while IFS='=' read -r k v; do
+    [[ -n "$k" ]] && F[$k]="$v"
+  done < "$flag"
+  return 0
+}
+
+# Determine the deadline for the current state, in seconds. Returns 0
+# when no deadline applies (idle — waits indefinitely for inotify).
+state_deadline() {
+  if read_flag; then
+    if [[ "${F[type]:-}" == "auth_prompt" ]]; then
+      local d=$(( prompt_ttl - AGE ))
+      (( d < 1 )) && d=1
+      echo "$d"
+      return
+    fi
+    if (( AGE < ttl )); then
+      echo $(( ttl - AGE ))
+      return
+    fi
+  fi
+  echo 0
+}
+
+# Spawn one tail --pid per active auth_prompt (cleared on next iteration).
+spawn_pid_watcher() {
+  if read_flag && [[ "${F[type]:-}" == "auth_prompt" ]]; then
+    local sudo_pid="${F[sudo_pid]:-}"
+    if [[ -n "$sudo_pid" ]] && kill -0 "$sudo_pid" 2>/dev/null; then
+      ( tail --pid="$sudo_pid" -f /dev/null 2>/dev/null
+        # Touch + remove to fire create+delete events; ensures inotify
+        # wakes regardless of which event mask the parent's listening for.
+        touch "$pid_marker" 2>/dev/null
+        rm -f "$pid_marker" 2>/dev/null
+      ) </dev/null >/dev/null 2>&1 &
+      WATCHERS+=("$!")
+    fi
+  fi
+}
+
+# Cleanup expired flags so the indicator returns idle on next read.
+expire_stale_flag() {
+  if read_flag; then
+    if [[ "${F[type]:-}" == "auth_prompt" ]]; then
+      local sudo_pid="${F[sudo_pid]:-}"
+      if [[ -n "$sudo_pid" ]] && ! kill -0 "$sudo_pid" 2>/dev/null; then
+        rm -f "$flag" 2>/dev/null
+        return
+      fi
+      if (( AGE > prompt_ttl )); then
+        rm -f "$flag" 2>/dev/null
+        return
+      fi
+    elif (( AGE >= ttl )); then
+      rm -f "$flag" 2>/dev/null
+    fi
+  fi
+}
+
+# ── main loop ──────────────────────────────────────────────────────────────
+# Flow: signal waybar (so it re-reads), check expiry, decide next deadline,
+# block on inotify with that timeout (or forever when idle).
+while true; do
+  expire_stale_flag
+  signal_waybar
+  spawn_pid_watcher
+
+  timeout=$(state_deadline)
+
+  if (( timeout > 0 )); then
+    inotifywait -qq -t "$timeout" \
+      -e modify,create,delete,close_write,moved_to,moved_from \
+      "$flag_dir" 2>/dev/null || true
+  else
+    inotifywait -qq \
+      -e modify,create,delete,close_write,moved_to,moved_from \
+      "$flag_dir" 2>/dev/null || true
+  fi
+
+  # Reap finished pid watchers.
+  for i in "${!WATCHERS[@]}"; do
+    kill -0 "${WATCHERS[$i]}" 2>/dev/null || unset "WATCHERS[$i]"
+  done
+done

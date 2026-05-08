@@ -161,9 +161,10 @@
         "on-click-right": "$HOME/.config/waybar/agent-attention.sh dismiss-all"
     },
     "custom/sudo": {
-        "exec": "$HOME/.config/waybar/sudo-watch.sh",
+        "exec": "$HOME/.config/waybar/sudo-indicator.sh",
         "return-type": "json",
-        "restart-interval": 1,
+        "interval": "once",
+        "signal": 10,
         "format": "{}",
         "tooltip": true,
         "escape": false,

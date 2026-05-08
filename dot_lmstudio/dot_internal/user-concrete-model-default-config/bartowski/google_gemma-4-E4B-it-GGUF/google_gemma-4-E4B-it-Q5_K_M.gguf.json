@@ -34,6 +34,10 @@
       {
         "key": "llm.load.llama.cpuThreadPoolSize",
         "value": 8
+      },
+      {
+        "key": "llm.load.numParallelSessions",
+        "value": 1
       }
     ]
   }

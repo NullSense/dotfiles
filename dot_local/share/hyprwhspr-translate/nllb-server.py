@@ -23,7 +23,7 @@ import time
 
 MODEL_DIR = os.path.expanduser("~/.local/share/hyprwhspr-translate/nllb-1.3B-int8")
 SOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "hyprwhspr-nllb.sock")
-IDLE_TIMEOUT = 600  # seconds — exit after this much idle time
+IDLE_TIMEOUT = 180  # seconds — exit after this much idle time
 
 # Sentence boundary regex: split on .!? followed by space + capital, OR newline.
 # Conservative — keeps abbreviations like "e.g." together.

@@ -168,7 +168,8 @@
         "format": "{}",
         "tooltip": true,
         "escape": false,
-        "markup": "pango"
+        "markup": "pango",
+        "on-click": "$HOME/.config/waybar/sudo-indicator.sh focus"
     },
     "custom/hyprwhspr": {
         "format": "{}",

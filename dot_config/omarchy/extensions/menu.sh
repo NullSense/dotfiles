@@ -369,11 +369,26 @@ ai_run_task_vision() {
     [[ -z "$q" ]] && { back_to show_ai_submenu; return; }
   fi
   notify-send -a omarchy-menu -u low -t 2000 "${task_label} (${source})…"
+  # Capture stderr separately — silently dropping it means daemon failures
+  # (grim WAYLAND_DISPLAY issues, model errors, capture cancels) all look
+  # like "empty result" to the user with no diagnostic. Show the stderr
+  # body in the failure notification instead.
+  local out err err_file rc
+  err_file="$(mktemp)"
   if [[ "$task" == "ask" ]]; then
-    ai_dispose "$(hyprwhspr-ai vision-task ask --source "$source" --question "$q" 2>/dev/null)"
+    out="$(hyprwhspr-ai vision-task ask --source "$source" --question "$q" 2>"$err_file")"
   else
-    ai_dispose "$(hyprwhspr-ai vision-task "$task" --source "$source" 2>/dev/null)"
+    out="$(hyprwhspr-ai vision-task "$task" --source "$source" 2>"$err_file")"
   fi
+  rc=$?
+  err="$(cat "$err_file")"
+  rm -f "$err_file"
+  if [[ $rc -ne 0 ]] || [[ -z "$out" ]]; then
+    notify-send -a omarchy-menu -u normal "${task_label} (${source}) — no output" \
+      "${err:-The model returned nothing. Try a tighter region or a different source.}"
+    return
+  fi
+  ai_dispose "$out"
 }
 
 # task × file → walker file picker, branch on extension:

@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/goodroot/hyprwhspr/main/share/config.schema.json",
   "use_hypr_bindings": true,
-  "audio_device_name": "voice_cleaned",
+  "audio_device_name": "Voice (Cleaned)",
   "transcription_backend": "onnx-asr",
   "audio_ducking": true,
   "mute_detection": true,

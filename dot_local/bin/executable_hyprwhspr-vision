@@ -37,6 +37,51 @@ walker_input() {
   printf '' | "$WALKER" --dmenu -I "${WDIMS[@]}" -p "${1}…" 2>/dev/null || true
 }
 
+# --- Result presentation -----------------------------------------------------
+# Surface a Gemma answer with action buttons. notify-send -A blocks until the
+# user clicks an action or the notification times out. We always print the
+# answer to stdout (existing contract) so the caller can still pipe it.
+#
+# Args:
+#   $1 = notification title
+#   $2 = answer text
+#   $3 = optional path to source image (kept on disk until this fn returns —
+#        caller should rm AFTER this returns so the handoff can read it)
+#   $4 = optional question/context text to prepend in the LM Studio handoff
+present_answer() {
+  local title="$1" answer="$2" image="${3:-}" context="${4:-}"
+
+  # Print to stdout first (always — preserves existing CLI contract).
+  printf '%s' "$answer"
+
+  # No notification daemon? Done.
+  command -v notify-send >/dev/null || return 0
+
+  local action
+  local -a args=( -a hyprwhspr-vision -t 15000
+                  -A "lms=󰭹 Open in LM Studio"
+                  -A "copy= Copy answer" )
+  [[ -n "$image" && -f "$image" ]] && args+=( -i "$image" )
+
+  action="$(notify-send "${args[@]}" "$title" "$answer" 2>/dev/null || true)"
+
+  case "$action" in
+    lms)
+      local handoff_text="$answer"
+      [[ -n "$context" ]] && handoff_text="> ${context}"$'\n\n'"$answer"
+      if [[ -n "$image" && -f "$image" ]]; then
+        hyprwhspr-lms-handoff both "$image" "$handoff_text"
+      else
+        hyprwhspr-lms-handoff text "$handoff_text"
+      fi
+      ;;
+    copy)
+      printf '%s' "$answer" | wl-copy
+      notify -u low -t 1500 "Copied" "Answer in clipboard"
+      ;;
+  esac
+}
+
 # --- Pre-flight: model loaded? -----------------------------------------------
 preflight() {
   local state
@@ -115,7 +160,8 @@ case "${1:-}" in
     notify -u low -t 1000 "Capturing screen…"
     img="$(capture_full)" || { notify -u normal "Capture failed"; exit 1; }
     notify -u low -t 2000 "Asking Gemma 4…"
-    vision_call "$img" "Summarize what's visible on this screen in 2-4 short sentences. If there's a clear primary task or content (an article, an error, a UI dialog), focus on that. Be concrete: name what you see. Output plain text, no markdown."
+    ans="$(vision_call "$img" "Summarize what's visible on this screen in 2-4 short sentences. If there's a clear primary task or content (an article, an error, a UI dialog), focus on that. Be concrete: name what you see. Output plain text, no markdown.")"
+    present_answer "Screen summary" "$ans" "$img" "Summarize this screen."
     rm -f "$img"
     ;;
 
@@ -123,7 +169,8 @@ case "${1:-}" in
     preflight || exit 0
     img="$(capture_region)" || { notify -u low "Region capture cancelled"; exit 0; }
     notify -u low -t 2000 "Asking Gemma 4…"
-    vision_call "$img" "Explain what's shown in this region. If it's an error or stack trace, decode the cause. If it's a UI element, describe what it does. If it's text, summarize it. If it's a chart or diagram, describe the data. Be concise — 2-4 sentences."
+    ans="$(vision_call "$img" "Explain what's shown in this region. If it's an error or stack trace, decode the cause. If it's a UI element, describe what it does. If it's text, summarize it. If it's a chart or diagram, describe the data. Be concise — 2-4 sentences.")"
+    present_answer "Region explanation" "$ans" "$img" "Explain this region."
     rm -f "$img"
     ;;
 
@@ -133,7 +180,8 @@ case "${1:-}" in
     if [[ -z "$q" ]]; then rm -f "$img"; exit 0; fi
     preflight || { rm -f "$img"; exit 0; }
     notify -u low -t 2000 "Asking Gemma 4…"
-    vision_call "$img" "$q"
+    ans="$(vision_call "$img" "$q")"
+    present_answer "Gemma — region Q&A" "$ans" "$img" "$q"
     rm -f "$img"
     ;;
 
@@ -154,7 +202,8 @@ case "${1:-}" in
     [[ -f "$file" ]] || { notify -u normal "File not found" "$file"; exit 1; }
     preflight || exit 0
     notify -u low -t 2000 "Asking Gemma 4…"
-    vision_call "$file" "$prompt"
+    ans="$(vision_call "$file" "$prompt")"
+    present_answer "Image analysis" "$ans" "$file" "$prompt"
     ;;
 
   *)

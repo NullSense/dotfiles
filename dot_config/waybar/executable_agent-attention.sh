@@ -129,9 +129,11 @@ case "${1:-}" in
     done
     text=$(IFS='  '; printf '%s' "${parts[*]}")
 
-    tooltip=$(jq -r '.[] | "\(.agent) · ws \(.ws) — \(.title)"' <<<"$arr" \
-              | sed 's/\\/\\\\/g; s/"/\\"/g' \
-              | awk 'BEGIN{ORS=""} {if(NR>1)print "\\n"; print $0}')
+    # Build the tooltip with REAL newlines, then let jq's --rawfile encode
+    # them as JSON `\n` escapes. waybar parses those back into actual line
+    # breaks for Pango. Previous version emitted literal "\n" (two chars)
+    # which round-tripped to a literal `\n` in the rendered tooltip.
+    tooltip=$(jq -r '.[] | "\(.agent) · ws \(.ws) — \(.title)"' <<<"$arr")
 
     text_json=$(jq -Rn --arg t "$text" '$t')
     tooltip_json=$(jq -Rn --arg t "$tooltip" '$t')

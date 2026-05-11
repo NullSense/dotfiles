@@ -6,6 +6,15 @@ After=graphical-session.target
 
 [Service]
 # Canonical: waybar auto-discovers ~/.config/waybar/config.jsonc.
+#
+# ExecStartPre: reap any stray waybar before launching. Defends against the
+# "two bars" race where an external pkill+respawn (env-reload, hot-plug glitch,
+# stale process from a prior session) leaves a sibling running while systemd's
+# Restart=on-failure races in a unit-owned instance. `-` prefix tolerates the
+# common case of nothing to kill; sleep gives waybar's layer-shell surface a
+# beat to disappear before the new one binds.
+ExecStartPre=-/usr/bin/pkill -x -u %U waybar
+ExecStartPre=/bin/sh -c 'i=0; while pgrep -x -u %U waybar >/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done; pkill -KILL -x -u %U waybar 2>/dev/null; exit 0'
 ExecStart=/usr/bin/waybar
 ExecReload=/usr/bin/kill -SIGUSR2 $MAINPID
 KillMode=mixed

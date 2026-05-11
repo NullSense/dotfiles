@@ -107,12 +107,31 @@ yy() {
 [[ -f ~/bin/zshfzfrc  ]] && source ~/bin/zshfzfrc
 [[ -f ~/.secrets       ]] && source ~/.secrets
 
+# ─── AI agent isolation (bubblewrap) ────────────────────────────────────────
+# Agent isolation lives in ~/bin/{claude,codex,opencode} — real on-disk shims
+# that PATH-shadow the real binaries (~/.local/bin/claude, /usr/bin/codex,
+# /usr/bin/opencode). Each shim execs ~/bin/_agent-shim which dispatches
+# through ~/bin/agent-isolated (bwrap sandbox).
+#
+# Why shims, not zsh functions: a function only intercepts zsh invocations.
+# Anything else — `command claude`, /usr/bin/env claude, any non-zsh shell,
+# an exec() syscall from a program, a systemd unit — would bypass the
+# wrapper and reach the real binary. Binary shims in ~/bin (first on $PATH)
+# catch all PATH-based lookups regardless of shell or context.
+#
+# Escape hatches per invocation: --ssh / --gpg / --rbw / --agent-vault
+# Sandbox bypasses (deliberate, no longer accidental):
+#   • AGENT_UNSANDBOX=1 claude …      — env-var gate
+#   • ~/.local/bin/claude …           — invoke real binary by full path
+#
+# unalias the names in case a legacy alias snuck back in via zshaliases
+# (some omarchy/agent-vault setups define `alias claude='agent-vault …'`).
+unalias claude codex opencode 2>/dev/null
+
 # zoxide MUST be last: it installs a chpwd hook + precmd, and zoxide's doctor
 # warns if any later sourced file (aliases, hooks, secrets) registers chpwd
 # after it. Keep this at the very bottom of zshrc.
 command -v zoxide   &>/dev/null && eval "$(zoxide init zsh --cmd cd)"
 
-# Added by LM Studio CLI (lms)
-export PATH="$PATH:/home/nullsense/.lmstudio/bin"
-# End of LM Studio CLI section
+# LM Studio CLI: PATH entry consolidated to dot_zshenv (single canonical source).
 

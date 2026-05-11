@@ -99,10 +99,34 @@ window#waybar.hidden { opacity: 0; }
 .modules-right > widget:last-child  > * { margin-right: 6px; }
 
 /* ============================================================
- * Workspaces — Omarchy-style.
- * Inactive workspaces show their number (small, dim). Active workspace
- * shows the filled-dot glyph in yellow. No pill background — pure typography.
+ * Workspaces — custom/workspaces module.
+ * Replaced built-in `hyprland/workspaces` with a script that emits Pango
+ * markup for each workspace digit, colored by state (focused / active-on-
+ * other-monitor / has-attention-from-agent / occupied / empty). Per-digit
+ * coloring requires a custom module since waybar's static `format-icons`
+ * can't react to live Hyprland tag state. Click handlers bound on the
+ * whole pill: L-click=next, R-click=prev, M-click=focus-attention,
+ * scroll=step. Direct WS jump still works via Super+1..6.
  * ============================================================ */
+#custom-workspaces {
+    background: transparent;
+    border: none;
+    padding: 0 8px;
+    margin-right: 6px;
+    font-size: 13px;
+    font-weight: bold;
+    color: @fg3;
+}
+#custom-workspaces.attention {
+    /* Brand colors are baked into the Pango markup; this just nudges the
+     * whole pill so it reads as "something here wants you" without
+     * fighting the per-digit colors. */
+    background: alpha(@yellow, 0.06);
+    border-radius: 4px;
+}
+
+/* Legacy hyprland/workspaces rules — kept for theme compatibility if the
+ * built-in module is ever re-enabled. #custom-workspaces above is live. */
 #workspaces {
     background: transparent;
     border: none;

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# post_transcription_hook adapter for the hyprwhspr-ai daemon.
+#
+# Contract (per hyprwhspr text_injector.py:517-535):
+#   stdin   = transcribed text from Parakeet (post word_overrides + filler filter)
+#   stdout  = non-empty replaces the transcription; empty = observer-only
+#             (hyprwhspr keeps its original text)
+#   timeout = 5 seconds hard cap from hyprwhspr; we self-cap a tiny bit lower
+#             so we don't get SIGKILL'd mid-write
+#   env     = HYPRWHSPR_MODEL + HYPRWHSPR_BACKEND (we don't use them)
+#
+# Failure mode is intentional: if anything goes wrong (daemon down, LM Studio
+# unreachable, bad JSON, anything), we emit EMPTY stdout. hyprwhspr's
+# observer-only path then keeps the raw transcription. Dictation never breaks.
+
+set -uo pipefail
+
+input="$(cat)"
+
+# Empty input: nothing to do. Echo it back (which is also empty).
+if [[ -z "${input// }" ]]; then
+  printf '%s' "$input"
+  exit 0
+fi
+
+# 4.5s self-cap (hyprwhspr's hard cap is 5s) to ensure we have time to write
+# our output before getting killed. The daemon's own timeouts are much
+# longer (30s for vision/translate) but this hook only ever runs rewrites
+# which are bounded by the LM Studio call.
+output="$(timeout --kill-after=0.5 4.5 \
+  bash -c 'printf "%s" "$1" | hyprwhspr-ai rewrite' _ "$input" 2>/dev/null \
+  || true)"
+
+# Whatever the client wrote, pass it through. Empty → hyprwhspr keeps original.
+# Non-empty → hyprwhspr replaces with our rewrite.
+printf '%s' "$output"
+exit 0

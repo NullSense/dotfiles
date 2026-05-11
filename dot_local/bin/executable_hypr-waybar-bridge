@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""hypr-waybar-bridge — Hyprland IPC → waybar signal dispatcher.
+
+Listens on Hyprland's `.socket2.sock` and signals waybar (SIGRTMIN+8, the
+same channel `custom/agents` already uses) whenever an event happens that
+should refresh the workspace pill or agent indicator.
+
+Why this exists: waybar's `hyprland/workspaces` is event-driven internally
+but our `custom/workspaces` script can't subscribe to the IPC socket on
+its own — waybar would otherwise have to poll. One persistent bridge
+re-uses one socket connection and dispatches a signal per relevant event.
+
+Originally written in bash + socat; rewritten in Python because socat
+isn't installed by default on Arch and the stdlib already has everything
+we need (socket + signal + subprocess), so no extra system dep.
+
+Event filter: workspace focus, monitor focus, window lifecycle, urgency,
+config reload. We drop `windowtitle` (Claude Code TUIs rewrite their
+title constantly and would storm the bar) and `activewindow*` (covered
+by `workspace`/`focusedmon`).
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+UID = os.getuid()
+XDG = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{UID}"))
+SIG = signal.SIGRTMIN + 8
+
+EVENTS_RE = re.compile(
+    r"^(workspace|focusedmon|openwindow|closewindow|movewindow|urgent|"
+    r"createworkspace|destroyworkspace|moveworkspace|"
+    r"monitoradded|monitorremoved|configreloaded)>>"
+)
+
+
+def find_socket() -> Path | None:
+    """Pick the most recently modified Hyprland instance dir.
+
+    Env may not be inherited when the systemd user service starts before
+    Hyprland exports HYPRLAND_INSTANCE_SIGNATURE, so we resolve from disk.
+    """
+    his = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    base = XDG / "hypr"
+    if his:
+        sock = base / his / ".socket2.sock"
+        if sock.is_socket():
+            return sock
+    if not base.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in base.iterdir() if (p / ".socket2.sock").is_socket()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return (candidates[0] / ".socket2.sock") if candidates else None
+
+
+def signal_waybar() -> None:
+    # pkill is robust to multiple waybar instances (multi-monitor sometimes
+    # spawns siblings) and matches the convention used by the rest of the
+    # signalling pipeline (sudo-pill-daemon, Claude Code hooks).
+    subprocess.run(
+        ["pkill", f"-SIGRTMIN+8", "-u", str(UID), "waybar"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def stream_events(sock_path: Path) -> None:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.connect(str(sock_path))
+        # Hyprland never closes mid-session unless the compositor dies, so a
+        # plain blocking recv loop is the right primitive here.
+        buf = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                return  # Hyprland closed — outer loop will reconnect.
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if EVENTS_RE.match(line.decode("utf-8", "replace")):
+                    signal_waybar()
+
+
+def main() -> None:
+    while True:
+        sock = find_socket()
+        if sock is None:
+            time.sleep(2)
+            continue
+        try:
+            stream_events(sock)
+        except (ConnectionError, OSError) as e:
+            print(f"hypr-waybar-bridge: {e}", file=sys.stderr)
+        # Brief pause before reconnect so we don't busy-spin if the socket
+        # is permanently gone (Hyprland died, racing systemd restart).
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    main()

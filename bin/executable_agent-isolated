@@ -1,0 +1,465 @@
+#!/usr/bin/env bash
+# agent-isolated — bubblewrap sandbox for AI coding agents (claude, codex, opencode).
+#
+# Usage:
+#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--agent-vault] [--dry-run] [-- <agent args>]
+#   agent-isolated sh                            # interactive shell inside the sandbox
+#   agent-isolated --self-test                   # run negative + positive verifications
+#   AGENT_UNSANDBOX=1 agent-isolated <agent> …   # bypass the sandbox entirely (escape hatch)
+#
+# Default behaviour: agent runs with tmpfs `/` and tmpfs `$HOME`, then a curated
+# allowlist of read-only system paths and read-write state/workspace mounts.
+# It cannot see ~/.ssh, ~/.gnupg, ~/.config/rbw, the rbw or SSH-agent sockets,
+# the chezmoi `private_*` sources, atuin history, the cliphist DB, or any
+# secret-bearing env var (BW_SESSION, AGENT_VAULT_SESSION_TOKEN, etc.).
+#
+# Escape hatches re-mount specific surfaces when a workflow legitimately needs
+# them; all default off:
+#   --ssh           Bind ~/.bitwarden-ssh-agent.sock + set SSH_AUTH_SOCK.
+#                   Use for `git push` over SSH or SSH-signed commits.
+#   --gpg           Bind $XDG_RUNTIME_DIR/gnupg + set GPG_TTY.
+#   --rbw           Bind $XDG_RUNTIME_DIR/rbw + the rbw binary.
+#                   Use sparingly; defeats most of the isolation goal.
+#   --agent-vault   Set HTTPS_PROXY/CA cert/session token for credential
+#                   injection on outbound HTTPS via the host's agent-vault.
+#                   Agent talks to APIs but never sees upstream tokens.
+#
+# Architecture and rationale documented in:
+#   ~/.claude/projects/-home-nullsense/memory/reference_agent_isolation.md
+#   ~/.claude/plans/okay-can-you-please-cozy-meteor.md (original design)
+
+set -euo pipefail
+
+# ───────────────────────────── Bypass ─────────────────────────────
+if [[ "${AGENT_UNSANDBOX:-0}" == "1" ]]; then
+    if [[ $# -ge 1 ]]; then
+        agent="$1"; shift
+        case "$agent" in
+            claude|codex|opencode)
+                exec "$(command -v "$agent" 2>/dev/null || echo "$agent")" "$@" ;;
+            *) exec "$agent" "$@" ;;
+        esac
+    fi
+fi
+
+# ─────────────────────── Argument parsing ─────────────────────────
+ALLOW_SSH=0
+ALLOW_GPG=0
+ALLOW_RBW=0
+ALLOW_AGENT_VAULT=0
+DRY_RUN=0
+SELF_TEST=0
+AGENT=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ssh)         ALLOW_SSH=1; shift ;;
+        --gpg)         ALLOW_GPG=1; shift ;;
+        --rbw)         ALLOW_RBW=1; shift ;;
+        --agent-vault) ALLOW_AGENT_VAULT=1; shift ;;
+        --dry-run)     DRY_RUN=1; shift ;;
+        --self-test)   SELF_TEST=1; AGENT="sh"; shift; break ;;
+        -h|--help)
+            sed -n '2,30p' "$0" | sed 's/^# \?//'
+            exit 0 ;;
+        --) shift; break ;;
+        claude|codex|opencode|sh|bash)
+            AGENT="$1"; shift; break ;;
+        *)
+            echo "agent-isolated: unknown arg: $1" >&2
+            exit 64 ;;
+    esac
+done
+
+if [[ -z "${AGENT:-}" ]]; then
+    echo "agent-isolated: missing agent name (claude|codex|opencode|sh|bash)" >&2
+    exit 64
+fi
+
+case "$AGENT" in
+    claude)   AGENT_BIN="$HOME/.local/bin/claude" ;;
+    codex)    AGENT_BIN="/usr/bin/codex" ;;
+    opencode) AGENT_BIN="/usr/bin/opencode" ;;
+    sh)       AGENT_BIN="/bin/sh" ;;
+    bash)     AGENT_BIN="/bin/bash" ;;
+esac
+
+if [[ ! -x "$AGENT_BIN" ]]; then
+    echo "agent-isolated: $AGENT_BIN not found or not executable" >&2
+    exit 65
+fi
+
+# ─────────────────────── Pre-flight checks ────────────────────────
+command -v bwrap >/dev/null 2>&1 || {
+    echo "agent-isolated: bwrap not installed (pacman -S bubblewrap)" >&2
+    exit 66
+}
+
+UID_NUM="$(id -u)"
+XRD="${XDG_RUNTIME_DIR:-/run/user/$UID_NUM}"
+CHEZMOI_ROOT="$HOME/.local/share/chezmoi"
+
+# Pin workspace: bind cwd ONLY if it's a real project dir, not $HOME itself
+# or one of the secret-bearing roots. Binding $HOME exposes ~/.ssh, ~/.gnupg,
+# etc.; binding ~/.local/share/chezmoi exposes SECRETS.md and private_dot_ssh.
+#
+# Bare $HOME is denied as an EXACT match only — an earlier version listed
+# "$HOME" inside the subtree-deny loop and the `$_deny/*` glob made it match
+# every project under $HOME, silently sandboxing the agent out of every
+# real workspace. Subtree denies still apply to the secret-bearing dirs.
+WORKSPACE="${PWD:-$HOME}"
+WORKSPACE_DENY_SUBTREE=(
+    "$HOME/.local/share/chezmoi"           # contains SECRETS.md, private_dot_ssh
+    "$HOME/.ssh"
+    "$HOME/.gnupg"
+    "$HOME/.config"                        # too broad — bind specific subdirs only
+    "$HOME/.agent-vault"
+    "$HOME/.local/share/keyrings"
+    "$HOME/.password-store"
+    "$HOME/.aws"
+    "$HOME/.kube"
+    "$HOME/.docker"
+    "$HOME/.cache"                         # cliphist/db, browser caches
+    "$HOME/.mozilla"
+)
+WORKSPACE_BIND=0
+case "$WORKSPACE" in
+    "$HOME")
+        echo "agent-isolated: cwd is bare \$HOME (would expose ~/.ssh, ~/.gnupg, etc); running in tmpfs \$HOME instead" >&2
+        ;;
+    "$HOME"/*)
+        WORKSPACE_BIND=1
+        for _deny in "${WORKSPACE_DENY_SUBTREE[@]}"; do
+            if [[ "$WORKSPACE" == "$_deny" ]] || [[ "$WORKSPACE" == "$_deny"/* ]]; then
+                WORKSPACE_BIND=0
+                echo "agent-isolated: cwd ($WORKSPACE) is under a denied subtree ($_deny); running in tmpfs \$HOME instead" >&2
+                break
+            fi
+        done
+        ;;
+    *)
+        echo "agent-isolated: cwd outside \$HOME ($WORKSPACE); running in tmpfs \$HOME instead" >&2
+        ;;
+esac
+(( WORKSPACE_BIND == 0 )) && WORKSPACE="$HOME"
+
+# ─────────────────────── Build bwrap argv ─────────────────────────
+ARGS=()
+
+# Namespaces — max isolation, keep network for API access.
+ARGS+=(
+    --unshare-all
+    --share-net
+    --new-session
+    --die-with-parent
+    --as-pid-1
+    --cap-drop ALL
+)
+
+# Empty filesystem, layered from here.
+ARGS+=(
+    --tmpfs /
+    --proc /proc
+    --dev /dev
+    --tmpfs /tmp
+    --tmpfs /var/tmp
+    --tmpfs /run
+    --dir "/run/user/$UID_NUM"
+)
+
+# System read-only.
+ARGS+=(
+    --ro-bind /usr /usr
+    --symlink usr/lib   /lib
+    --symlink usr/lib64 /lib64
+    --symlink usr/bin   /bin
+    --symlink usr/sbin  /sbin
+    --ro-bind /etc /etc
+    --ro-bind-try /opt /opt
+)
+
+# Mask known secret-extraction binaries that exist in /usr/bin. Even though
+# their backends (sockets, DBs, D-Bus services) are hidden, having the
+# binary on $PATH is a footgun. /dev/null is bound over each — calling them
+# fails immediately. Defense in depth.
+for _bin in rbw rofi-rbw bw secret-tool keyctl op doppler vault ykman \
+            gpg-connect-agent gnome-keyring gnome-keyring-daemon; do
+    [[ -e "/usr/bin/$_bin" ]] && ARGS+=( --ro-bind /dev/null "/usr/bin/$_bin" )
+done
+unset _bin
+
+# HOME: empty tmpfs, then explicit re-binds.
+ARGS+=( --tmpfs "$HOME" )
+
+# Per-agent state (rw). Includes each agent's auth file — that's expected
+# (the agent must reach its own API). We are NOT trying to hide the agent's
+# own API key from itself; we're hiding *other* secrets.
+ARGS+=(
+    --bind     "$HOME/.claude"      "$HOME/.claude"
+    --bind-try "$HOME/.claude.json" "$HOME/.claude.json"
+    --bind-try "$HOME/.codex"       "$HOME/.codex"
+)
+
+# Agent binaries + runtime tooling (read-only). mise is bound because
+# Claude Code spawns stdio MCP servers via npx, and npx lives at
+# ~/.local/share/mise/installs/node/<ver>/bin/npx. Without it, MCP servers
+# like react-grab-mcp / playwright / chrome-devtools fail to start.
+# HTTP MCP servers (context7, exa) don't need this — they go over the
+# network, which --share-net keeps open.
+ARGS+=(
+    --ro-bind     "$HOME/.local/bin"           "$HOME/.local/bin"
+    --ro-bind-try "$HOME/.local/share/claude"  "$HOME/.local/share/claude"
+    --ro-bind-try "$HOME/.local/share/mise"    "$HOME/.local/share/mise"
+    --ro-bind-try "$HOME/.cache/mise"          "$HOME/.cache/mise"
+    --ro-bind-try "$HOME/.cargo"               "$HOME/.cargo"
+    --ro-bind-try "$HOME/.cache/npx"           "$HOME/.cache/npx"
+)
+
+# chezmoi source — bind only the safe top-level entries. Deliberately
+# NOT bound: `private_dot_ssh/`, `SECRETS.md`, anything else `private_*`.
+# The tmpfs $HOME ensures un-bound paths simply don't exist.
+ARGS+=(
+    --bind     "$CHEZMOI_ROOT/bin"          "$CHEZMOI_ROOT/bin"
+    --bind     "$CHEZMOI_ROOT/dot_config"   "$CHEZMOI_ROOT/dot_config"
+    --bind     "$CHEZMOI_ROOT/dot_local"    "$CHEZMOI_ROOT/dot_local"
+    --bind     "$CHEZMOI_ROOT/dot_claude"   "$CHEZMOI_ROOT/dot_claude"
+    --bind     "$CHEZMOI_ROOT/dot_codex"    "$CHEZMOI_ROOT/dot_codex"
+    --bind-try "$CHEZMOI_ROOT/dot_lmstudio" "$CHEZMOI_ROOT/dot_lmstudio"
+    --bind-try "$CHEZMOI_ROOT/root"         "$CHEZMOI_ROOT/root"
+)
+for f in dot_zshrc dot_zshenv dot_bashrc dot_gitconfig dot_tmux.conf dot_vimrc \
+         dot_profile dot_envrc mcp-sync.sh omarchy-bootstrap.sh readme.md; do
+    [[ -e "$CHEZMOI_ROOT/$f" ]] && \
+        ARGS+=( --bind "$CHEZMOI_ROOT/$f" "$CHEZMOI_ROOT/$f" )
+done
+
+# Within dot_config, skip private_* entries (chezmoi convention for 0700-mode).
+for entry in "$CHEZMOI_ROOT"/dot_config/*; do
+    name="${entry##*/}"
+    if [[ "$name" == private_* ]]; then
+        # already covered by parent --bind dot_config above? Yes — but we want
+        # to *mask* it. Overlay tmpfs:
+        ARGS+=( --tmpfs "$entry" )
+    fi
+done
+
+# Target dotfiles at $HOME root (where chezmoi apply writes).
+for f in .zshrc .zshenv .bashrc .gitconfig .tmux.conf .vimrc .profile .envrc; do
+    [[ -e "$HOME/$f" ]] && ARGS+=( --bind "$HOME/$f" "$HOME/$f" )
+done
+
+# ~/.config target subdirs/files — chezmoi-managed list, with denylist.
+# CONFIG_DENYLIST: anything secret-bearing or potentially containing it.
+CONFIG_DENYLIST=(atuin agent-vault op rbw Bitwarden google-chrome chromium
+                 BraveSoftware Vivaldi 1Password gh gh-cli gnupg)
+in_denylist() {
+    local item="$1" d
+    for d in "${CONFIG_DENYLIST[@]}"; do
+        [[ "$item" == "$d" ]] && return 0
+    done
+    return 1
+}
+while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    in_denylist "$entry" && continue
+    [[ ! -e "$HOME/.config/$entry" ]] && continue
+    ARGS+=( --bind "$HOME/.config/$entry" "$HOME/.config/$entry" )
+done < <(chezmoi managed --include=files 2>/dev/null \
+            | awk -F/ '$1==".config"{print $2}' | sort -u)
+
+# User script dir.
+ARGS+=( --bind "$HOME/bin" "$HOME/bin" )
+
+# Workspace.
+if (( WORKSPACE_BIND )); then
+    ARGS+=( --bind "$WORKSPACE" "$WORKSPACE" )
+fi
+
+# Runtime sockets (selective).
+ARGS+=(
+    --ro-bind-try "$XRD/hypr"      "$XRD/hypr"        # hyprctl reload
+    --ro-bind-try "$XRD/wayland-1" "$XRD/wayland-1"   # wl-copy / notifications
+)
+# NEVER bound: $XRD/{rbw,gnupg,bus,dbus-1,pulse,pipewire-0}.
+
+# Env: scrub everything, then setenv allowlist.
+ARGS+=(
+    --clearenv
+    --setenv HOME             "$HOME"
+    --setenv USER             "$USER"
+    --setenv LOGNAME          "$USER"
+    --setenv TERM             "${TERM:-xterm-256color}"
+    --setenv COLORTERM        "${COLORTERM:-truecolor}"
+    --setenv LANG             "${LANG:-C.UTF-8}"
+    --setenv PATH             "$HOME/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin"
+    --setenv XDG_RUNTIME_DIR  "$XRD"
+    --setenv WAYLAND_DISPLAY  "${WAYLAND_DISPLAY:-wayland-1}"
+    --setenv EDITOR           "${EDITOR:-nvim}"
+    --setenv VISUAL           "${VISUAL:-${EDITOR:-nvim}}"
+    --setenv AGENT_ISOLATED   "1"
+)
+[[ -n "${LC_ALL:-}"     ]] && ARGS+=( --setenv LC_ALL     "$LC_ALL" )
+[[ -n "${LC_CTYPE:-}"   ]] && ARGS+=( --setenv LC_CTYPE   "$LC_CTYPE" )
+[[ -n "${LC_MESSAGES:-}" ]] && ARGS+=( --setenv LC_MESSAGES "$LC_MESSAGES" )
+
+# Per-agent API key (only the one for the agent we're launching).
+case "$AGENT" in
+    claude)
+        [[ -n "${ANTHROPIC_API_KEY:-}" ]] && ARGS+=( --setenv ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY" )
+        [[ -n "${ANTHROPIC_BASE_URL:-}" ]] && ARGS+=( --setenv ANTHROPIC_BASE_URL "$ANTHROPIC_BASE_URL" )
+        ;;
+    codex)
+        [[ -n "${OPENAI_API_KEY:-}"  ]] && ARGS+=( --setenv OPENAI_API_KEY  "$OPENAI_API_KEY" )
+        [[ -n "${OPENAI_API_BASE:-}" ]] && ARGS+=( --setenv OPENAI_API_BASE "$OPENAI_API_BASE" )
+        ;;
+    opencode)
+        [[ -n "${OPENROUTER_API_KEY:-}" ]] && ARGS+=( --setenv OPENROUTER_API_KEY "$OPENROUTER_API_KEY" )
+        [[ -n "${OPENAI_API_KEY:-}"     ]] && ARGS+=( --setenv OPENAI_API_KEY    "$OPENAI_API_KEY" )
+        ;;
+esac
+
+# Escape-hatch: SSH agent (host: Bitwarden SSH agent at ~/.bitwarden-ssh-agent.sock)
+if (( ALLOW_SSH )); then
+    sock="${SSH_AUTH_SOCK:-$HOME/.bitwarden-ssh-agent.sock}"
+    if [[ -S "$sock" ]]; then
+        ARGS+=(
+            --bind "$sock" "$sock"
+            --setenv SSH_AUTH_SOCK "$sock"
+        )
+    else
+        echo "agent-isolated: --ssh requested but $sock missing" >&2
+    fi
+fi
+
+# Escape-hatch: GPG.
+if (( ALLOW_GPG )); then
+    ARGS+=(
+        --ro-bind-try "$XRD/gnupg" "$XRD/gnupg"
+        --setenv GPG_TTY "${GPG_TTY:-/dev/pts/0}"
+    )
+fi
+
+# Escape-hatch: rbw.
+if (( ALLOW_RBW )); then
+    ARGS+=(
+        --ro-bind-try "$XRD/rbw"          "$XRD/rbw"
+        --ro-bind-try "$HOME/.config/rbw" "$HOME/.config/rbw"
+    )
+    rbw_bin="$(command -v rbw 2>/dev/null || true)"
+    [[ -n "$rbw_bin" ]] && ARGS+=( --ro-bind "$rbw_bin" "$rbw_bin" )
+fi
+
+# Escape-hatch: agent-vault credential-injection proxy.
+if (( ALLOW_AGENT_VAULT )); then
+    ca="$HOME/.agent-vault/mitm-ca.pem"
+    if [[ -e "$ca" ]]; then
+        ARGS+=(
+            --ro-bind "$ca" "$ca"
+            --setenv NODE_EXTRA_CA_CERTS "$ca"
+            --setenv SSL_CERT_FILE       "$ca"
+            --setenv REQUESTS_CA_BUNDLE  "$ca"
+        )
+    fi
+    if [[ -n "${AGENT_VAULT_ADDR:-}" ]]; then
+        proxy="$AGENT_VAULT_ADDR"
+        case "$proxy" in http*://*) : ;; *) proxy="http://$proxy" ;; esac
+        ARGS+=(
+            --setenv HTTPS_PROXY "$proxy"
+            --setenv HTTP_PROXY  "$proxy"
+            --setenv NO_PROXY    "127.0.0.1,localhost,api.anthropic.com"
+        )
+    fi
+    [[ -n "${AGENT_VAULT_SESSION_TOKEN:-}" ]] && \
+        ARGS+=( --setenv AGENT_VAULT_SESSION_TOKEN "$AGENT_VAULT_SESSION_TOKEN" )
+    [[ -n "${AGENT_VAULT_VAULT:-}" ]] && \
+        ARGS+=( --setenv AGENT_VAULT_VAULT "$AGENT_VAULT_VAULT" )
+fi
+
+# chdir
+ARGS+=( --chdir "$WORKSPACE" )
+
+# Optional per-host override.
+USER_OVERRIDE="$HOME/.config/agent-isolated/config.sh"
+if [[ -f "$USER_OVERRIDE" ]]; then
+    declare -a EXTRA_BWRAP_ARGS=()
+    # shellcheck disable=SC1090
+    . "$USER_OVERRIDE"
+    if [[ ${#EXTRA_BWRAP_ARGS[@]} -gt 0 ]]; then
+        ARGS+=( "${EXTRA_BWRAP_ARGS[@]}" )
+    fi
+fi
+
+# ────────────────────────── Self-test ─────────────────────────────
+if (( SELF_TEST )); then
+    pass=0; fail=0
+    run() {
+        # $1 = direction (neg|pos), $2 = description, rest = sh -c command
+        local dir="$1" desc="$2"; shift 2
+        local out rc
+        set +e
+        out="$(bwrap "${ARGS[@]}" /bin/sh -c "$*" 2>&1)"; rc=$?
+        set -e
+        if [[ "$dir" == "neg" ]]; then
+            if (( rc != 0 )) || [[ -z "$out" ]] || \
+               [[ "$out" == *"No such file"* ]] || \
+               [[ "$out" == *"command not found"* ]] || \
+               [[ "$out" == *"cannot access"* ]] || \
+               [[ "$out" == *"not found"* ]]; then
+                printf "  \033[32m✓\033[0m %s\n" "$desc"; pass=$((pass+1))
+            else
+                printf "  \033[31m✗\033[0m %s — UNEXPECTED: %s\n" "$desc" "${out:0:100}"; fail=$((fail+1))
+            fi
+        else
+            if (( rc == 0 )) && [[ -n "$out" ]]; then
+                printf "  \033[32m✓\033[0m %s — %s\n" "$desc" "${out:0:60}"; pass=$((pass+1))
+            else
+                printf "  \033[31m✗\033[0m %s — FAILED rc=%d: %s\n" "$desc" "$rc" "${out:0:100}"; fail=$((fail+1))
+            fi
+        fi
+    }
+
+    echo "── NEGATIVE: must fail / be empty / be missing ─────────────────"
+    run neg "rbw not in PATH"                  'command -v rbw'
+    run neg "bw not in PATH"                   'command -v bw'
+    run neg "secret-tool not in PATH"          'command -v secret-tool'
+    run neg "~/.ssh hidden"                    "ls $HOME/.ssh"
+    run neg "~/.gnupg hidden"                  "ls $HOME/.gnupg"
+    run neg "~/.config/rbw hidden"             "ls $HOME/.config/rbw"
+    run neg "~/.config/Bitwarden hidden"       "ls $HOME/.config/Bitwarden"
+    run neg "~/.config/atuin hidden"           "ls $HOME/.config/atuin"
+    run neg "~/.bitwarden-ssh-agent.sock hidden" "ls $HOME/.bitwarden-ssh-agent.sock"
+    run neg "SECRETS.md hidden"                "cat $CHEZMOI_ROOT/SECRETS.md"
+    run neg "private_dot_ssh hidden"           "ls $CHEZMOI_ROOT/private_dot_ssh"
+    run neg "~/.cache/cliphist hidden"         "ls $HOME/.cache/cliphist"
+    run neg "~/.local/share/keyrings hidden"   "ls $HOME/.local/share/keyrings"
+    run neg "~/.git-credentials hidden"        "cat $HOME/.git-credentials"
+    run neg "rbw socket hidden"                "ls $XRD/rbw"
+    run neg "dbus session hidden"              "ls $XRD/bus"
+    run neg "agent-vault dir hidden"           "ls $HOME/.agent-vault"
+    run neg "SSH_AUTH_SOCK env scrubbed"       'test -n "$SSH_AUTH_SOCK" && echo SET'
+    run neg "BW_SESSION env scrubbed"          'test -n "$BW_SESSION" && echo SET'
+    run neg "AGENT_VAULT_SESSION_TOKEN scrubbed" 'test -n "$AGENT_VAULT_SESSION_TOKEN" && echo SET'
+
+    echo
+    echo "── POSITIVE: must succeed and produce output ───────────────────"
+    run pos "/usr/bin readable"                'ls /usr/bin | head -1'
+    run pos "chezmoi binary visible"           'command -v chezmoi'
+    run pos "hypr config dir bound"            "ls $HOME/.config/hypr | head -1"
+    run pos "chezmoi source bound"             "ls $CHEZMOI_ROOT/dot_config | head -1"
+    run pos "Wayland socket reachable"         "ls $XRD/wayland-1"
+    run pos "agent state dir writable"         "touch $HOME/.claude/.sandbox-test && rm $HOME/.claude/.sandbox-test && echo ok"
+
+    echo
+    printf "── %d passed, %d failed ──\n" "$pass" "$fail"
+    exit "$fail"
+fi
+
+# ──────────────────────────── Dry run ─────────────────────────────
+if (( DRY_RUN )); then
+    printf '%q ' bwrap "${ARGS[@]}" "$AGENT_BIN" "$@"
+    echo
+    exit 0
+fi
+
+# ─────────────────────────────  Exec  ─────────────────────────────
+exec bwrap "${ARGS[@]}" "$AGENT_BIN" "$@"

@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-# Bitwarden picker over walker --dmenu (replaces rofi-rbw).
+# Bitwarden picker over walker --dmenu. Type-aware action sub-menu.
 #
-# Action:  copy  — copies password to clipboard, clears in 30s
-#          type  — types the password into the focused window via wtype
-# Default: copy. First arg can be 'copy' or 'type'.
+# Usage:
+#   walker-rbw            entry picker → action sub-menu (default)
+#   walker-rbw type       entry picker → type password directly (no sub-menu)
+#                         Bound to $mod+SHIFT+B as a fast-path for filling
+#                         login forms with muscle memory. No-op (with notify)
+#                         on entries that have no password (Note / Identity /
+#                         Card without code / SSH Key).
 #
-# Hardening (added 2026-05-08 after a hang investigation):
-#   * flock(1) keeps a single instance — repeated $mod+B presses no longer
-#     pile up zombie scripts when something downstream hangs.
-#   * `timeout 60 rbw unlock` bounds the pinentry wait. rbw uses pinentry-qt
-#     (see ~/.config/rbw/config.json) which surfaces reliably on Wayland;
-#     pinentry-gnome3's gcr-prompter dialog can silently fail to present on
-#     Hyprland, which is what wedged the original script.
+# Sub-menu is built from `rbw get --raw | jq` and adapts to the entry type.
+# Items only appear when the corresponding data exists, so a Secure Note
+# entry won't offer "Copy password" and an SSH Key won't offer "Open URL".
+#
+# Lookup uses each entry's UUID, not name+user — this avoids ambiguity for
+# the ~12 names that recur across multiple entries (github.com, etc.) and
+# also handles entries without a username (most non-Login types).
+#
+# Clipboard auto-clear (30s) is delegated to a transient `systemd-run --user`
+# timer instead of a backgrounded `sleep 30; wl-copy --clear &`. The shell
+# doesn't hold any state and there's no fd inheritance — fixes the
+# previous bug where the sleep subshell inherited the flock fd and silently
+# blocked every subsequent $mod+B press for 30 seconds.
 
-set -euo pipefail
-ACTION="${1:-copy}"
+set -uo pipefail
+ACTION="${1:-menu}"
 
 LOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/walker-rbw.lock"
 exec 9>"$LOCK"
@@ -27,26 +37,282 @@ if ! rbw unlocked >/dev/null 2>&1; then
     fi
 fi
 
-# Format: "Name  ·  Username" — fzf-friendly, walker dedupes on the full line.
-sel=$(rbw list --fields name,user \
-        | awk -F'\t' '{ printf "%s  ·  %s\n", $1, $2 }' \
-        | ~/bin/launch-walker --dmenu -p " Bitwarden…") || exit 0
-[[ -z $sel ]] && exit 0
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+copy_clear() {
+    # $1 = secret, $2 = label for notification
+    # --sensitive marks the clipboard offer via the wl-clipboard >= 2.3
+    # `clipboard-state` Wayland protocol extension. wl-paste --watch then
+    # propagates CLIPBOARD_STATE=sensitive in the env of its spawned command,
+    # so a properly-configured cliphist watcher (autostart.conf) can skip
+    # storing the secret in its history database. Without this, every copied
+    # password ends up in ~/.cache/cliphist/db unencrypted.
+    printf '%s' "$1" | wl-copy --sensitive
+    notify-send -t 3000 "Bitwarden" "$2 copied (clears in 30s)"
+    # Transient systemd timer: fires once after 30s, runs wl-copy --clear,
+    # then `--collect` removes the unit. No shell state held, no fd
+    # inheritance, survives if walker-rbw crashes.
+    systemd-run --user --quiet \
+        --on-active=30s \
+        --timer-property=AccuracySec=1s \
+        --collect \
+        wl-copy --clear 2>/dev/null || true
+}
 
-name=${sel%%  ·  *}
-user=${sel##*  ·  }
+type_text() {
+    if ! command -v wtype >/dev/null 2>&1; then
+        notify-send -u critical "Bitwarden" "wtype not installed — can't type"
+        exit 1
+    fi
+    if [[ -z $1 ]]; then
+        notify-send "Bitwarden" "Nothing to type for this entry"
+        return
+    fi
+    printf '%s' "$1" | wtype -
+}
 
-case "$ACTION" in
-    type)
-        if ! command -v wtype >/dev/null 2>&1; then
-            notify-send -u critical "Bitwarden" "wtype not installed — can't type"
-            exit 1
+uri_host() {  # extract a short label from a URI for menu display
+    local u=$1
+    u=${u#*://}
+    u=${u%%/*}
+    printf '%s' "${u:-$1}"
+}
+
+# ─── Entry picker (ID-based, type badge) ─────────────────────────────────────
+# rbw list outputs tab-separated id, name, type, user (in that order).
+# We stash everything in parallel arrays and feed only the display line to
+# walker; walker prints the chosen index back via --index.
+declare -a entry_ids=() entry_names=() entry_users=() entry_types=()
+declare -a picker_lines=()
+
+while IFS=$'\t' read -r id name type user; do
+    [[ -z $id ]] && continue
+    entry_ids+=("$id")
+    entry_names+=("$name")
+    entry_users+=("$user")
+    entry_types+=("$type")
+
+    line="$name"
+    [[ -n $user ]] && line+="  ·  $user"
+    [[ $type != "Login" ]] && line+="  [$type]"
+    picker_lines+=("$line")
+done < <(rbw list --fields id,name,type,user 2>/dev/null)
+
+if [[ ${#picker_lines[@]} -eq 0 ]]; then
+    notify-send -u critical "Bitwarden" "No entries returned by rbw list"
+    exit 1
+fi
+
+idx=$(printf '%s\n' "${picker_lines[@]}" \
+        | "$HOME/bin/launch-walker" --dmenu --index -p " Bitwarden…") || exit 0
+[[ -z $idx ]] && exit 0
+
+id="${entry_ids[$idx]}"
+name="${entry_names[$idx]}"
+user="${entry_users[$idx]}"
+type="${entry_types[$idx]}"
+
+json=$(rbw get --raw "$id" 2>/dev/null)
+if [[ -z $json ]]; then
+    notify-send -u critical "Bitwarden" "Couldn't fetch entry $name"
+    exit 1
+fi
+
+# ─── Quick-type fast path ($mod+SHIFT+B) ─────────────────────────────────────
+if [[ $ACTION == type ]]; then
+    pw=$(jq -r '.data.password // ""' <<<"$json")
+    type_text "$pw"
+    exit 0
+fi
+
+# ─── Build action sub-menu, adapting to the entry's type ─────────────────────
+declare -a labels=() keys=()
+add() { keys+=("$1"); labels+=("$2"); }
+
+# Pull notes once — every type can carry notes.
+notes=$(jq -r '.notes // ""' <<<"$json")
+[[ $notes == "null" ]] && notes=""
+
+case "$type" in
+    Login)
+        pw=$(jq -r '.data.password // ""' <<<"$json")
+        if [[ -n $pw ]]; then
+            add "copy.password" "Copy password"
+            add "type.password" "Type password"
         fi
-        rbw get "$name" "$user" | wtype -
+        uname=$(jq -r '.data.username // ""' <<<"$json")
+        if [[ -n $uname ]]; then
+            add "copy.username" "Copy username — $uname"
+            add "type.username" "Type username — $uname"
+        fi
+        totp=$(jq -r '.data.totp // ""' <<<"$json")
+        [[ -n $totp ]] && add "copy.totp" "Copy TOTP code"
+        while IFS= read -r u; do
+            [[ -z $u ]] && continue
+            host=$(uri_host "$u")
+            add "open.uri:$u" "Open in browser — $host"
+            add "copy.uri:$u" "Copy URL — $host"
+        done < <(jq -r '.data.uris[]?.uri // empty' <<<"$json")
         ;;
-    copy|*)
-        rbw get "$name" "$user" | wl-copy
-        notify-send -t 3000 "Bitwarden" "Password for $name copied (clears in 30s)"
-        ( sleep 30 && wl-copy --clear ) &
+    Card)
+        num=$(jq -r '.data.number // ""' <<<"$json")
+        if [[ -n $num ]]; then
+            tail4=${num: -4}
+            add "copy.card.number" "Copy card number — ····${tail4}"
+        fi
+        cvv=$(jq -r '.data.code // ""' <<<"$json")
+        [[ -n $cvv ]] && add "copy.card.cvv" "Copy CVV"
+        holder=$(jq -r '.data.cardholder_name // ""' <<<"$json")
+        [[ -n $holder ]] && add "copy.card.holder" "Copy cardholder — $holder"
+        em=$(jq -r '.data.exp_month // ""' <<<"$json")
+        ey=$(jq -r '.data.exp_year // ""' <<<"$json")
+        if [[ -n $em && -n $ey ]]; then
+            add "copy.card.expiry" "Copy expiry — $em/$ey"
+        fi
+        brand=$(jq -r '.data.brand // ""' <<<"$json")
+        [[ -n $brand && $brand != "Other" ]] && add "copy.card.brand" "Copy brand — $brand"
         ;;
+    Identity)
+        em=$(jq -r '.data.email // ""' <<<"$json")
+        [[ -n $em ]] && add "copy.id.email" "Copy email — $em"
+        ph=$(jq -r '.data.phone // ""' <<<"$json")
+        [[ -n $ph ]] && add "copy.id.phone" "Copy phone — $ph"
+        fn=$(jq -r '.data.first_name // ""' <<<"$json")
+        ln=$(jq -r '.data.last_name // ""' <<<"$json")
+        if [[ -n $fn || -n $ln ]]; then
+            add "copy.id.fullname" "Copy full name — ${fn} ${ln}"
+        fi
+        addr=$(jq -r '
+            [.data.address1, .data.address2, .data.address3,
+             .data.postal_code, .data.city, .data.state, .data.country]
+            | map(select(. != null and . != ""))
+            | join(", ")
+        ' <<<"$json")
+        [[ -n $addr ]] && add "copy.id.address" "Copy address — $addr"
+        ssn=$(jq -r '.data.ssn // ""' <<<"$json")
+        [[ -n $ssn ]] && add "copy.id.ssn" "Copy SSN/Tax ID"
+        psp=$(jq -r '.data.passport_number // ""' <<<"$json")
+        [[ -n $psp ]] && add "copy.id.passport" "Copy passport number"
+        lic=$(jq -r '.data.license_number // ""' <<<"$json")
+        [[ -n $lic ]] && add "copy.id.license" "Copy license number"
+        un=$(jq -r '.data.username // ""' <<<"$json")
+        [[ -n $un ]] && add "copy.id.username" "Copy username — $un"
+        ;;
+    "SSH Key")
+        pub=$(jq -r '.data.public_key // ""' <<<"$json")
+        [[ -n $pub ]] && add "copy.ssh.pub" "Copy public key"
+        fp=$(jq -r '.data.fingerprint // ""' <<<"$json")
+        [[ -n $fp ]] && add "copy.ssh.fp" "Copy fingerprint"
+        priv=$(jq -r '.data.private_key // ""' <<<"$json")
+        [[ -n $priv ]] && add "copy.ssh.priv" "Copy private key (be careful!)"
+        ;;
+    Note)
+        # Secure Notes carry their content in `.notes`. The "Copy notes"
+        # entry below covers that. Custom fields below cover anything else.
+        :
+        ;;
+esac
+
+# Notes (any type) — show preview in the label so the user knows what's there.
+if [[ -n $notes ]]; then
+    preview=${notes//$'\n'/ }
+    [[ ${#preview} -gt 50 ]] && preview="${preview:0:47}…"
+    add "copy.notes" "Copy notes — $preview"
+fi
+
+# Custom fields (any type). Hidden fields show "(hidden)"; text/boolean
+# fields show their value (truncated) so you can pick the right one.
+field_count=$(jq '.fields | length' <<<"$json")
+for ((i = 0; i < field_count; i++)); do
+    fname=$(jq -r ".fields[$i].name // \"field${i}\"" <<<"$json")
+    ftype=$(jq -r ".fields[$i].type // \"text\"" <<<"$json")
+    if [[ $ftype == "hidden" ]]; then
+        add "copy.field:$i" "Copy field — $fname (hidden)"
+    else
+        fval=$(jq -r ".fields[$i].value // \"\"" <<<"$json")
+        fval=${fval//$'\n'/ }
+        [[ ${#fval} -gt 30 ]] && fval="${fval:0:27}…"
+        add "copy.field:$i" "Copy field — $fname ($fval)"
+    fi
+done
+
+if [[ ${#labels[@]} -eq 0 ]]; then
+    notify-send "Bitwarden" "$name has no copyable data"
+    exit 0
+fi
+
+# ─── Dispatch sub-menu ───────────────────────────────────────────────────────
+sub_idx=$(printf '%s\n' "${labels[@]}" \
+        | "$HOME/bin/launch-walker" --dmenu --index -p " $name — action") || exit 0
+[[ -z $sub_idx ]] && exit 0
+
+action="${keys[$sub_idx]:-}"
+[[ -z $action ]] && exit 0
+
+case "$action" in
+    copy.password)
+        copy_clear "$(jq -r '.data.password // ""' <<<"$json")" "Password for $name"
+        ;;
+    type.password)
+        type_text "$(jq -r '.data.password // ""' <<<"$json")"
+        ;;
+    copy.username)
+        copy_clear "$(jq -r '.data.username // ""' <<<"$json")" "Username for $name"
+        ;;
+    type.username)
+        type_text "$(jq -r '.data.username // ""' <<<"$json")"
+        ;;
+    copy.totp)
+        code=$(rbw code "$id" 2>/dev/null) || code=""
+        copy_clear "$code" "TOTP for $name"
+        ;;
+    copy.notes)
+        copy_clear "$notes" "Notes for $name"
+        ;;
+    open.uri:*)
+        uri=${action#open.uri:}
+        setsid xdg-open "$uri" >/dev/null 2>&1 9>&- &
+        disown
+        ;;
+    copy.uri:*)
+        uri=${action#copy.uri:}
+        copy_clear "$uri" "URL for $name"
+        ;;
+    copy.field:*)
+        i=${action#copy.field:}
+        val=$(jq -r ".fields[$i].value // \"\"" <<<"$json")
+        fname=$(jq -r ".fields[$i].name // \"field\"" <<<"$json")
+        copy_clear "$val" "Field $fname"
+        ;;
+    copy.card.number) copy_clear "$(jq -r '.data.number // ""' <<<"$json")" "Card number for $name" ;;
+    copy.card.cvv)    copy_clear "$(jq -r '.data.code // ""' <<<"$json")"   "CVV for $name" ;;
+    copy.card.holder) copy_clear "$(jq -r '.data.cardholder_name // ""' <<<"$json")" "Cardholder for $name" ;;
+    copy.card.expiry)
+        em=$(jq -r '.data.exp_month // ""' <<<"$json")
+        ey=$(jq -r '.data.exp_year // ""' <<<"$json")
+        copy_clear "${em}/${ey}" "Expiry for $name"
+        ;;
+    copy.card.brand)  copy_clear "$(jq -r '.data.brand // ""' <<<"$json")" "Card brand for $name" ;;
+    copy.id.email)    copy_clear "$(jq -r '.data.email // ""' <<<"$json")" "Email for $name" ;;
+    copy.id.phone)    copy_clear "$(jq -r '.data.phone // ""' <<<"$json")" "Phone for $name" ;;
+    copy.id.fullname)
+        fn=$(jq -r '.data.first_name // ""' <<<"$json")
+        ln=$(jq -r '.data.last_name // ""' <<<"$json")
+        copy_clear "${fn} ${ln}" "Full name for $name"
+        ;;
+    copy.id.address)
+        addr=$(jq -r '
+            [.data.address1, .data.address2, .data.address3,
+             .data.postal_code, .data.city, .data.state, .data.country]
+            | map(select(. != null and . != ""))
+            | join(", ")
+        ' <<<"$json")
+        copy_clear "$addr" "Address for $name"
+        ;;
+    copy.id.ssn)      copy_clear "$(jq -r '.data.ssn // ""' <<<"$json")"             "SSN/Tax ID for $name" ;;
+    copy.id.passport) copy_clear "$(jq -r '.data.passport_number // ""' <<<"$json")" "Passport for $name" ;;
+    copy.id.license)  copy_clear "$(jq -r '.data.license_number // ""' <<<"$json")"  "License for $name" ;;
+    copy.id.username) copy_clear "$(jq -r '.data.username // ""' <<<"$json")"        "Username for $name" ;;
+    copy.ssh.pub)     copy_clear "$(jq -r '.data.public_key // ""' <<<"$json")"      "SSH public key for $name" ;;
+    copy.ssh.fp)      copy_clear "$(jq -r '.data.fingerprint // ""' <<<"$json")"     "SSH fingerprint for $name" ;;
+    copy.ssh.priv)    copy_clear "$(jq -r '.data.private_key // ""' <<<"$json")"     "SSH private key for $name" ;;
 esac

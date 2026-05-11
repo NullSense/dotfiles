@@ -8,6 +8,12 @@
 # happens to be running.
 [ -S "$HOME/.bitwarden-ssh-agent.sock" ] && export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
 
+# Suppress zoxide's "init me last" doctor warning.
+# zoxide IS init'd last in zshrc, but mise's hook-env runs on every chpwd
+# (registered AFTER zoxide via mise's precmd), so zoxide's doctor sees a
+# "later" hook and nags every shell. False positive — silence it.
+export _ZO_DOCTOR=0
+
 # Omarchy — pinned to a release tag at ~/.local/share/omarchy.
 # OMARCHY_PATH is read by every omarchy-* script for theme paths, defaults,
 # and template rendering. PATH gets the omarchy bin dir prepended so all
@@ -27,6 +33,15 @@ case ":$PATH:" in
     *":$HOME/bin:"*) ;;
     *) export PATH="$HOME/bin:$PATH" ;;
 esac
+
+# LM Studio CLI (lms). Single canonical location — was previously triplicated
+# by the LM Studio installer in zshrc, bashrc, and profile.
+if [ -d "$HOME/.lmstudio/bin" ]; then
+    case ":$PATH:" in
+        *":$HOME/.lmstudio/bin:"*) ;;
+        *) export PATH="$PATH:$HOME/.lmstudio/bin" ;;
+    esac
+fi
 
 # Agent Vault is per-process via `agent-vault vault run`, not blanket-exported
 # in shells, so HTTPS_PROXY / NO_PROXY are not set here.

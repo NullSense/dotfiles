@@ -113,22 +113,27 @@ case "${1:-}" in
       esac
 
       if [[ "$kind" == "close_session" ]]; then
-        # Cache warm but no command running → OPEN lock (privileged
-        # access available), dim, no workspace.
-        text="󰿆"
-        class="cached"
-        tt="sudo cache active — ~${rem_min}m ${rem_sec}s left\\n(no command running)"
-      else
-        # open_session — command actually running with elevated privs.
-        # OPEN lock + green to make "actively using sudo" obvious.
-        if [[ -n "$ws_label" ]]; then text="󰿆 $ws_label"; else text="󰿆"; fi
-        class="active"
-        tt="sudo running with elevated privs — cache ~${rem_min}m ${rem_sec}s"
-        tt+="\\nuser: ${F[user]:-?}"
-        [[ -n "${F[tty]:-}" && "${F[tty]:-}" != "?" ]] && tt+="\\ntty:  ${F[tty]}"
-        [[ -n "$ws" ]] && tt+="\\nws:   $ws"
-        [[ -n "${F[addr]:-}" ]] && tt+="\\naddr: ${F[addr]}"
+        # Cache warm but no command running. Render IDENTICALLY to the
+        # idle state — closed lock, no badge — so the pill doesn't sit
+        # on the bar for 5 minutes after every `sudo <cmd>`. The flag is
+        # still tracked by sudo-pill-daemon for proper state transitions
+        # (idle → cached → prompt etc.). The cache-remaining time is
+        # surfaced via tooltip-on-hover for users who actually want it.
+        tt="sudo locked\\n(cache active for next sudo: ~${rem_min}m ${rem_sec}s)"
+        tooltip_json=$(jq -Rn --arg t "$tt" '$t' | sed 's/\\\\n/\\n/g')
+        printf '{"text":"󰌾","alt":"idle","class":"idle","tooltip":%s}\n' "$tooltip_json"
+        exit 0
       fi
+
+      # open_session — command actually running with elevated privs.
+      # OPEN lock + active class to make "actively using sudo" obvious.
+      if [[ -n "$ws_label" ]]; then text="󰿆 $ws_label"; else text="󰿆"; fi
+      class="active"
+      tt="sudo running with elevated privs — cache ~${rem_min}m ${rem_sec}s"
+      tt+="\\nuser: ${F[user]:-?}"
+      [[ -n "${F[tty]:-}" && "${F[tty]:-}" != "?" ]] && tt+="\\ntty:  ${F[tty]}"
+      [[ -n "$ws" ]] && tt+="\\nws:   $ws"
+      [[ -n "${F[addr]:-}" ]] && tt+="\\naddr: ${F[addr]}"
 
       text_json=$(jq -Rn --arg t "$text" '$t')
       tooltip_json=$(jq -Rn --arg t "$tt" '$t' | sed 's/\\\\n/\\n/g')

@@ -84,6 +84,15 @@ def cmd_vision(args: argparse.Namespace) -> int:
             print("--question is required for ask_region", file=sys.stderr)
             return 2
         payload["question"] = args.question
+    elif args.subop == "analyze_file":
+        if not args.image:
+            print("--image is required for analyze_file", file=sys.stderr)
+            return 2
+        if not args.prompt:
+            print("--prompt is required for analyze_file", file=sys.stderr)
+            return 2
+        payload["image_path"] = args.image
+        payload["prompt"] = args.prompt
     resp = _send(payload)
     if not resp.get("ok"):
         print(f"vision failed: {resp.get('detail', resp.get('error'))}", file=sys.stderr)
@@ -108,9 +117,68 @@ def cmd_translate(args: argparse.Namespace) -> int:
 
 
 def cmd_ocr(args: argparse.Namespace) -> int:
-    resp = _send({"op": "ocr", "image_path": args.image_path})
+    base = {"op": "ocr", "mode": args.mode, "engine": args.engine}
+    if args.region:
+        payload: dict[str, Any] = {**base, "region": True}
+    else:
+        if not args.image_path:
+            print("image_path is required (or use --region)", file=sys.stderr)
+            return 2
+        payload = {**base, "image_path": args.image_path}
+    # Surya cold-loads models on every call (~25-30 s); hybrid is
+    # surya + a Gemma roundtrip (~35-45 s). Chandra cold-loads in LM
+    # Studio (~10-20 s first call, ~3-5 s warm). Qwen 3.6 35B-A3B is
+    # the slowest at ~50-70 s per call due to MoE expert-CPU offload.
+    if args.engine == "qwen":
+        timeout = 600.0
+    elif args.engine in ("surya", "hybrid"):
+        timeout = 300.0
+    elif args.engine == "granite":
+        # JIT-load can take 10-20 s on cold first call; warm calls are fast.
+        timeout = 180.0
+    else:
+        timeout = 120.0
+    resp = _send(payload, timeout=timeout)
     if not resp.get("ok"):
         print(f"ocr failed: {resp.get('detail', resp.get('error'))}", file=sys.stderr)
+        return 1
+    sys.stdout.write(resp.get("text", ""))
+    return 0
+
+
+def cmd_vision_task(args: argparse.Namespace) -> int:
+    payload: dict[str, Any] = {
+        "op": "vision-task", "task": args.task, "source": args.source,
+    }
+    if args.task == "ask":
+        if not args.question:
+            print("--question is required for task=ask", file=sys.stderr)
+            return 2
+        payload["question"] = args.question
+    if args.source == "file":
+        if not args.image:
+            print("--image is required for source=file", file=sys.stderr)
+            return 2
+        payload["image_path"] = args.image
+    resp = _send(payload)
+    if not resp.get("ok"):
+        print(f"vision-task failed: {resp.get('detail', resp.get('error'))}", file=sys.stderr)
+        return 1
+    sys.stdout.write(resp.get("text", ""))
+    return 0
+
+
+def cmd_text_task(args: argparse.Namespace) -> int:
+    text = args.text if args.text else sys.stdin.read()
+    payload: dict[str, Any] = {"op": "text-task", "task": args.task, "text": text}
+    if args.task == "ask":
+        if not args.question:
+            print("--question is required for task=ask", file=sys.stderr)
+            return 2
+        payload["question"] = args.question
+    resp = _send(payload)
+    if not resp.get("ok"):
+        print(f"text-task failed: {resp.get('detail', resp.get('error'))}", file=sys.stderr)
         return 1
     sys.stdout.write(resp.get("text", ""))
     return 0
@@ -129,8 +197,12 @@ def main(argv: list[str] | None = None) -> int:
     sp.set_defaults(fn=cmd_rewrite)
 
     sp = sub.add_parser("vision", help="run a vision op")
-    sp.add_argument("subop", choices=("summarize_screen", "explain_region", "ask_region"))
+    sp.add_argument("subop", choices=(
+        "summarize_screen", "explain_region", "ask_region", "analyze_file",
+    ))
     sp.add_argument("--question", help="for ask_region")
+    sp.add_argument("--image", help="image path (for analyze_file)")
+    sp.add_argument("--prompt", help="prompt to run against the image (for analyze_file)")
     sp.set_defaults(fn=cmd_vision)
 
     sp = sub.add_parser("translate", help="translate text or a region")
@@ -141,9 +213,35 @@ def main(argv: list[str] | None = None) -> int:
                     help="capture a screen region instead of using stdin/text")
     sp.set_defaults(fn=cmd_translate)
 
-    sp = sub.add_parser("ocr", help="OCR an image file via Gemma vision")
-    sp.add_argument("image_path", help="path to a PNG/JPG image")
+    sp = sub.add_parser("ocr", help="OCR an image file or screen region")
+    sp.add_argument("image_path", nargs="?", help="path to a PNG/JPG image (omit when using --region)")
+    sp.add_argument("--region", action="store_true",
+                    help="capture a screen region (slurp+grim) instead of reading a file")
+    sp.add_argument("--engine", choices=("gemma", "surya", "hybrid", "chandra", "qwen", "granite"), default="gemma",
+                    help="gemma (default, ~4s): fast general VLM, good for snippets. "
+                         "surya (~16s): word-perfect, no markdown structure. "
+                         "hybrid (~20s): Surya text + Gemma layout cleanup, quality default. "
+                         "chandra (~11s): purpose-built document OCR, GGUF-flaky. "
+                         "qwen (~57s, requires manual LM Studio model swap to free VRAM): "
+                         "Qwen 3.6 35B-A3B, highest quality on our bench.")
+    sp.add_argument("--mode", choices=("faithful", "plain"), default="faithful",
+                    help="faithful (default): preserve markdown/tables/code; "
+                         "plain: strip formatting for translation pipelines. "
+                         "Ignored for --engine surya (always plain).")
     sp.set_defaults(fn=cmd_ocr)
+
+    sp = sub.add_parser("vision-task", help="summarize/explain/ask × monitor/region/file")
+    sp.add_argument("task", choices=("summarize", "explain", "ask"))
+    sp.add_argument("--source", required=True, choices=("monitor", "region", "file"))
+    sp.add_argument("--image", help="path to image (for --source file)")
+    sp.add_argument("--question", help="for task=ask")
+    sp.set_defaults(fn=cmd_vision_task)
+
+    sp = sub.add_parser("text-task", help="summarize/explain/ask on text via stdin")
+    sp.add_argument("task", choices=("summarize", "explain", "ask"))
+    sp.add_argument("text", nargs="?", help="text to operate on (default: stdin)")
+    sp.add_argument("--question", help="for task=ask")
+    sp.set_defaults(fn=cmd_text_task)
 
     args = p.parse_args(argv)
     return args.fn(args)

@@ -1,0 +1,59 @@
+# Global cargo configuration  ($CARGO_HOME/config.toml, default ~/.cargo/config.toml)
+# Managed by chezmoi: source = ~/.local/share/chezmoi/dot_cargo/config.toml
+# DO NOT edit ~/.cargo/config.toml directly — run `chezmoi apply` instead.
+#
+# Note: cargo only reads from $CARGO_HOME/config.toml (default ~/.cargo/), NOT
+# ~/.config/cargo/config.toml. The XDG path is sometimes shown in docs but is
+# only honored when CARGO_HOME is explicitly set there.
+#
+# Stack (installed 2026-05-09):
+#   - sccache  (RUSTC_WRAPPER, compilation cache, /usr/bin/sccache, pacman)
+#   - mold     (linker, ~/.local/bin/mold, prebuilt v2.41.0 since no sudo)
+#   - cargo-nextest, bacon, cargo-watch, cargo-machete, cargo-binstall, cargo-update
+#
+# See ~/.claude/memory/domain/rust.md for the full rationale and per-tool notes.
+
+[build]
+# sccache wraps rustc to deduplicate compilation across projects/branches.
+# `which sccache` -> /usr/bin/sccache (Arch package).
+rustc-wrapper = "/usr/bin/sccache"
+
+# Use all logical cores by default. Cargo defaults to physical cores; -j 0 = unlimited
+# but in practice cargo treats unset/auto as ncpus. Leave commented to keep cargo's default.
+# jobs = 0
+
+# Keep incremental ON for dev (default). sccache + incremental coexist:
+# sccache caches non-incremental crates (deps), incremental handles the workspace crate.
+incremental = true
+
+[target.x86_64-unknown-linux-gnu]
+# mold is the fastest Linux linker as of 2026 (faster than rust-lld which became the
+# stable default in Rust 1.90 for this target). Plain `-fuse-ld=mold` works without
+# needing `linker = "clang"` because rustc forwards the flag to its default cc driver.
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# Profile tweaks ------------------------------------------------------------
+# Keep these conservative — overrides here apply to every project on the machine.
+
+[profile.dev]
+# Default debug = true, opt-level = 0. Leave as-is; mold + sccache already
+# handle the dev-loop perf wins. Setting opt-level=1 here would slow clean
+# builds for marginal runtime gains.
+
+[profile.release]
+# `lto = "thin"` is a good default for release: ~5-15% smaller/faster binaries,
+# only modest extra link time (mold makes this cheap anyway).
+lto = "thin"
+codegen-units = 1
+# target-cpu=native is intentionally NOT set globally — it makes binaries
+# non-portable (won't run on older CPUs) and breaks reproducible CI artifacts.
+# Set per-project in `.cargo/config.toml` or via `RUSTFLAGS=-Ctarget-cpu=native`.
+
+# Useful aliases ------------------------------------------------------------
+[alias]
+# Drop-in faster test runner.
+nt = "nextest run"
+# Watch + check loop. Prefer `bacon` interactively; this is for scripts/CI.
+wc = "watch -x check"
+# Find unused dependencies in the workspace.
+unused = "machete"

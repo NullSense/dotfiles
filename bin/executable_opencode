@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# opencode shim — PATH-shadows /usr/bin/opencode so every invocation routes
+# through agent-isolated. See ~/bin/_agent-shim for design notes.
+exec /home/nullsense/bin/_agent-shim opencode "$@"

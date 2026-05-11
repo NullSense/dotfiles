@@ -6,7 +6,7 @@
 # Sub:  Screenrecord → audio choice
 #
 # Pressing the bind while recording stops the recording (matches omarchy).
-# Layer animation is disabled via `layerrule = noanim, rofi` in looknfeel.conf,
+# Layer animation is disabled via the walker layerrule in looknfeel.conf,
 # so the menu disappears instantly on selection — no sleep needed.
 
 set -uo pipefail
@@ -19,7 +19,7 @@ if is_recording; then
     exit 0
 fi
 
-DMENU=( /home/nullsense/bin/launch-walker --dmenu --width 360 )
+DMENU=( "$HOME/bin/launch-walker" --dmenu --width 360 )
 
 top=$(printf '%s\n' \
     '  Screenshot' \

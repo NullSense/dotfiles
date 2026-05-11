@@ -1,6 +1,6 @@
 # dotfiles
 
-Arch Linux + Sway + Wayland. **One repo, one source of truth.** Managed by [chezmoi](https://www.chezmoi.io/).
+Arch Linux + Hyprland + Wayland. **One repo, one source of truth.** Managed by [chezmoi](https://www.chezmoi.io/).
 
 ```
 github.com/NullSense/dotfiles                   ← THIS IS THE ONLY REPO
@@ -16,22 +16,22 @@ github.com/NullSense/dotfiles                   ← THIS IS THE ONLY REPO
 │   ├── setup-secure-boot.sh                    sbctl flow
 │   ├── setup-inference.sh                      llama.cpp + ComfyUI Docker
 │   ├── verify-system.sh                        post-install health check
-│   ├── fix-boot-after-windows.sh               recovery
-│   └── sway-display-config.txt                 dual-monitor + DDC + HDR + fonts
+│   └── fix-boot-after-windows.sh               recovery
 │
-├── dot_claude/        chezmoi → ~/.claude/             Claude Code: CLAUDE.md, mcp.json, statusline, skills, commands, memory
+├── dot_claude/        chezmoi → ~/.claude/             Claude Code: CLAUDE.md, mcp.json, statusline, skills, commands, memory, hooks (deny-secrets, destructive-guard)
 ├── dot_codex/         chezmoi → ~/.codex/              Codex CLI: config.toml, rules
-├── dot_config/        chezmoi → ~/.config/             opencode/, sway/, ghostty/, etc.
-├── dot_local/         chezmoi → ~/.local/              user-installed binaries layout
-├── dot_swaylock/      chezmoi → ~/.swaylock/           swaylock theming
+├── dot_config/        chezmoi → ~/.config/             hypr/, waybar/, ghostty/, mako/, opencode/, systemd/user/, agent-isolated/, etc.
+├── dot_local/         chezmoi → ~/.local/              user-installed binaries (hypr-waybar-bridge, sudo-pill-daemon, etc.)
+├── dot_lmstudio/      chezmoi → ~/.lmstudio/           LM Studio config presets (voice-rewrite, coding, general)
 ├── dot_zshrc          chezmoi → ~/.zshrc
+├── dot_zshenv         chezmoi → ~/.zshenv              minimal: SSH_AUTH_SOCK, PATH, OMARCHY_PATH
 ├── dot_bashrc         chezmoi → ~/.bashrc
-├── dot_gitconfig      chezmoi → ~/.gitconfig
+├── dot_gitconfig      chezmoi → ~/.gitconfig           SSH-signed commits/tags, github HTTPS→SSH rewrite
 ├── dot_profile        chezmoi → ~/.profile
+├── dot_envrc          chezmoi → ~/.envrc               direnv root
 ├── dot_tmux.conf      chezmoi → ~/.tmux.conf
 ├── private_dot_ssh/   chezmoi → ~/.ssh/                (mode 700; private_ prefix preserves permissions)
-├── symlink_dot_vimrc  chezmoi → ~/.vimrc               (symlink, not copy)
-├── bin/               chezmoi → ~/bin/                 user shell scripts deployed to PATH
+├── bin/               chezmoi → ~/bin/                 user shell scripts deployed to PATH (agent-isolated, full-reload, restart-waybar, …)
 ├── root/              chezmoi → /root/ (system files; opt-in)
 │
 ├── .chezmoiignore                              tells chezmoi which paths to NOT deploy (e.g. arch-install/)
@@ -102,3 +102,55 @@ See `SECRETS.md`. TL;DR:
 - **Infisical** for app/process secrets (env vars, API keys), via `direnv` per-project — see RUNBOOK Phase 9.95's "Infisical cold start"
 - **`.gitignore`** prevents `user_credentials.json` from leaking
 - The repo is **public**; nothing here decrypts to plaintext credentials
+
+## Security model
+
+Three layers of defense, top to bottom:
+
+### 1. Authentication backbone — Bitwarden Desktop SSH agent
+
+```
+Bitwarden Desktop  →  ~/.bitwarden-ssh-agent.sock  →  SSH_AUTH_SOCK (set in dot_zshenv)
+                                                       ├─ ssh / git push over ssh
+                                                       └─ git commit/tag signing  (gpg.format=ssh)
+```
+
+- `~/.zshenv` exports `SSH_AUTH_SOCK` conditionally — present even in non-interactive contexts (cron, systemd user units, IDEs).
+- `[url "git@github.com:"] insteadOf = https://github.com/` in `dot_gitconfig` forces SSH for github so HTTPS auth never falls through.
+- `gpg.format = ssh` + `gpg.ssh.allowedSignersFile = ~/.config/git/allowed_signers` — GPG is **not** used for git; the SSH key is the trust root for everything.
+- Locking BW Desktop (timeout or manual) clears all SSH operations until you unlock — intentional trade-off.
+
+### 2. Per-invocation isolation — `agent-isolated` (bubblewrap) via PATH shims
+
+Every coding-agent CLI (`claude`, `codex`, `opencode`) is auto-wrapped by `~/bin/agent-isolated`. The wrapping is enforced by **on-disk binary shims** at `~/bin/{claude,codex,opencode}` that PATH-shadow the real binaries — `~/bin/` is first in `$PATH` per `dot_zshenv`. Each shim execs `~/bin/_agent-shim` which lifts known wrapper flags and dispatches through `agent-isolated`.
+
+Why shims, not zsh functions: a function only intercepts zsh invocations. Anything else — `command claude`, `/usr/bin/env claude`, any non-zsh shell, an `exec()` syscall from a program, a systemd unit — would bypass the wrapper. Real binaries on `$PATH` catch all PATH-based lookups regardless of context.
+
+The agent runs with `tmpfs /` + `tmpfs $HOME`, plus a curated allowlist of read-only paths and read-write workspaces. It **cannot** see `~/.ssh`, `~/.gnupg`, `~/.config/rbw`, the rbw/SSH-agent sockets, the chezmoi `private_*` sources, atuin history, the cliphist DB, or any secret-bearing env var.
+
+Escape-hatches (default off, opt-in per invocation):
+- `claude --ssh`          → binds `~/.bitwarden-ssh-agent.sock`, exports `SSH_AUTH_SOCK`
+- `claude --gpg`          → binds `$XDG_RUNTIME_DIR/gnupg`
+- `claude --rbw`          → binds the rbw socket + config + binary
+- `claude --agent-vault`  → routes outbound HTTPS through agent-vault for credential injection
+
+Bypasses (deliberate, no longer accidental):
+- `AGENT_UNSANDBOX=1 claude …` — env-var gate inside `agent-isolated`
+- `~/.local/bin/claude …` (or `/usr/bin/codex`, `/usr/bin/opencode`) — invoke the real binary by full path
+
+`command claude` does **not** bypass: it still resolves through `$PATH` and hits the shim. Closing this hole was the reason for moving from zsh functions to shims.
+
+Self-test: `~/bin/agent-isolated --self-test` runs 26 verifications (20 negative — secrets must be hidden, 6 positive — required surfaces must be reachable).
+
+### 3. Defense in depth — `deny-secrets` PreToolUse hook
+
+Lives at `dot_claude/hooks/deny-secrets.sh`. Pattern-matches every `Bash` tool call inside an agent and refuses ones that name known secret-extraction commands or paths (`rbw`, `bw`, `cat ~/.ssh`, `cat ~/.gnupg`, etc.). Caught a real incident on 2026-05-08 — see `the-night-an-ai-ate-my-home-directory.md`. The hook is redundant with the bwrap sandbox (the secrets aren't reachable from inside anyway), but layered defense costs nothing.
+
+### Verifying the stack
+
+```sh
+~/bin/agent-isolated --self-test            # 26-check sandbox verification
+stat -c '%a %n' ~/.bitwarden-ssh-agent.sock # expect 700
+ssh-add -l                                  # expect your keys listed
+git log --show-signature -1                 # expect "Good signature" via SSH
+```

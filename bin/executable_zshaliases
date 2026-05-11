@@ -10,12 +10,18 @@
 # ~600 user-writable files to their own absolute path. See
 # ~/the-night-an-ai-ate-my-home-directory.md for the postmortem.
 #
-# AGENT_VAULT_SESSION_TOKEN is set by `agent-vault vault run` for every
-# wrapped child (claude, codex, opencode, future agents). Since all our
-# agent invocations are wrapped through agent-vault, this single env var
-# is the universal "I'm running inside an AI agent" detector. New agents
-# auto-covered when added to the wrapper aliases below.
+# Agent-shell guard. Two architectures, both detected here:
+#   1. agent-vault: `agent-vault vault run --vault default -- <agent>` sets
+#      AGENT_VAULT_SESSION_TOKEN for the wrapped child.
+#   2. agent-isolated (bubblewrap, current default for claude/codex/opencode):
+#      sets AGENT_ISOLATED=1 in the sandbox env. The wrapper also propagates
+#      AGENT_VAULT_SESSION_TOKEN only when --agent-vault is passed; otherwise
+#      it scrubs that env var entirely.
+# Either signal short-circuits alias loading so an interactive alias
+# (cf. the 2026-05-08 `alias ls=eza` incident) never gets captured into an
+# agent's shell snapshot. Non-interactive shells skip too.
 [[ -n "${AGENT_VAULT_SESSION_TOKEN:-}" ]] && return 0
+[[ -n "${AGENT_ISOLATED:-}" ]] && return 0
 [[ -o interactive ]] || return 0
 
 # Aliases
@@ -88,11 +94,9 @@ alias gpl='git pull'
 alias cleanup='sudo pacman -Sc && paru -Sc'
 alias orphans='sudo pacman -Qtdq | sudo pacman -Rns -'
 
-# Agent Vault — wrap AI agents so HTTPS calls route through the broker
-# and real API keys never enter the agent's process. The wrapper sets
-# proxy/CA env vars on the wrapped process ONLY — your normal shell stays
-# clean (no broken paru, no broken git, no broken curl). See:
-# ~/dotfiles/arch-install/AGENT-VAULT.md
-alias claude='agent-vault vault run --vault default -- claude'
-alias codex='agent-vault vault run --vault default -- codex'
-alias opencode='agent-vault vault run --vault default -- opencode'
+# NOTE: claude/codex/opencode are NOT aliased here. dot_zshrc defines them
+# as shell functions (after sourcing this file) that route through
+# ~/bin/agent-isolated for OS-level bubblewrap isolation. To get the old
+# agent-vault credential-injection behaviour, pass --agent-vault:
+#     claude --agent-vault   # binds the MITM CA + propagates AGENT_VAULT_SESSION_TOKEN
+# Direct bypass: `command claude` or `AGENT_UNSANDBOX=1 claude`.

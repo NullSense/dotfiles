@@ -4,3 +4,22 @@
     command = "delta"
 [data]
     user = "nullsense"
+
+# Auto-commit + auto-push for chezmoi-driven source changes.
+#
+# Triggers ONLY when chezmoi itself modifies the source dir:
+#   • chezmoi add <path>
+#   • chezmoi re-add <path>
+#   • chezmoi forget <path>
+#   • chezmoi destroy <path>
+#   • chezmoi edit <path>      (commits the post-edit state)
+#
+# Does NOT trigger when you edit files under ~/.local/share/chezmoi/ directly
+# with $EDITOR — that path stays manual via `chezmoi git -- commit`.
+#
+# autoPush implies autoCommit. Repo is github.com/NullSense/dotfiles (public),
+# so anything chezmoi-tracked under non-template `private_*` paths becomes
+# public on next chezmoi-driven action. Permission-marker only — not encryption.
+[git]
+    autoCommit = true
+    autoPush = true

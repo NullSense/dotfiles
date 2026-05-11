@@ -13,7 +13,7 @@
     "margin-left": 0,
     "margin-right": 0,
     "modules-left": [
-        "hyprland/workspaces",
+        "custom/workspaces",
         "hyprland/window",
         "custom/media",
         "hyprland/submap"
@@ -61,37 +61,32 @@
             "disk#root"
         ]
     },
-    "hyprland/workspaces": {
-        "disable-scroll": false,
-        "all-outputs": false,
-        "on-click": "activate",
-        "format": "{icon}",
-        "format-icons": {
-            "default": "",
-            "1": "1",
-            "2": "2",
-            "3": "3",
-            "4": "4",
-            "5": "5",
-            "6": "6",
-            "7": "7",
-            "8": "8",
-            "9": "9",
-            "10": "0",
-            "active": "󱓻"
-        },
-        "persistent-workspaces": {
-            "DP-1": [
-                1,
-                2,
-                4,
-                5,
-                6
-            ],
-            "DP-2": [
-                3
-            ]
-        }
+    "custom/workspaces": {
+        // Replaces `hyprland/workspaces` so each digit can be Pango-colored
+        // dynamically: per-agent brand color when an attention tag is set,
+        // gruvbox @yellow when the user is on it, @aqua for active-on-other-
+        // monitor, @fg3 for occupied, @bg4 for empty/persistent. waybar's
+        // built-in module can't do this — `format-icons` is static config.
+        // Trade-off: lost per-button click-to-switch. Compensated by:
+        //   left-click  = workspace e+1     middle-click = focus attention
+        //   right-click = workspace e-1     scroll       = step ±1
+        // Direct selection still works via Super+1..6 (Hyprland keybinds).
+        // Refresh is signal-driven via SIGRTMIN+8 — fired by
+        // `hypr-waybar-bridge.service` on workspace/window/urgent events
+        // and by Claude Code hooks on attention-tag changes.
+        "exec": "$HOME/.config/waybar/workspaces-pill.sh",
+        "return-type": "json",
+        "interval": "once",
+        "signal": 8,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click": "$HOME/.config/waybar/workspaces-pill.sh next",
+        "on-click-right": "$HOME/.config/waybar/workspaces-pill.sh prev",
+        "on-click-middle": "$HOME/.config/waybar/workspaces-pill.sh focus-attention",
+        "on-scroll-up": "$HOME/.config/waybar/workspaces-pill.sh next",
+        "on-scroll-down": "$HOME/.config/waybar/workspaces-pill.sh prev"
     },
     "hyprland/window": {
         "format": "{title}",
@@ -146,7 +141,7 @@
         "signal": 9,
         "tooltip": true,
         "on-click": "$HOME/.config/waybar/aiquota-cycle.sh",
-        "on-click-right": "ghostty -e $HOME/code/aiquota/target/release/aiquota tui"
+        "on-click-right": "xdg-terminal-exec $HOME/code/aiquota/target/release/aiquota tui"
     },
     "custom/agents": {
         "exec": "$HOME/.config/waybar/agent-attention.sh",

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Keybindings viewer — Omarchy's omarchy-menu-keybindings, ported to rofi.
+# Keybindings viewer — Omarchy's omarchy-menu-keybindings, adapted for walker.
 #
 # Pulls live binds from `hyprctl binds`, resolves keycodes to symbols via
-# xkbcli, prioritizes commonly-used ones to the top, and pipes through rofi.
+# xkbcli, prioritizes commonly-used ones to the top, and pipes through
+# `launch-walker --dmenu`.
 #
 # Run with `--print` to dump to stdout (useful for piping or debugging).
 
@@ -136,6 +137,6 @@ output() {
 if [[ ${1:-} == "--print" || ${1:-} == "-p" ]]; then
     output
 else
-    output | /home/nullsense/bin/launch-walker \
+    output | "$HOME/bin/launch-walker" \
         --dmenu --width 800 --placeholder 'keybind' >/dev/null
 fi

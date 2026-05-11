@@ -174,9 +174,14 @@ class LMStudioClient:
         *,
         max_tokens: int = 768,
         temperature: float = 0.5,
+        model: str | None = None,
     ) -> str:
-        """Vision-enabled chat completion (Gemma 4 multimodal). Image must be
-        a base64 data URI like 'data:image/png;base64,...'.
+        """Vision-enabled chat completion. Image must be a base64 data URI
+        like 'data:image/png;base64,...'.
+
+        model defaults to the configured model id (Gemma) but can be
+        overridden per-call to route OCR-specific requests to a different
+        loaded model (e.g. Chandra OCR 2).
         """
         messages: list[dict[str, Any]] = []
         if system_prompt:
@@ -189,7 +194,7 @@ class LMStudioClient:
             ],
         })
         body = {
-            "model": self._model_id,
+            "model": model or self._model_id,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,

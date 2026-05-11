@@ -26,9 +26,19 @@ if [ -n "$errs" ] && [ "$errs" != "no errors" ]; then
     notify-send -u critical "Hyprland config errors" "$errs"
 fi
 
-# Waybar — SIGUSR2 = in-place reload (preserves systemd unit identity).
-systemctl --user reload waybar.service >/dev/null 2>&1 \
-    || systemctl --user restart waybar.service >/dev/null 2>&1
+# Waybar — SIGUSR2 in-place reload is fastest, but it ONLY signals MainPID.
+# If any off-tree waybar sibling is running (rare; happens when something
+# pkill+respawned waybar outside the unit, see waybar.service ExecStartPre),
+# `reload` leaves the sibling untouched. Detect that and fall through to
+# `restart`, which fires ExecStartPre and reaps strays. Self-healing — any
+# accumulated dupe gets cleaned next SUPER+SHIFT+R.
+waybar_count=$(pgrep -xc -u "$(id -u)" waybar 2>/dev/null || echo 0)
+if [ "$waybar_count" -gt 1 ] || ! systemctl --user is-active --quiet waybar.service; then
+    systemctl --user restart waybar.service >/dev/null 2>&1
+else
+    systemctl --user reload waybar.service >/dev/null 2>&1 \
+        || systemctl --user restart waybar.service >/dev/null 2>&1
+fi
 
 # Mako — re-reads ~/.config/mako/config.
 makoctl reload >/dev/null 2>&1

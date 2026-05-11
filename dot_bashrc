@@ -12,7 +12,6 @@ command -v mise &>/dev/null && eval "$(mise activate bash)"
 # Secrets (gitignored)
 [[ -f ~/.secrets ]] && source ~/.secrets
 
-# Added by LM Studio CLI (lms)
-export PATH="$PATH:/home/nullsense/.lmstudio/bin"
-# End of LM Studio CLI section
+# LM Studio CLI: PATH is set in ~/.zshenv (zsh's universal env file).
+# If you ever switch to bash as default shell, mirror that block here.
 

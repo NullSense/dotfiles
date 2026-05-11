@@ -1,3 +1,7 @@
 #!/usr/bin/env sh
-# omarchy-style helper — kill + respawn waybar (via the keeper).
-exec sh -c 'pkill -x waybar 2>/dev/null; sleep 0.3; setsid ~/bin/waybar-keeper >/dev/null 2>&1 < /dev/null & disown; true'
+# Restart waybar via its systemd unit. The unit's ExecStartPre reaps any
+# stray waybar first, so this is safe even if a prior pkill+setsid pattern
+# left an off-tree sibling. Uses `restart` (not reload) so the bar fully
+# re-initialises — for in-place reload (theme/css edits) use `wayrestart`
+# alias (SIGUSR2) or `systemctl --user reload waybar.service`.
+exec systemctl --user restart waybar.service

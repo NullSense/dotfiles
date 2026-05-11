@@ -49,6 +49,33 @@ class AppConfig:
     # Hard timeout for any single NLLB request.
     nllb_timeout_s: float
 
+    # Surya OCR — optional engine for verbatim text extraction. Lives in
+    # its own venv (~/.local/share/surya-ocr) because PyTorch ROCm pulls
+    # ~5 GB of deps we don't want in the daemon's venv. Talked to via the
+    # surya_ocr CLI binary.
+    surya_bin: Path
+    surya_gfx_override: str
+
+    # Chandra OCR 2 — optional engine for high-quality OCR. Loaded into
+    # LM Studio alongside Gemma; we just route the OCR request to its
+    # model id instead of Gemma's. No separate venv, no subprocess.
+    chandra_model_id: str
+
+    # Qwen 3.6 35B-A3B — optional power-user OCR engine. Won our 14-case
+    # bench on quality (0.974 recall) but requires a manual model swap
+    # in LM Studio (won't coexist with Gemma+Chandra in 12 GB VRAM).
+    # ~50-70 s per call due to MoE expert-CPU offload. The daemon
+    # surfaces a clear error if the configured Qwen model isn't loaded.
+    qwen_model_id: str
+
+    # IBM Granite Vision 3.3-2b — small (1.55 GB Q4_K_M + 0.7 GB mmproj),
+    # Apache 2.0, specialized for enterprise document understanding (tables,
+    # charts, infographics, forms). Different model lineage from Chandra/Qwen
+    # (LlavaNext + SigLIP2 + Granite 3.1) so likely fails on different
+    # inputs — a useful complement. Coexists with Gemma+Chandra in 12 GB VRAM.
+    # JIT-loaded by LM Studio (no manual model swap needed).
+    granite_model_id: str
+
     @classmethod
     def from_env(cls) -> "AppConfig":
         run = _runtime_dir()
@@ -70,6 +97,14 @@ class AppConfig:
             lmstudio_state_cache_ttl_s=float(_env("HYPRWHSPR_AI_LMS_STATE_TTL", "30.0")),
             keepalive_threshold_s=float(_env("HYPRWHSPR_AI_KEEPALIVE_THRESHOLD", "3000")),  # 50min
             keepalive_check_interval_s=float(_env("HYPRWHSPR_AI_KEEPALIVE_INTERVAL", "300")),  # 5min
-            lmstudio_timeout_s=float(_env("HYPRWHSPR_AI_LMS_TIMEOUT", "30.0")),
+            lmstudio_timeout_s=float(_env("HYPRWHSPR_AI_LMS_TIMEOUT", "90.0")),
             nllb_timeout_s=float(_env("HYPRWHSPR_AI_NLLB_TIMEOUT", "30.0")),
+            surya_bin=Path(_env(
+                "HYPRWHSPR_AI_SURYA_BIN",
+                str(Path.home() / ".local/share/surya-ocr/.venv/bin/surya_ocr"),
+            )),
+            surya_gfx_override=_env("HYPRWHSPR_AI_SURYA_GFX", "10.3.0"),
+            chandra_model_id=_env("HYPRWHSPR_AI_CHANDRA_MODEL", "chandra-ocr-2"),
+            qwen_model_id=_env("HYPRWHSPR_AI_QWEN_MODEL", "qwen_qwen3.6-35b-a3b"),
+            granite_model_id=_env("HYPRWHSPR_AI_GRANITE_MODEL", "granite-vision-3.3-2b"),
         )

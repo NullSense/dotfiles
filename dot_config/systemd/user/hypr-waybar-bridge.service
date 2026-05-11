@@ -1,0 +1,17 @@
+[Unit]
+Description=Hyprland → waybar event bridge (custom/workspaces refresh)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hypr-waybar-bridge
+Restart=always
+RestartSec=2
+# Light footprint: one socat + one bash event loop. Idle when Hyprland is
+# quiet; bursts during workspace/window churn.
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=graphical-session.target

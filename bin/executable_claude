@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# claude shim — PATH-shadows /home/nullsense/.local/bin/claude so every
+# invocation (any shell, any script, any exec syscall) routes through
+# agent-isolated. See ~/bin/_agent-shim for design notes.
+exec /home/nullsense/bin/_agent-shim claude "$@"

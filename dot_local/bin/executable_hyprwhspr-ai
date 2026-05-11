@@ -6,12 +6,14 @@
 # fast (no `mise exec` overhead per invocation) and makes the entry
 # point discoverable via PATH.
 
-VENV_PY="$HOME/.local/share/hyprwhspr-ai/.venv/bin/python"
 SRC_DIR="$HOME/.local/share/hyprwhspr-ai"
+VENV_PY="$SRC_DIR/.venv/bin/python"
 
 if [[ ! -x "$VENV_PY" ]]; then
   echo "hyprwhspr-ai: venv not found. Run: $SRC_DIR/setup.sh" >&2
   exit 2
 fi
 
+# cd into the project so `python -m src.client` can find the src package.
+cd "$SRC_DIR" || exit 2
 exec "$VENV_PY" -m src.client "$@"

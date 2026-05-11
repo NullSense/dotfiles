@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Internal dispatcher shared by the ~/bin/{claude,codex,opencode} shims.
+# Each shim invokes us as:  _agent-shim <agent> "$@"
+#
+# Why this exists: shell-function wrappers (the old approach, defined in
+# dot_zshrc) only work in interactive zsh. Any non-zsh shell, any script,
+# any `exec()` syscall that resolves <agent> via PATH lookup would skip the
+# wrapper and reach the real binary directly. By turning ~/bin/<agent> into
+# a real on-disk script that PATH-shadows the real binary, we get
+# system-level enforcement regardless of how the agent is invoked.
+#
+# The shim lifts known wrapper flags (--ssh / --gpg / --rbw / --agent-vault)
+# from "$@" so `claude --ssh` reaches agent-isolated correctly — its arg
+# parser breaks out of flag parsing the moment it sees the agent name.
+#
+# Bypasses (intentional, for emergency use):
+#   • AGENT_UNSANDBOX=1 claude …   — env-var gate inside agent-isolated
+#   • ~/.local/bin/claude …        — invoke real binary by full path
+# `command claude` does NOT bypass anymore — it still resolves through PATH
+# and hits this shim. Before this change, `command claude` skipped the
+# zsh function and reached the real binary; that hole is now closed.
+
+set -euo pipefail
+
+agent="$1"; shift
+
+wrapper_flags=()
+passthrough=()
+saw_terminator=0
+
+for arg in "$@"; do
+    if (( saw_terminator )); then
+        passthrough+=("$arg")
+        continue
+    fi
+    case "$arg" in
+        --) saw_terminator=1; passthrough+=("$arg") ;;
+        --ssh|--gpg|--rbw|--agent-vault)
+            wrapper_flags+=("$arg") ;;
+        *) passthrough+=("$arg") ;;
+    esac
+done
+
+exec "$HOME/bin/agent-isolated" "${wrapper_flags[@]}" "$agent" "${passthrough[@]}"

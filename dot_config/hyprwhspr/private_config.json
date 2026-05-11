@@ -39,5 +39,5 @@
     "CtrlPlus": "Ctrl+",
     "ShiftPlus": "Shift+"
   },
-  "post_transcription_hook": "/home/nullsense/.local/bin/hyprwhspr-rewrite"
+  "post_transcription_hook": "/home/nullsense/.local/bin/hyprwhspr-ai-rewrite-hook"
 }

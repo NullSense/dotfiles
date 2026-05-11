@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# codex shim — PATH-shadows /usr/bin/codex so every invocation routes
+# through agent-isolated. See ~/bin/_agent-shim for design notes.
+exec /home/nullsense/bin/_agent-shim codex "$@"

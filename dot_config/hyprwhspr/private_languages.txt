@@ -1,12 +1,11 @@
-# Translation favorites for hyprwhspr-translate.
-# One language per line. Used as the top entries in the target-language
-# walker picker; "Other…" at the bottom takes free-text input.
+# Translation favorites for the omarchy capture menu (Translate region /
+# Translate clipboard). One language per line — top entries become the
+# walker picker; "Other…" at the bottom takes free-text input that is
+# resolved against the daemon's NLLB code table.
 #
-# Format: name as you'd say it in English (Gemma understands either the
-# common name or ISO 639 code). Order = display order.
-#
-# Add/remove with `hyprwhspr-translate vocab-add`/`vocab-rm` (TODO) or just
-# edit this file. No daemon restart needed — picked up on each translation.
+# Format: name as you'd say it in English. The daemon resolves human names
+# ("Lithuanian") and NLLB BCP-47 codes ("lit_Latn") via its internal map.
+# Order = display order. No daemon restart needed — read fresh per call.
 
 English
 German

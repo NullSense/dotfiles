@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh set codex"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh clear codex"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/nullsense/.local/bin/plannotator",
+            "timeout": 345600
+          }
+        ]
+      }
+    ]
+  }
+}

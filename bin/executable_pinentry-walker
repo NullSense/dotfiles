@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# pinentry-walker — minimal Assuan-protocol pinentry that delegates GETPIN
+# to `walker -x -I` (Walker dmenu password input). Installed for rbw via
+# ~/.config/rbw/config.json:  "pinentry": "/home/nullsense/bin/pinentry-walker"
+#
+# Why this exists: pinentry-gnome3 wedges silently on Hyprland (gcr-prompter
+# system-modal dialog doesn't surface), and pinentry-qt 1.3.2-2 ships broken
+# (missing libKF6GuiAddons.so.6). Walker is already the user's launcher of
+# choice and supports masked input via -x, so we make the master-password
+# prompt match the rest of the picker UX.
+#
+# Protocol reference: https://www.gnupg.org/documentation/manuals/assuan/
+# We respond OK to every command we don't care about, and translate GETPIN
+# into a single Walker password prompt. Anything we want to surface (errors,
+# descriptions, prompts) is folded into the placeholder text.
+
+set -u
+
+# Stderr → logfile so we never pollute the Assuan stdout channel.
+LOGFILE="${XDG_RUNTIME_DIR:-/tmp}/pinentry-walker.log"
+exec 2>>"$LOGFILE"
+echo "[$(date -Iseconds)] pinentry-walker started, pid=$$, ppid=$PPID" >&2
+
+# Ensure HOME/PATH even if rbw-agent's env was scrubbed.
+export HOME="${HOME:-/home/$(id -un)}"
+export PATH="$HOME/bin:${PATH:-/usr/local/bin:/usr/bin}"
+
+prompt="Passphrase"
+desc=""
+errmsg=""
+
+# Encode % CR LF for transmission on a `D` data line.
+assuan_escape() {
+    local s="$1"
+    s="${s//%/%25}"
+    s="${s//$'\r'/%0D}"
+    s="${s//$'\n'/%0A}"
+    printf '%s' "$s"
+}
+# Decode incoming %XX hex pairs in command arguments.
+assuan_unescape() {
+    local s="$1"
+    printf '%b' "${s//%/\\x}"
+}
+
+# Banner — first thing any Assuan server must emit.
+printf 'OK Pleased to meet you, pinentry-walker\n'
+
+while IFS= read -r line; do
+    # Trim possible trailing CR (Assuan lines are CRLF-terminated by spec).
+    line="${line%$'\r'}"
+    case "$line" in
+        SETPROMPT\ *) prompt=$(assuan_unescape "${line#SETPROMPT }"); printf 'OK\n' ;;
+        SETDESC\ *)   desc=$(assuan_unescape "${line#SETDESC }");     printf 'OK\n' ;;
+        SETERROR\ *)  errmsg=$(assuan_unescape "${line#SETERROR }");  printf 'OK\n' ;;
+        GETPIN)
+            # Build a single-line placeholder from desc/prompt/error.
+            label="${desc:+${desc} — }${prompt}${errmsg:+ — ${errmsg}}"
+            label="${label//$'\n'/ }"
+            label="${label//$'\r'/ }"
+            # Walker -x sets dmenu+password automatically; -I = no list.
+            # Empty stdin so walker has nothing to display besides the input.
+            pw=$(printf '' | "$HOME/bin/launch-walker" -x -I -p " $label")
+            rc=$?
+            if (( rc != 0 )) || [[ -z $pw ]]; then
+                printf 'ERR 83886179 Operation cancelled\n'
+            else
+                printf 'D %s\n' "$(assuan_escape "$pw")"
+                printf 'OK\n'
+            fi
+            errmsg=""
+            ;;
+        BYE)
+            printf 'OK closing connection\n'
+            exit 0
+            ;;
+        '') ;;
+        # Everything else (OPTION, SETTITLE, SETKEYINFO, RESET, NOP, etc.):
+        # ack and ignore. rbw-agent doesn't depend on us doing more.
+        *) printf 'OK\n' ;;
+    esac
+done
+
+echo "[$(date -Iseconds)] pinentry-walker exiting (eof)" >&2

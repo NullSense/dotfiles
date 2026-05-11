@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+body { font: 14px "DejaVu Sans", sans-serif; padding: 30px; max-width: 600px; }
+h3 { margin-top: 4px; }
+.row { display: grid; grid-template-columns: 180px 1fr; gap: 12px; margin: 8px 0; align-items: center; }
+.label { font-weight: 600; color: #444; }
+.field { border-bottom: 1px solid #999; padding: 4px 6px; min-height: 18px; }
+.checkbox { display: inline-block; width: 16px; height: 16px; border: 1.5px solid #333; vertical-align: middle; margin-right: 6px; text-align: center; line-height: 14px; font-size: 14px; }
+.checked { background: #1e40af; color: white; }
+.subgroup { margin: 14px 0; }
+.subgroup .item { margin: 4px 0; }
+.section-h { font-size: 16px; font-weight: 700; margin: 18px 0 8px 0; padding-bottom: 4px; border-bottom: 2px solid #333; }
+</style></head><body>
+<h3>Conference Registration — DevConf 2026</h3>
+
+<div class="section-h">Attendee details</div>
+<div class="row"><div class="label">Full name</div><div class="field">Maria Hernández-Torres</div></div>
+<div class="row"><div class="label">Email</div><div class="field">m.hernandez@example.org</div></div>
+<div class="row"><div class="label">Affiliation</div><div class="field">Acme Robotics Ltd.</div></div>
+<div class="row"><div class="label">Country</div><div class="field">Spain</div></div>
+
+<div class="section-h">Track preferences (select all that apply)</div>
+<div class="subgroup">
+<div class="item"><span class="checkbox checked">✓</span> Distributed systems</div>
+<div class="item"><span class="checkbox"></span> Frontend &amp; UX</div>
+<div class="item"><span class="checkbox checked">✓</span> AI/ML infrastructure</div>
+<div class="item"><span class="checkbox checked">✓</span> Security &amp; cryptography</div>
+<div class="item"><span class="checkbox"></span> Embedded systems</div>
+<div class="item"><span class="checkbox"></span> Developer tooling</div>
+</div>
+
+<div class="section-h">Dietary requirements</div>
+<div class="subgroup">
+<div class="item"><span class="checkbox"></span> Vegetarian</div>
+<div class="item"><span class="checkbox checked">✓</span> Vegan</div>
+<div class="item"><span class="checkbox"></span> Gluten-free</div>
+<div class="item"><span class="checkbox"></span> Halal</div>
+<div class="item"><span class="checkbox"></span> No restrictions</div>
+</div>
+
+<div class="row"><div class="label">Special requests</div><div class="field">Wheelchair access for sessions on day 2.</div></div>
+</body></html>

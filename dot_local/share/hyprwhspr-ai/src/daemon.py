@@ -30,6 +30,8 @@ from .config import AppConfig
 from .lmstudio import LMStudioClient
 from .nllb import NLLBClient
 from .services.rewrite import RewriteService
+from .services.surya import SuryaService
+from .services.textgen import TextGenError, TextGenService
 from .services.translate import TranslateError, TranslateService
 from .services.vision import VisionError, VisionService
 from .vocab import VocabRepository
@@ -56,8 +58,19 @@ class Daemon:
         )
         self._vocab = VocabRepository(path=config.vocabulary_path)
         self._windows = WindowProvider(cache_ttl_s=config.window_cache_ttl_s)
+        self._surya = SuryaService(
+            surya_bin=config.surya_bin,
+            gfx_override=config.surya_gfx_override,
+        )
         self._rewrite = RewriteService(self._lms, self._vocab, self._windows)
-        self._vision = VisionService(self._lms)
+        self._vision = VisionService(
+            self._lms,
+            surya=self._surya,
+            chandra_model_id=config.chandra_model_id,
+            qwen_model_id=config.qwen_model_id,
+            granite_model_id=config.granite_model_id,
+        )
+        self._textgen = TextGenService(self._lms)
         self._translate = TranslateService(self._nllb, self._vision)
         self._server: asyncio.base_events.Server | None = None
         self._keepalive_task: asyncio.Task[None] | None = None
@@ -167,6 +180,10 @@ class Daemon:
                 return await self._op_translate_region(req)
             if op == "ocr":
                 return await self._op_ocr(req)
+            if op == "vision-task":
+                return await self._op_vision_task(req)
+            if op == "text-task":
+                return await self._op_text_task(req)
             return {"ok": False, "error": "unknown_op", "detail": f"op={op!r}"}
         except Exception as e:
             log.exception("op=%s failed", op)
@@ -203,6 +220,11 @@ class Daemon:
                 r = await self._vision.explain_region()
             elif subop == "ask_region":
                 r = await self._vision.ask_region(req.get("question", ""))
+            elif subop == "analyze_file":
+                path = Path(req.get("image_path", ""))
+                if not path.is_file():
+                    return {"ok": False, "error": "image_not_found", "detail": str(path)}
+                r = await self._vision.analyze_file(path, req.get("prompt", ""))
             else:
                 return {"ok": False, "error": "unknown_subop", "detail": f"subop={subop!r}"}
         except VisionError as e:
@@ -235,13 +257,50 @@ class Daemon:
         }
 
     async def _op_ocr(self, req: dict[str, Any]) -> dict[str, Any]:
+        mode = req.get("mode", "faithful")
+        engine = req.get("engine", "gemma")
+        # Region mode: capture via slurp+grim, then OCR. No image_path needed.
+        if req.get("region"):
+            try:
+                r = await self._vision.ocr_region(mode=mode, engine=engine)
+            except VisionError as e:
+                return {"ok": False, "error": "vision_failed", "detail": str(e)}
+            except ValueError as e:  # bad mode
+                return {"ok": False, "error": "bad_mode", "detail": str(e)}
+            return {"ok": True, "text": r.text, "took_ms": r.took_ms, "engine": engine}
         path = Path(req.get("image_path", ""))
         if not path.is_file():
             return {"ok": False, "error": "image_not_found", "detail": str(path)}
         try:
-            r = await self._vision.ocr(path)
+            r = await self._vision.ocr(path, mode=mode, engine=engine)
         except VisionError as e:
             return {"ok": False, "error": "vision_failed", "detail": str(e)}
+        except ValueError as e:
+            return {"ok": False, "error": "bad_mode", "detail": str(e)}
+        return {"ok": True, "text": r.text, "took_ms": r.took_ms, "engine": engine}
+
+    async def _op_vision_task(self, req: dict[str, Any]) -> dict[str, Any]:
+        """Unified vision: task ∈ {summarize,explain,ask} × source ∈ {monitor,region,file}."""
+        task = req.get("task", "")
+        source = req.get("source", "")
+        question = req.get("question", "")
+        image_path_str = req.get("image_path", "")
+        image_path = Path(image_path_str) if image_path_str else None
+        try:
+            r = await self._vision.run_task(task, source, question=question, image_path=image_path)
+        except VisionError as e:
+            return {"ok": False, "error": "vision_failed", "detail": str(e)}
+        return {"ok": True, "text": r.text, "took_ms": r.took_ms}
+
+    async def _op_text_task(self, req: dict[str, Any]) -> dict[str, Any]:
+        """Unified text-mode: task ∈ {summarize,explain,ask}; text + optional question."""
+        task = req.get("task", "")
+        text = req.get("text", "")
+        question = req.get("question", "")
+        try:
+            r = await self._textgen.run_task(task, text, question=question)
+        except TextGenError as e:
+            return {"ok": False, "error": "textgen_failed", "detail": str(e)}
         return {"ok": True, "text": r.text, "took_ms": r.took_ms}
 
 

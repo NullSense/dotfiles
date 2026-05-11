@@ -31,12 +31,25 @@
 set -euo pipefail
 
 # ───────────────────────────── Bypass ─────────────────────────────
+# AGENT_UNSANDBOX=1 → exec the real agent binary, skipping bwrap entirely.
+# `command -v` is the WRONG lookup here: ~/bin/ is first in PATH so it would
+# resolve to the shim, recursing back into agent-isolated forever. Real
+# agent binaries live in ~/.local/bin/ (claude is a symlink there, codex/
+# opencode are direct files or symlinks). Use that explicitly.
 if [[ "${AGENT_UNSANDBOX:-0}" == "1" ]]; then
     if [[ $# -ge 1 ]]; then
         agent="$1"; shift
         case "$agent" in
             claude|codex|opencode)
-                exec "$(command -v "$agent" 2>/dev/null || echo "$agent")" "$@" ;;
+                real="$HOME/.local/bin/$agent"
+                if [[ -x "$real" || -L "$real" ]]; then
+                    exec "$real" "$@"
+                fi
+                # fallback: scrub ~/bin from PATH then look up via env
+                clean_path="${PATH//$HOME\/bin:/}"
+                clean_path="${clean_path//:$HOME\/bin/}"
+                exec env -u AGENT_UNSANDBOX PATH="$clean_path" "$agent" "$@"
+                ;;
             *) exec "$agent" "$@" ;;
         esac
     fi

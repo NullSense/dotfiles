@@ -128,6 +128,21 @@ yy() {
 # (some omarchy/agent-vault setups define `alias claude='agent-vault …'`).
 unalias claude codex opencode 2>/dev/null
 
+# Deliberate-unsandbox convenience: <name>-raw runs the agent outside bwrap.
+# Implementation: invoke the real binary directly at ~/.local/bin/<agent>,
+# skipping the ~/bin shim entirely. This avoids a chicken-and-egg loop where
+# AGENT_UNSANDBOX=1 routes through the shim, which routes through agent-
+# isolated, which would re-resolve "claude" back to the shim.
+#
+# Use when you need to write to paths the sandbox doesn't bind (systemd unit
+# files, /etc, ~/.config/* outside chezmoi source, etc.) The deny-secrets
+# PreToolUse hook still blocks tool calls naming secret paths (~/.ssh,
+# ~/.gnupg, ~/.config/rbw, .env files, etc.) even in -raw mode — defense
+# in depth, deliberately layered above bwrap.
+alias claude-raw='$HOME/.local/bin/claude'
+alias codex-raw='$HOME/.local/bin/codex'
+alias opencode-raw='$HOME/.local/bin/opencode'
+
 # zoxide MUST be last: it installs a chpwd hook + precmd, and zoxide's doctor
 # warns if any later sourced file (aliases, hooks, secrets) registers chpwd
 # after it. Keep this at the very bottom of zshrc.

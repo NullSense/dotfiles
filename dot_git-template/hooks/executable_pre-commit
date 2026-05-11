@@ -1,0 +1,19 @@
+#!/bin/sh
+# Pre-commit secret scan — runs BOTH gitleaks and infisical on staged diff.
+# Either tool blocking = commit aborted. Bypass: git commit --no-verify
+#
+# - gitleaks:  regex + entropy, ~150 rules, fast, well-maintained allowlist
+# - infisical: complementary ruleset, catches some patterns gitleaks misses
+
+set -e
+
+# gitleaks — staged diff only
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --verbose
+fi
+
+# infisical — staged diff only
+# Note: infisical scan git-changes scans uncommitted changes; --staged restricts to staged
+if command -v infisical >/dev/null 2>&1; then
+  infisical scan git-changes --staged --verbose
+fi

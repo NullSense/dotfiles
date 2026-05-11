@@ -103,10 +103,15 @@
 ## with ^ or end with $, they'll match anywhere in the command.
 ## For details on the supported regular expression syntax, see
 ## https://docs.rs/regex/latest/regex/#syntax
-# history_filter = [
-#   "^secret-cmd",
-#   "^innocuous-cmd .*--secret=.+",
-# ]
+history_filter = [
+  "^secret-cmd",
+  "^innocuous-cmd .*--secret=.+",
+    "(?i)^(export|set)\\s+.*(TOKEN|SECRET|KEY|PASSWORD|API_KEY|PASSWD|AUTH)=",
+    "sk-ant-[A-Za-z0-9_-]{32,}",
+    "sk-proj-[A-Za-z0-9_-]{32,}",
+    "AIza[A-Za-z0-9_-]{35}",
+    "(?i)curl\\s.*(authorization|x-api-key|bearer)",
+]
 
 ## prevent commands run with cwd matching any of these regexes from being written
 ## to history. Note that these regular expressions are unanchored, i.e. if they don't

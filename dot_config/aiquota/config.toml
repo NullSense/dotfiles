@@ -1,0 +1,58 @@
+# aiquota config — providers + credential policy.
+#
+# Credentials are env-var only (strict default). Recommended:
+#   infisical run --path=/aiquota -- aiquota waybar
+# Or set the per-provider env vars manually. See README for the
+# canonical env-var name per provider.
+
+[general]
+cache_ttl_secs = 120
+warn_pct       = 70.0
+crit_pct       = 90.0
+refresh_secs   = 60
+
+[security]
+# Default-deny plaintext reads from ~/.local/share/opencode/auth.json.
+# Set true (or per-provider) only if you're OK with API tokens living
+# unencrypted on disk.
+allow_plaintext_creds = false
+
+[providers.claude]
+enabled = true
+
+[providers.codex]
+enabled = true
+
+[providers.opencode]
+enabled = true
+
+# Off by default — Gemini's "quota" is a file-count proxy, often
+# inaccurate. Flip if you actually want it.
+[providers.gemini]
+enabled = false
+
+# OpenCode Go — dashboard scrape, EXPERIMENTAL.
+# Needs OPENCODE_GO_WORKSPACE_ID + OPENCODE_GO_AUTH_COOKIE in env.
+# Use Infisical: put the auth cookie there, never on disk in plaintext.
+[providers.opencode-go]
+enabled = true
+
+# OpenRouter — credit / spend monitor.
+# Needs OPENROUTER_API_KEY in env.
+[providers.openrouter]
+enabled = true
+
+# GitHub Copilot — requires the special "usage" token from a second
+# OAuth device-flow during `opencode auth login`. Off until you have
+# GITHUB_COPILOT_USAGE_TOKEN configured.
+[providers.copilot]
+enabled = false
+
+# Z.ai GLM Coding Plan. Needs ZAI_API_KEY in env.
+[providers.zai]
+enabled = false
+
+[output.waybar]
+format       = "{glyph} {pct}% <span foreground='#bdae93' size='small'>{resets_in}</span>"
+separator    = "  "
+tooltip_help = true

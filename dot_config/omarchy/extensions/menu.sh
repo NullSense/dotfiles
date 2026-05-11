@@ -138,10 +138,20 @@ show_capture_menu() {
   esac
 }
 
-# Region OCR — pick engine first, then drag region. Three engines:
-#   Gemma  — fast (~2s), good general-purpose, can fumble dense tables
-#   Surya  — verbatim (~15s), word-perfect, no markdown structure
-#   Hybrid — Surya text + Gemma layout cleanup (~22s), best for tables
+# Region OCR — pick engine first, then drag region. Six engines (plus the
+# Tesseract fast-path that bypasses the daemon). Latency + recall numbers
+# below are from tests/ocr-bench (2026-05-09, 14-case suite):
+#
+#   qwen      0.974 recall, 56.5s, never empty (highest quality, slow)
+#   hybrid    0.952 recall, 19.9s, never empty (best quality/latency mix)
+#   surya     0.890 recall, 16.1s, verbatim only, no markdown
+#   gemma     0.875 recall,  3.8s, fast general-purpose
+#   chandra   0.794 recall, 23.6s, 1/14 empty (FLAKY — strictly dominated)
+#   granite   not benched
+#
+# Chandra is kept as an option because the user wants it, but the empty-
+# result / failure paths below explicitly recommend Hybrid as the next
+# thing to try — bench shows Hybrid beats Chandra on every dimension.
 # Falls back to Tesseract via omarchy-capture-text-extraction if daemon down.
 ocr_region_to_clipboard() {
   if ! hyprwhspr-ai ping >/dev/null 2>&1; then
@@ -151,7 +161,7 @@ ocr_region_to_clipboard() {
   fi
   local engine_pick engine engine_label
   engine_pick=$(menu "OCR engine" \
-    "  Hybrid — best quality, ~20s\n  Gemma — fast, ~4s\n  Granite — small, Apache 2.0, ~5s\n  Chandra — document-OCR, ~11s\n  Surya — verbatim, ~16s\n  Qwen 35B — top quality, ~60s (model swap)\n  Tesseract — instant, no structure")
+    "  Hybrid — best quality, ~20s\n  Gemma — fast, ~4s\n  Granite — small, Apache 2.0, ~5s\n  Chandra — flaky, ~24s (try Hybrid first)\n  Surya — verbatim, ~16s\n  Qwen 35B — top quality, ~60s (model swap)\n  Tesseract — instant, no structure")
   case "$engine_pick" in
     *Hybrid*)    engine=hybrid;    engine_label="Hybrid" ;;
     *Gemma*)     engine=gemma;     engine_label="Gemma" ;;
@@ -173,18 +183,72 @@ ocr_region_to_clipboard() {
   rc=$?
   err="$(cat "$err_file")"
   rm -f "$err_file"
-  if [[ $rc -ne 0 ]]; then
-    notify-send -a omarchy-menu -u normal "${engine_label} OCR failed" "${err:-(no error message)}"
-    return
-  fi
-  if [[ -z "$text" ]]; then
-    notify-send -a omarchy-menu -u normal "${engine_label} OCR — empty result" \
-      "The model recognized no text. Try a tighter region around actual content, or another engine."
+  if [[ $rc -ne 0 ]] || [[ -z "$text" ]]; then
+    _ocr_handle_failure "$engine" "$engine_label" "$rc" "$err" "$text"
     return
   fi
   printf '%s' "$text" | wl-copy
   notify-send -a omarchy-menu -u low -t 2500 "󰴑    Copied (${engine_label})" \
     "$(printf '%s' "$text" | head -c 80)…"
+}
+
+# Shared failure UX for OCR. Distinguishes timeout / empty / other-error
+# and recommends a concrete alternative engine derived from the bench
+# results (tests/ocr-bench, 2026-05-09):
+#   chandra fails  → Hybrid (0.952 recall vs chandra's 0.794, faster, never empty)
+#   gemma fails    → Hybrid (handles dense layouts gemma fumbles)
+#   surya fails    → Hybrid (already includes surya text + gemma cleanup)
+#   hybrid fails   → Qwen   (only engine with higher recall in our bench)
+#   granite fails  → Hybrid (untested, default to best general option)
+#   qwen fails     → Hybrid (qwen rarely fails; if it does, Hybrid is closest)
+#
+# Adds a notify-send action that re-fires the OCR with the suggested engine,
+# so retry is one click. The retry path uses the SAME captured region — we
+# can't replay slurp+grim non-interactively, so retry re-prompts for region.
+_ocr_handle_failure() {
+  local engine="$1" engine_label="$2" rc="$3" err="$4" text="$5"
+  local suggest_engine suggest_label reason
+  case "$engine" in
+    chandra) suggest_engine=hybrid; suggest_label="Hybrid" ;;
+    gemma)   suggest_engine=hybrid; suggest_label="Hybrid" ;;
+    surya)   suggest_engine=hybrid; suggest_label="Hybrid" ;;
+    hybrid)  suggest_engine=qwen;   suggest_label="Qwen" ;;
+    granite) suggest_engine=hybrid; suggest_label="Hybrid" ;;
+    qwen)    suggest_engine=hybrid; suggest_label="Hybrid" ;;
+    *)       suggest_engine=hybrid; suggest_label="Hybrid" ;;
+  esac
+  if [[ $rc -ne 0 ]]; then
+    # Empty stderr + non-zero rc = daemon hit lmstudio_timeout_s (default 90s)
+    # without specific error path. Stay explicit.
+    if [[ -z "$err" ]]; then
+      reason="Timed out (90s daemon limit). ${engine_label} may not be loaded in LM Studio yet, or this image is too large."
+    else
+      reason="$err"
+    fi
+  else
+    reason="The model returned no text. ${engine_label} can mis-recognize dense or unusual content."
+  fi
+  local action
+  action="$(notify-send -a omarchy-menu -u normal -t 12000 \
+    -A "retry=󰑐 Retry with ${suggest_label}" \
+    "${engine_label} OCR — no output" \
+    "${reason} Try ${suggest_label} instead?" 2>/dev/null || true)"
+  if [[ "$action" == "retry" ]]; then
+    notify-send -a omarchy-menu -u low -t 1500 "${suggest_label} OCR — drag a region…"
+    local rtext rerr rrc
+    local rerr_file; rerr_file="$(mktemp)"
+    rtext="$(hyprwhspr-ai ocr --region --engine "$suggest_engine" 2>"$rerr_file")"
+    rrc=$?
+    rerr="$(cat "$rerr_file")"; rm -f "$rerr_file"
+    if [[ $rrc -ne 0 ]] || [[ -z "$rtext" ]]; then
+      notify-send -a omarchy-menu -u normal "${suggest_label} OCR also failed" \
+        "${rerr:-(no error message)} — try Tesseract or a different region."
+      return
+    fi
+    printf '%s' "$rtext" | wl-copy
+    notify-send -a omarchy-menu -u low -t 2500 "󰴑    Copied (${suggest_label})" \
+      "$(printf '%s' "$rtext" | head -c 80)…"
+  fi
 }
 
 # Open the most recent screenshot in satty for annotation. No AI involved —

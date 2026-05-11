@@ -135,12 +135,12 @@
         }
     },
     "custom/aiquota": {
-        "exec": "$HOME/.config/waybar/aiquota-wrap.sh",
+        "exec": "$HOME/code/aiquota/share/waybar/aiquota-wrap.sh",
         "return-type": "json",
         "interval": 30,
         "signal": 9,
         "tooltip": true,
-        "on-click": "$HOME/.config/waybar/aiquota-cycle.sh",
+        "on-click": "$HOME/code/aiquota/share/waybar/aiquota-cycle.sh",
         "on-click-right": "xdg-terminal-exec $HOME/code/aiquota/target/release/aiquota tui"
     },
     "custom/agents": {

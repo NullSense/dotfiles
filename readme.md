@@ -32,6 +32,7 @@ github.com/NullSense/dotfiles                   ← THIS IS THE ONLY REPO
 ├── dot_tmux.conf      chezmoi → ~/.tmux.conf
 ├── private_dot_ssh/   chezmoi → ~/.ssh/                (mode 700; private_ prefix preserves permissions)
 ├── bin/               chezmoi → ~/bin/                 user shell scripts deployed to PATH (agent-isolated, full-reload, restart-waybar, …)
+├── dot_git-template/  chezmoi → ~/.git-template/       global git hooks: pre-commit (gitleaks + infisical) + pre-push (trufflehog --results=verified)
 ├── root/              chezmoi → /root/ (system files; opt-in)
 │
 ├── .chezmoiignore                              tells chezmoi which paths to NOT deploy (e.g. arch-install/)
@@ -144,7 +145,77 @@ Self-test: `~/bin/agent-isolated --self-test` runs 26 verifications (20 negative
 
 ### 3. Defense in depth — `deny-secrets` PreToolUse hook
 
-Lives at `dot_claude/hooks/deny-secrets.sh`. Pattern-matches every `Bash` tool call inside an agent and refuses ones that name known secret-extraction commands or paths (`rbw`, `bw`, `cat ~/.ssh`, `cat ~/.gnupg`, etc.). Caught a real incident on 2026-05-08 — see `the-night-an-ai-ate-my-home-directory.md`. The hook is redundant with the bwrap sandbox (the secrets aren't reachable from inside anyway), but layered defense costs nothing.
+Lives at `dot_claude/hooks/deny-secrets.sh`. Pattern-matches every `Bash`, `Read`, `Edit`, `Write`, `NotebookEdit`, `Glob`, and `Grep` tool call inside an agent and refuses ones that name known secret-extraction commands or paths (`rbw`, `bw`, `cat ~/.ssh`, `cat ~/.gnupg`, etc.). Caught a real incident on 2026-05-08 — see `the-night-an-ai-ate-my-home-directory.md`. The hook is redundant with the bwrap sandbox (the secrets aren't reachable from inside anyway), but layered defense costs nothing. **Claude-only** — see "Known gaps" below for the codex/opencode story.
+
+### 4. Secret scanning at commit & push time
+
+Global git template at `dot_git-template/hooks/` deploys event-driven scanners to **every git repo** on the machine (existing repos via `git init` retrofit; new ones via `git config --global init.templateDir`):
+
+| Hook | Tools | What it scans | Latency | Bypass |
+|---|---|---|---|---|
+| `pre-commit` | gitleaks + infisical scan, chained | staged diff only | <100ms | `git commit --no-verify` |
+| `pre-push` | trufflehog `--results=verified` | commits being pushed (range `${remote_sha}..${local_sha}`) | seconds (calls real provider APIs to verify keys are live) | `git push --no-verify` |
+
+Layer logic:
+- **gitleaks** (regex + entropy, 150 rules) — fast, catches the obvious patterns at commit time
+- **infisical scan** (gitleaks rules + their own) — complementary, runs alongside gitleaks at commit time
+- **trufflehog** — slower (verification calls AWS STS/GitHub/Stripe/etc. with the *found* key from your machine, never from a third party) — runs only at push time so latency is acceptable. `--results=verified` filters out regex false positives: a hit means a live credential, not a test fixture.
+
+Trufflehog gracefully no-ops if the binary is missing (`command -v` guard), so a broken install doesn't block pushes — gitleaks at commit time still applies.
+
+### 5. CVE visibility — `arch-audit-gtk` tray indicator
+
+System-tray indicator polling [security.archlinux.org](https://security.archlinux.org) (the official Arch Security Team tracker) every 2–6 hours with random jitter for privacy. Green = no known unpatched CVEs in installed packages; yellow/red = there are some. xdg-autostarts on login; pacman post-transaction hook re-checks after every upgrade. Package maintainer (`kpcyrd`) is an Arch + Debian + Alpine packager with a background in reproducible builds and supply-chain security.
+
+No timer, no logs to read, no email — purely passive visibility.
+
+### 6. Network / DNS layer — AdGuard via Tailscale + firewalld
+
+Three sub-layers; all cross-agent, none process-aware (which is fine because layer 2 above gives process-level FS isolation):
+
+```
+agent process → DNS via Tailscale MagicDNS (100.100.100.100) → AdGuard at router → filtered answer
+                ↓ if connection allowed
+                firewalld (host-level conn-state firewall, default-deny inbound)
+                ↓
+                public internet
+```
+
+Tested working: `dig @100.100.100.100 doubleclick.net` returns `0.0.0.0` (sinkholed); `dig @1.1.1.1 doubleclick.net` returns the real IP (control). Every device on the tailnet inherits this — phones, laptops, the OnePlus 8T homelab node.
+
+AdGuard additionally blocks DoH endpoints (`dns.google`, `cloudflare-dns.com`, `dns.quad9.net`, `mozilla.cloudflare-dns.com`) so apps attempting to bypass system DNS fall back to the system resolver and pick up your filter.
+
+**Why no OpenSnitch:** evaluated 2026-05-11, rejected. The nftables conflict with firewalld is real (issue #1393), the default-deny ask-on-every-connection flow breaks normal workflows, and the marginal value over (bwrap default-deny network) + (AdGuard) + (firewalld) is small. The leftover `inet filter`/`inet nat`/`inet mangle` tables from the brief install are dead and clear on reboot.
+
+**Why no third-party AI-agent firewalls:** evaluated 2026-05-11, all rejected as supply-chain risk. AgentWall, AgentShield, Rampart, Greywall, Pipelock/PipeLab, mcp-firewall — all were 2-3 months old at evaluation, single-developer, no third-party audits. Installing any of them would give an unknown party a proxy in front of every agent's traffic. Net-negative for security.
+
+### Ad-hoc audit tools (manual, on demand)
+
+| Tool | Use case | Command |
+|---|---|---|
+| `mitmproxy` | inspect what an agent actually sends during a session | `mitmproxy --mode local --intercept process=claude` |
+| `trufflehog filesystem` | one-off verified-secrets scan of a project tree | `trufflehog filesystem ~/projects --results=verified` |
+| `infisical scan` | per-project / per-workflow secret scan | `infisical scan` (in repo) |
+| `arch-audit` | full CVE list with rule details | `arch-audit --show-cve` |
+
+None of these run on a timer. They exist for incident response and curiosity.
+
+### What runs automatically vs manually
+
+| Layer | Mode | Trigger |
+|---|---|---|
+| Bitwarden SSH agent | automatic | always-on, GUI-managed; 5min vault timeout |
+| `agent-isolated` bwrap shim | automatic | every `claude` / `codex` / `opencode` invocation via PATH |
+| `deny-secrets` hook | automatic | every Bash / Read / Edit / Write / Glob / Grep tool call (Claude only) |
+| gitleaks + infisical pre-commit | automatic | every `git commit` (all repos with template hook) |
+| trufflehog pre-push | automatic | every `git push` (all repos with template hook) |
+| arch-audit-gtk | automatic | 2–6h jittered + pacman post-tx hook |
+| AdGuard | automatic | every DNS lookup on tailnet |
+| firewalld | automatic | always-on |
+| mitmproxy | manual | when you want to audit a session |
+| trufflehog filesystem | manual | quarterly or post-incident |
+| infisical scan | manual | per-workflow |
+| `arch-audit-gtk` deep dive | manual | when tray pill goes yellow/red |
 
 ### Verifying the stack
 
@@ -153,4 +224,22 @@ Lives at `dot_claude/hooks/deny-secrets.sh`. Pattern-matches every `Bash` tool c
 stat -c '%a %n' ~/.bitwarden-ssh-agent.sock # expect 700
 ssh-add -l                                  # expect your keys listed
 git log --show-signature -1                 # expect "Good signature" via SSH
+ls -la ~/.git-template/hooks/               # expect pre-commit + pre-push, both +x
+gitleaks version && infisical --version     # both pre-commit scanners present
+trufflehog --version                        # pre-push scanner present
+dig @100.100.100.100 doubleclick.net        # expect 0.0.0.0 (AdGuard sinkhole)
+pgrep -a arch-audit-gtk                     # expect process running (or check tray)
 ```
+
+### Known gaps (as of 2026-05-11)
+
+| Gap | Impact | Status |
+|---|---|---|
+| Codex / OpenCode lack a `deny-secrets` equivalent hook | bwrap covers FS isolation but no in-agent regex deny like Claude's hook | open; non-trivial — Codex has `~/.codex/config.toml` sandbox config but no simple regex-deny path; OpenCode plugin system differs |
+| MCP servers not unified across Claude / Codex / OpenCode / Hermes | each has its own MCP config file; drift possible | open; chezmoi-template approach discussed, not yet implemented |
+| MCP server periodic scan with [MCP-Scan](https://github.com/invariantlabs-ai/mcp-scan) | tool-poisoning / rug-pull detection not automated | deferred; run `npx @invariant-ai/mcp-scan` ad-hoc when adding a new MCP server |
+| AUR `trufflehog-bin` PKGBUILD wrapper path bug | requires `sed` fix or pacman hook to re-patch after upgrades | mitigated by local pacman hook; bug to be reported to maintainer |
+| `mitmproxy` CA cert not installed in any trust store | first-time use will fail TLS until cert is added | deferred; only matters when actually using mitmproxy |
+| `StartLimitIntervalSec=` in waybar.service / dropdown-terminal.service | should be in `[Unit]` not `[Service]`; silently ignored where it is | known; 1-line fix per file |
+| Pre-existing `MM` drift on `dot_claude/CLAUDE.md` | both source and target diverged; risk of silent overwrite on next `chezmoi apply` | open; resolve before next apply per the rules in CLAUDE.md |
+| `~/.gnupg` cleanup | conditional rm-rf never confirmed | open; check `ls ~/.gnupg/` |

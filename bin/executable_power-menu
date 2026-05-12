@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Power menu — walker dmenu picker for lock/suspend/logout/restart/shutdown.
+# Replaces wlogout. Modeled on omarchy-menu's show_system_menu() but
+# self-contained (omarchy-system-* scripts aren't installed here).
+#
+# Walker invocation mirrors omarchy: --width 295 --minheight 1 --maxheight 630
+# so the picker visually matches the rest of the omarchy/walker UX.
+
+set -euo pipefail
+
+# Single-instance: if walker is already showing this menu, toggle it off.
+if pgrep -fa 'walker --dmenu' | grep -q -- 'System…'; then
+    pkill -f 'walker --dmenu' || true
+    exit 0
+fi
+
+options="  Lock\n󰒲  Suspend\n󰍃  Logout\n󰜉  Restart\n󰐥  Shutdown"
+
+choice=$(printf '%b' "$options" | launch-walker \
+    --dmenu --width 295 --minheight 1 --maxheight 630 -p 'System…' 2>/dev/null) || exit 0
+
+case "$choice" in
+    *Lock*)     exec hyprlock ;;
+    *Suspend*)  exec systemctl suspend ;;
+    *Logout*)   exec hyprctl dispatch exit ;;
+    *Restart*)  exec systemctl reboot ;;
+    *Shutdown*) exec systemctl poweroff ;;
+esac

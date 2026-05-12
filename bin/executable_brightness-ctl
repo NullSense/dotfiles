@@ -1,0 +1,100 @@
+#!/usr/bin/env sh
+# Unified brightness controller — fast path.
+#
+# Synchronous (returns in ~5ms):
+#   1. clamp the target to [0, 100]
+#   2. write it to the state file
+#   3. signal waybar so the pill repaints instantly
+#
+# Asynchronous (background, single-instance via flock):
+#   4. drive DDC/CI on every monitor in parallel
+#   5. when the I²C round-trip returns, re-read the state file
+#      — if the user scrolled in the meantime, apply the new target;
+#      otherwise exit. This collapses N rapid scrolls into ~one DDC call
+#      per panel-response cycle (~500–1000 ms) instead of queuing N of them.
+#
+# Caching: `ddcutil detect` costs ~330ms per call and the bus IDs are stable
+# until you replug a monitor. We cache the detected display numbers in
+# $XDG_RUNTIME_DIR; run `brightness-ctl flush` after a docking change.
+
+set -eu
+
+F="${XDG_RUNTIME_DIR:-/tmp}/brightness"
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/brightness.lock"
+CACHE="${XDG_RUNTIME_DIR:-/tmp}/ddc-displays"
+MIN=0
+MAX=100
+SIGNAL_NUM=8   # waybar custom/brightness has "signal": 8
+
+[ -f "$F" ] || echo 100 > "$F"
+cur=$(cat "$F")
+
+force=0
+case "${1:-get}" in
+    get)
+        printf '%s' "$cur"
+        exit 0
+        ;;
+    flush)
+        rm -f "$CACHE"
+        echo "ddc-displays cache cleared"
+        exit 0
+        ;;
+    resync)
+        # Hotplug recovery: refresh display cache and force-apply the current
+        # state value to every monitor (including any that just appeared).
+        rm -f "$CACHE"
+        new="$cur"
+        force=1
+        ;;
+    +*) new=$((cur + ${1#+})) ;;
+    -*) new=$((cur - ${1#-})) ;;
+    *)  new="$1" ;;
+esac
+
+# Clamp.
+[ "$new" -lt "$MIN" ] && new="$MIN"
+[ "$new" -gt "$MAX" ] && new="$MAX"
+
+# No-op fast exit (skipped for resync, where we want to re-push to all panels).
+if [ "$force" = 0 ] && [ "$new" = "$cur" ]; then
+    exit 0
+fi
+
+# State + UI update happen first so the pill never lags behind the keypress.
+echo "$new" > "$F"
+pkill -RTMIN+"$SIGNAL_NUM" waybar 2>/dev/null || true
+
+# Centred OSD overlay (matches volume keys' UX). Skip for `resync` since
+# that's a non-interactive hotplug recovery, not a user gesture.
+if [ "$force" = 0 ] && command -v omarchy-swayosd-brightness >/dev/null 2>&1; then
+    omarchy-swayosd-brightness "$new" >/dev/null 2>&1 &
+fi
+
+# Detect monitors once (cache survives until `flush` or reboot).
+if [ ! -s "$CACHE" ]; then
+    ddcutil detect --terse 2>/dev/null \
+        | awk '/^Display [0-9]+$/{print $2}' \
+        > "$CACHE"
+fi
+
+# Background worker: single-instance, coalescing.
+#   `flock -n` → if a worker is already running, exit; that worker will pick up
+#   our latest state on its next loop iteration. No pile-up of stale calls.
+(
+    flock -n 9 || exit 0
+    applied=""
+    while :; do
+        wanted=$(cat "$F" 2>/dev/null || echo 100)
+        [ "$wanted" = "$applied" ] && exit 0
+        for d in $(cat "$CACHE"); do
+            ddcutil --display "$d" --noverify --sleep-multiplier 0.1 \
+                setvcp 10 "$wanted" >/dev/null 2>&1 &
+        done
+        wait
+        applied="$wanted"
+    done
+) 9>"$LOCK" </dev/null >/dev/null 2>&1 &
+disown 2>/dev/null || true
+
+exit 0

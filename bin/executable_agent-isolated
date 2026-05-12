@@ -24,6 +24,16 @@
 #                   injection on outbound HTTPS via the host's agent-vault.
 #                   Agent talks to APIs but never sees upstream tokens.
 #
+# Default-on (low-risk, broadly useful):
+#   plannotator     Bind ~/.{local/share,config,cache}/plannotator so the
+#                   agent can run `plannotator last` / `plannotator review`
+#                   from inside the sandbox. Sets BROWSER=/usr/bin/echo so
+#                   plannotator prints its URL instead of trying xdg-open
+#                   (which would need dbus, which stays hidden). Open the
+#                   printed URL manually in your existing browser. Opt out
+#                   with --no-plannotator if you want zero plannotator
+#                   surface in this invocation.
+#
 # Architecture and rationale documented in:
 #   ~/.claude/projects/-home-nullsense/memory/reference_agent_isolation.md
 #   ~/.claude/plans/okay-can-you-please-cozy-meteor.md (original design)
@@ -60,18 +70,25 @@ ALLOW_SSH=0
 ALLOW_GPG=0
 ALLOW_RBW=0
 ALLOW_AGENT_VAULT=0
+# Default-on: plannotator's binds are narrow (3 dirs under $HOME, no
+# secrets), broadly useful (review / annotate flows), and harmless when
+# the binary isn't installed. Flip with --no-plannotator for the rare
+# case where you want a completely surface-minimized run.
+ALLOW_PLANNOTATOR=1
 DRY_RUN=0
 SELF_TEST=0
 AGENT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --ssh)         ALLOW_SSH=1; shift ;;
-        --gpg)         ALLOW_GPG=1; shift ;;
-        --rbw)         ALLOW_RBW=1; shift ;;
-        --agent-vault) ALLOW_AGENT_VAULT=1; shift ;;
-        --dry-run)     DRY_RUN=1; shift ;;
-        --self-test)   SELF_TEST=1; AGENT="sh"; shift; break ;;
+        --ssh)            ALLOW_SSH=1; shift ;;
+        --gpg)            ALLOW_GPG=1; shift ;;
+        --rbw)            ALLOW_RBW=1; shift ;;
+        --agent-vault)    ALLOW_AGENT_VAULT=1; shift ;;
+        --plannotator)    ALLOW_PLANNOTATOR=1; shift ;;  # accepted for symmetry
+        --no-plannotator) ALLOW_PLANNOTATOR=0; shift ;;
+        --dry-run)        DRY_RUN=1; shift ;;
+        --self-test)      SELF_TEST=1; AGENT="sh"; shift; break ;;
         -h|--help)
             sed -n '2,30p' "$0" | sed 's/^# \?//'
             exit 0 ;;
@@ -386,6 +403,33 @@ if (( ALLOW_AGENT_VAULT )); then
         ARGS+=( --setenv AGENT_VAULT_SESSION_TOKEN "$AGENT_VAULT_SESSION_TOKEN" )
     [[ -n "${AGENT_VAULT_VAULT:-}" ]] && \
         ARGS+=( --setenv AGENT_VAULT_VAULT "$AGENT_VAULT_VAULT" )
+fi
+
+# --plannotator: bind plannotator's three state dirs so the agent can
+# invoke `plannotator last` / `plannotator review` from inside the
+# sandbox. dbus and the desktop's default-app registry stay HIDDEN —
+# we just point $BROWSER at a stub that prints the URL for the human
+# to open manually in their existing browser tab. Network is already
+# shared (--share-net above) so the localhost server plannotator
+# starts is reachable from the host's browser without further wiring.
+#
+# Surface added: three RW binds under $HOME, nothing else. No dbus,
+# no display weakening, no socket exposure beyond the loopback already
+# reachable for any --share-net agent.
+if (( ALLOW_PLANNOTATOR )); then
+    for _d in "$HOME/.local/share/plannotator" \
+              "$HOME/.config/plannotator" \
+              "$HOME/.cache/plannotator"; do
+        # Create the host-side dir if missing so plannotator's first
+        # run doesn't fail before it can write its state.
+        mkdir -p "$_d"
+        ARGS+=( --bind "$_d" "$_d" )
+    done
+    unset _d
+    # Stub "browser" — when plannotator (or anything else inside the
+    # sandbox) tries to open a URL, print it instead. The user opens
+    # it manually in the existing host-side browser session.
+    ARGS+=( --setenv BROWSER "/usr/bin/echo" )
 fi
 
 # chdir

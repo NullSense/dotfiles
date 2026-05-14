@@ -19,7 +19,7 @@ unfocused-split-opacity = 0.85
 clipboard-trim-trailing-spaces = true
 clipboard-paste-protection = true
 
-scrollback-limit = 100000
+scrollback-limit = 104857600
 copy-on-select = true
 
 shell-integration = zsh
@@ -39,4 +39,4 @@ quit-after-last-window-closed = true
 # is measurably softer for well-hinted monospaces. `hinting` re-enables full
 # native hinting; the rest (no-force-autohint, no-autohint, light) became
 # defaults in 1.3, but pinning `hinting` is forwards-safe.
-freetype-load-flags = hinting
+freetype-load-flags = no-force-autohint

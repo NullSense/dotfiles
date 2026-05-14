@@ -345,6 +345,7 @@ case "$AGENT" in
     opencode)
         [[ -n "${OPENROUTER_API_KEY:-}" ]] && ARGS+=( --setenv OPENROUTER_API_KEY "$OPENROUTER_API_KEY" )
         [[ -n "${OPENAI_API_KEY:-}"     ]] && ARGS+=( --setenv OPENAI_API_KEY    "$OPENAI_API_KEY" )
+        [[ -n "${OPENCODE_API_KEY:-}"   ]] && ARGS+=( --setenv OPENCODE_API_KEY  "$OPENCODE_API_KEY" )
         ;;
 esac
 

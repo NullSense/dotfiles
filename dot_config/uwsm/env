@@ -16,3 +16,11 @@
 # to the graphical session only — Xorg/login sessions are unaffected.
 
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/omarchy/bin:$HOME/bin:$HOME/.bun/bin:$HOME/.local/share/pnpm:$PATH"
+
+# OMARCHY_PATH is NOT defined here on purpose — `uwsm aux prepare-env` is a
+# Type=oneshot that runs once at session start. wayland-wm-app-daemon.service
+# (gateway for `uwsm app --` → elephant → omarchy-theme-set) snapshots its
+# env at that moment, so after-the-fact edits don't propagate to running
+# services until next login. OMARCHY_PATH lives in
+# ~/.config/environment.d/omarchy.conf instead, which systemd --user reads at
+# user-manager startup AND exports to D-Bus, reaching every spawn path.

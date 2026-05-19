@@ -12,6 +12,7 @@ context7
 Cortiq
 Dasha
 dokploy
+.env
 Exa
 Gemma
 helium

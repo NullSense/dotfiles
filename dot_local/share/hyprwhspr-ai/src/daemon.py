@@ -120,7 +120,14 @@ class Daemon:
     async def _keepalive_loop(self) -> None:
         """Ping LM Studio when activity has been idle longer than the
         threshold. Skips when activity is recent (the user is dictating
-        often enough to keep TTL warm naturally)."""
+        often enough to keep TTL warm naturally).
+
+        Disabled entirely when keepalive_check_interval_s <= 0: the
+        daemon then never auto-pings LM Studio and the model only
+        loads in response to actual rewrite/vision/translate calls."""
+        if self._config.keepalive_check_interval_s <= 0:
+            log.info("keepalive disabled (interval<=0); model loads on demand only")
+            return
         import time as _time
         while True:
             await asyncio.sleep(self._config.keepalive_check_interval_s)

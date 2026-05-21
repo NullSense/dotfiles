@@ -1,8 +1,0 @@
-[Unit]
-Description=Keep the LM Studio rewrite model hot for hyprwhspr
-After=hyprwhspr.service
-Wants=hyprwhspr.service
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/hyprwhspr-warmup

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# llama-server wrapper for Qwen3.6-35B-A3B APEX-MTP
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, gfx1031) + 64GB DDR5-5800
+# Model:    mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF (I-Quality, ~24GB)
+# Features: MTP self-spec + ngram-map-k4v chained, 128k ctx, MoE CPU offload, persistent slot cache
+set -euo pipefail
+
+# RDNA2 gfx1031 -> gfx1030 override. ROCm 7.2.3 has native gfx1031 but llama.cpp-hip
+# may still be built against gfx1030; the override is a safe no-op when not needed.
+export HSA_OVERRIDE_GFX_VERSION=10.3.0
+export GPU_TARGETS=gfx1030
+
+# ROCm 7.2.3 advertises the CPU as a HIP fallback device (ROCm1). --device ROCm0
+# below pins to the real GPU, but also hide it from device discovery so --fit / device
+# routing can never accidentally land kernels on the CPU-as-HIP path.
+export ROCR_VISIBLE_DEVICES=0
+export HIP_VISIBLE_DEVICES=0
+
+MODEL="${MODEL:-$HOME/.lmstudio/models/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf}"
+TEMPLATE="${TEMPLATE:-$HOME/.config/llama-cpp/qwen36-merged-fakezeta-allanchan-froggeric.jinja}"
+SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots}"
+PORT="${PORT:-8080}"
+mkdir -p "$SLOTS_DIR"
+
+# MODE selects sampler + reasoning. `reasoning auto` lets the template/client decide;
+# `on` and `off` are explicit. preserve_thinking is still a template-kwarg (no CLI flag).
+MODE="${MODE:-code}"
+case "$MODE" in
+  code)   TEMP=0.6; TOPP=0.95; PRES=0.0; REASON=on;  PRESERVE=true  ;;  # precise coding (Qwen-recommended)
+  chat)   TEMP=1.0; TOPP=0.95; PRES=1.5; REASON=on;  PRESERVE=false ;;  # general tasks
+  fast)   TEMP=0.7; TOPP=0.8;  PRES=1.5; REASON=off; PRESERVE=false ;;  # non-thinking, low latency
+  *) echo "MODE must be code | chat | fast"; exit 1 ;;
+esac
+
+# MoE CPU offload sizing for 12 GB VRAM + ~24 GB Q4 MoE:
+#   Routed experts ~75% of model (~18 GB / 40 layers ≈ 450 MB/layer).
+#   Budget: 12 GB VRAM - 6 GB non-MoE - 0.75 GB KV (Q8 @ 128k) - 1.5 GB compute = ~3.7 GB
+#   → keep experts of ~6-8 layers on GPU → NCPUMOE 33 (32-34 sweet spot).
+#   Override at the CLI: NCPUMOE=30 ~/bin/llama-qwen36
+NCPUMOE="${NCPUMOE:-33}"
+
+exec llama-server \
+  --model "$MODEL" \
+  --alias "qwen3.6-35b-a3b-apex" \
+  --chat-template-file "$TEMPLATE" \
+  --host 127.0.0.1 --port "$PORT" \
+  --device ROCm0 \
+  --fit off \
+  --n-gpu-layers 99 \
+  --n-cpu-moe "$NCPUMOE" \
+  --ctx-size 131072 \
+  --keep -1 \
+  --cache-reuse 256 \
+  --slot-save-path "$SLOTS_DIR" \
+  --slot-prompt-similarity 0.5 \
+  --flash-attn on \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --batch-size 2048 \
+  --ubatch-size 512 \
+  --threads 8 \
+  --threads-batch 8 \
+  --parallel 1 \
+  --no-mmap \
+  --temp "$TEMP" \
+  --top-p "$TOPP" \
+  --top-k 20 \
+  --min-p 0.0 \
+  --presence-penalty "$PRES" \
+  --repeat-penalty 1.0 \
+  --jinja \
+  --reasoning "$REASON" \
+  --chat-template-kwargs "{\"preserve_thinking\":$PRESERVE}" \
+  --spec-type draft-mtp \
+    --spec-draft-n-max 2 \
+    --spec-draft-p-min 0.0 \
+  --spec-type ngram-map-k4v \
+    --spec-ngram-map-k4v-size-n 16 \
+    --spec-ngram-map-k4v-size-m 24 \
+    --spec-ngram-map-k4v-min-hits 1 \
+  --metrics

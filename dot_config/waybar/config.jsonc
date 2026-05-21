@@ -135,13 +135,20 @@
         }
     },
     "custom/aiquota": {
-        "exec": "$HOME/code/aiquota/target/release/aiquota waybar",
+        // Wrapped via aiquota-wrap.sh so any failure (binary missing, timeout,
+        // panic, non-JSON output) surfaces as a "⚠ aiquota" pill with the
+        // error in the tooltip — instead of waybar silently dropping the
+        // module (which is what happens when exec fails or prints garbage).
+        "exec": "$HOME/.config/waybar/aiquota-wrap.sh",
         "return-type": "json",
         "interval": 30,
         "signal": 9,
+        "format": "{}",
         "tooltip": true,
-        "on-click": "$HOME/code/aiquota/target/release/aiquota cycle",
-        "on-click-right": "xdg-terminal-exec $HOME/code/aiquota/target/release/aiquota tui"
+        "escape": false,
+        "markup": "pango",
+        "on-click": "$HOME/Programming/aiquota/target/release/aiquota cycle",
+        "on-click-right": "xdg-terminal-exec $HOME/Programming/aiquota/target/release/aiquota tui"
     },
     "custom/agents": {
         "exec": "$HOME/.config/waybar/agent-attention.sh",

@@ -1,4 +1,7 @@
-@import "/usr/lib/hyprwhspr/config/waybar/hyprwhspr-style.css";
+/* hyprwhspr upstream CSS (was @import "/usr/lib/hyprwhspr/config/waybar/hyprwhspr-style.css")
+ * is NOT imported here — the package is not reliably installed and this file
+ * already contains a full gruvbox-tuned override below (search "#custom-hyprwhspr").
+ * Do NOT re-add the @import; waybar treats a failed CSS import as a fatal error. */
 /*
  * Waybar — Gruvbox Dark Hard, Omarchy-inspired refresh.
  *

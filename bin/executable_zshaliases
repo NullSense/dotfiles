@@ -94,6 +94,12 @@ alias gpl='git pull'
 alias cleanup='sudo pacman -Sc && paru -Sc'
 alias orphans='sudo pacman -Qtdq | sudo pacman -Rns -'
 
+# Build AUR packages in a clean chroot (Arch-recommended; see
+# wiki "Building in a clean chroot"). Isolates the build from host
+# contamination — notably mise's global python (3.13) shadowing system
+# python (3.14) during makepkg, which breaks AUR python builds. Needs devtools.
+alias paur='paru --chroot'
+
 # NOTE: claude/codex/opencode are NOT aliased here. dot_zshrc defines them
 # as shell functions (after sourcing this file) that route through
 # ~/bin/agent-isolated for OS-level bubblewrap isolation. To get the old

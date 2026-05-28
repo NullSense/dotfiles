@@ -1,10 +1,11 @@
 [user]
     email = matas234@gmail.com
     name = NullSense
-	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII2uFCH4EpEwjdYLXxFs9gh7idl8ErFa3mpTg4cq+xpz Arch NullSense ed25519
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJK+IxBkjVonY3gehBXpbtqCvZINMlc5LlfNNIoLwddp git signing key
 
 [init]
     defaultBranch = main
+	templateDir = /home/nullsense/.git-template
 
 [core]
     excludesfile = ~/.gitignore
@@ -94,5 +95,13 @@
 	format = ssh
 [gpg "ssh"]
 	allowedSignersFile = /home/nullsense/.config/git/allowed_signers
-[url "git@github.com:"]
-	insteadOf = https://github.com/
+    program = /home/nullsense/bin/git-sign-ssh
+[url "https://github.com/"]
+    insteadOf = git@github.com:
+    insteadOf = ssh://git@github.com/
+[credential "https://github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential

@@ -1,0 +1,27 @@
+[Unit]
+Description=Dedicated ssh-agent holding ONLY the git commit-signing key
+Documentation=file://%h/dotfiles/arch-install/AGENTS.md
+# A minimal, separate ssh-agent that holds a sign-only ed25519 key (NOT the
+# Bitwarden auth key, NOT registered as an authorized key on any host/GitHub).
+# agent-isolated binds THIS socket into sandboxes by default, so agents can
+# make signed commits without exposing an auth-capable key. The full Bitwarden
+# agent (server auth / SSH push) stays behind the --ssh escape hatch.
+# Headless (no GUI dep), survives Hyprland restarts — same rationale as
+# agent-vault.service.
+
+[Service]
+Type=simple
+Environment=SSH_AUTH_SOCK=%t/git-sign-agent.sock
+# Recreate the socket cleanly on (re)start.
+ExecStartPre=-/usr/bin/rm -f %t/git-sign-agent.sock
+ExecStart=/usr/bin/ssh-agent -D -a %t/git-sign-agent.sock
+# Load the sign-only key. Must be passphraseless (autonomous, non-interactive);
+# its safety comes from being sign-only + never an authorized key, not a
+# passphrase. Generate with:
+#   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_sign -C "git signing key" -N ''
+ExecStartPost=/usr/bin/ssh-add %h/.ssh/id_ed25519_sign
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

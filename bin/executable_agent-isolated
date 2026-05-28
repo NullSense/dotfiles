@@ -281,23 +281,25 @@ if (( WORKSPACE_BIND )); then
     ARGS+=( --bind "$WORKSPACE" "$WORKSPACE" )
 fi
 
-# --dotfiles: flip the config surface to RW so the agent can manage dotfiles
-# (chezmoi source + ~/.config + $HOME rc files + ~/bin) and run the
-# edit-source → `chezmoi apply` loop in-sandbox. These RW binds go BEFORE the
-# secret masks (3), so the masks still re-hide every secret child afterwards:
-# config-writable, secrets still invisible — NOT *-raw. chezmoi is bound RW
-# here and its SECRETS.md + private_* are selectively re-masked in (3).
-if (( ALLOW_DOTFILES )); then
-    ARGS+=(
-        --bind "$CHEZMOI_ROOT" "$CHEZMOI_ROOT"
-        --bind "$HOME/.config" "$HOME/.config"
-        --bind "$HOME/bin"     "$HOME/bin"
-    )
-    for _f in .zshrc .zshenv .bashrc .gitconfig .tmux.conf .vimrc .profile .envrc; do
-        [[ -e "$HOME/$_f" ]] && ARGS+=( --bind "$HOME/$_f" "$HOME/$_f" )
-    done
-    unset _f
-fi
+# Config surface (rw, DEFAULT-ON as of 2026-05-28). Agents can edit dotfiles +
+# run the edit-source → `chezmoi apply` loop in-sandbox. Previously gated behind
+# --dotfiles and otherwise masked as an empty tmpfs — which made agents' chezmoi
+# edits silently vanish on exit (the recurring "agents get confused" bug). Now
+# always RW. These binds go BEFORE the secret masks (3), so every secret child
+# is re-hidden afterwards — config-writable, secrets still invisible (NOT *-raw).
+# ~/.local/{bin,share} are included so `chezmoi apply` can write its targets.
+# (--dotfiles is now a no-op kept for back-compat.)
+ARGS+=(
+    --bind-try "$CHEZMOI_ROOT"      "$CHEZMOI_ROOT"
+    --bind-try "$HOME/.config"      "$HOME/.config"
+    --bind-try "$HOME/bin"          "$HOME/bin"
+    --bind-try "$HOME/.local/bin"   "$HOME/.local/bin"
+    --bind-try "$HOME/.local/share" "$HOME/.local/share"
+)
+for _f in .zshrc .zshenv .bashrc .gitconfig .tmux.conf .vimrc .profile .envrc; do
+    [[ -e "$HOME/$_f" ]] && ARGS+=( --bind "$HOME/$_f" "$HOME/$_f" )
+done
+unset _f
 
 # (3) Secret masks — THE security boundary under the read floor. The floor
 # made all of $HOME readable; these overlays carve the secrets back out, so
@@ -310,22 +312,16 @@ fi
 mask_dir()  { [[ -e "$1" ]] && ARGS+=( --tmpfs "$1" ); return 0; }
 mask_file() { [[ -e "$1" ]] && ARGS+=( --ro-bind /dev/null "$1" ); return 0; }
 
-# chezmoi source secrets. Default: mask the WHOLE source tree (the agent never
-# needs the *source* — deployed targets under $HOME stay readable via the
-# floor — and one tmpfs can't be defeated by a new private_* slipping past a
-# selective filter). With --dotfiles the tree is bound RW above, so instead
-# re-mask just the secret-bearing entries: SECRETS.md + every private_* at any
-# depth (dirs → tmpfs, files → /dev/null).
-if (( ALLOW_DOTFILES )); then
-    mask_file "$CHEZMOI_ROOT/SECRETS.md"
-    while IFS= read -r _p; do
-        if [[ -d "$_p" ]]; then ARGS+=( --tmpfs "$_p" )
-        else ARGS+=( --ro-bind /dev/null "$_p" ); fi
-    done < <(find "$CHEZMOI_ROOT" -name 'private_*' -prune 2>/dev/null)
-    unset _p
-else
-    mask_dir "$CHEZMOI_ROOT"
-fi
+# chezmoi source secrets. The source tree is RW-bound above (config surface),
+# so re-mask just the secret-bearing entries: SECRETS.md + every private_* /
+# encrypted_* at any depth (dirs → tmpfs, files → /dev/null). Replaces the old
+# wholesale-tmpfs mask that made agents' chezmoi edits silently vanish.
+mask_file "$CHEZMOI_ROOT/SECRETS.md"
+while IFS= read -r _p; do
+    if [[ -d "$_p" ]]; then ARGS+=( --tmpfs "$_p" )
+    else ARGS+=( --ro-bind /dev/null "$_p" ); fi
+done < <(find "$CHEZMOI_ROOT" \( -name 'private_*' -o -name 'encrypted_*' \) -prune 2>/dev/null)
+unset _p
 
 # Home-level credential stores + sensitive caches.
 for _m in .ssh .gnupg .aws .kube .docker .password-store .agent-vault \
@@ -397,6 +393,22 @@ case "$AGENT" in
         [[ -n "${OPENCODE_API_KEY:-}"   ]] && ARGS+=( --setenv OPENCODE_API_KEY  "$OPENCODE_API_KEY" )
         ;;
 esac
+
+# Default signing agent: bind the sign-only ssh-agent socket
+# (git-sign-agent.service) and point SSH_AUTH_SOCK at it, so agents make SIGNED
+# commits with no flag. NOT the Bitwarden agent — this key can't auth anywhere
+# (registered on GitHub as a Signing key only, not an authorized key). Guarded:
+# if the socket isn't up yet, SSH_AUTH_SOCK stays unset (signing then needs
+# --ssh). The --ssh hatch below runs later and overrides SSH_AUTH_SOCK with the
+# full Bitwarden agent when explicitly requested.
+_sign_sock="$XRD/git-sign-agent.sock"
+if [[ -S "$_sign_sock" ]]; then
+    ARGS+=(
+        --ro-bind "$_sign_sock" "$_sign_sock"
+        --setenv  SSH_AUTH_SOCK "$_sign_sock"
+    )
+fi
+unset _sign_sock
 
 # Escape-hatch: SSH agent (host: Bitwarden SSH agent at ~/.bitwarden-ssh-agent.sock)
 if (( ALLOW_SSH )); then
@@ -537,7 +549,6 @@ if (( SELF_TEST )); then
     run neg "bitwarden-ssh sock neutralized"   "test -S $HOME/.bitwarden-ssh-agent.sock && echo LIVE"
     run neg "SECRETS.md hidden"                "cat $CHEZMOI_ROOT/SECRETS.md"
     run neg "private_dot_ssh hidden"           "ls $CHEZMOI_ROOT/private_dot_ssh"
-    run neg "chezmoi source masked"            "ls $CHEZMOI_ROOT"
     run neg "~/.cache/cliphist hidden"         "ls $HOME/.cache/cliphist"
     run neg "~/.local/share/keyrings hidden"   "ls $HOME/.local/share/keyrings"
     run neg "~/.local/share/atuin hidden"      "ls $HOME/.local/share/atuin"
@@ -549,7 +560,7 @@ if (( SELF_TEST )); then
     run neg "rbw socket hidden"                "ls $XRD/rbw"
     run neg "dbus session hidden"              "ls $XRD/bus"
     run neg "agent-vault dir hidden"           "ls $HOME/.agent-vault"
-    run neg "SSH_AUTH_SOCK env scrubbed"       'test -n "$SSH_AUTH_SOCK" && echo SET'
+    run neg "full Bitwarden SSH agent not exposed" 'test "$SSH_AUTH_SOCK" = "$HOME/.bitwarden-ssh-agent.sock" && echo LEAK'
     run neg "BW_SESSION env scrubbed"          'test -n "$BW_SESSION" && echo SET'
     run neg "AGENT_VAULT_SESSION_TOKEN scrubbed" 'test -n "$AGENT_VAULT_SESSION_TOKEN" && echo SET'
 
@@ -562,6 +573,8 @@ if (( SELF_TEST )); then
     run pos "non-secret config readable"       "ls $HOME/.config/nvim | head -1"
     run pos "Wayland socket reachable"         "ls $XRD/wayland-1"
     run pos "agent state dir writable"         "touch $HOME/.claude/.sandbox-test && rm $HOME/.claude/.sandbox-test && echo ok"
+    run pos "chezmoi source writable"          "touch $CHEZMOI_ROOT/.sandbox-test && rm $CHEZMOI_ROOT/.sandbox-test && echo ok"
+    run pos "~/.local/bin writable"            "touch $HOME/.local/bin/.sandbox-test && rm $HOME/.local/bin/.sandbox-test && echo ok"
 
     echo
     printf "── %d passed, %d failed ──\n" "$pass" "$fail"

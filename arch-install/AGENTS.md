@@ -18,7 +18,12 @@ and given tools. This is the **map**; deep-dives are linked per section.
 | MCP source-of-truth | `.chezmoidata/mcp.yaml` |
 | MCP sync tool | `dot_local/bin/executable_mcp-sync` → `~/.local/bin/mcp-sync` |
 | Safety hooks | `dot_claude/hooks/{deny-secrets,destructive-guard,attention}.sh` |
-| Hook registrations | `~/.claude/settings.json` (NOT chezmoi-tracked — edit live) |
+| Hook registrations | `~/.claude/settings.json` → chezmoi `dot_claude/settings.json` (managed, but heavily LIVE-edited — edit the target then `chezmoi re-add`; source drifts otherwise) |
+
+> **chezmoi note:** the source repo has `autocommit = true` + `autopush = true`.
+> Any `chezmoi re-add`/`edit` commits ALL pending source changes and pushes to
+> `github.com:NullSense/dotfiles`. Raw file edits don't trigger it; chezmoi
+> commands do. Pre-push gitleaks + trufflehog scans gate secrets.
 
 ## Runtime pipeline (what happens when you type `claude`)
 
@@ -80,9 +85,11 @@ broad env. Disable per-call with `AGENT_NO_INFISICAL=1`.
 - Secrets carved back out with `--tmpfs` / `--ro-bind /dev/null` overlays —
   this masklist IS the security boundary (fail-closed; see the script).
 - WRITES confined to: each agent's own state dirs, the cwd workspace (if a
-  real project), **`~/Programming` (always RW)**, and `AGENT_BIND=/a:/b`.
+  real project), **`~/Programming` (always RW)**, **`~/.cache` (tool caches —
+  uv/sigstore/go/npx/cargo/mise; secret cache children stay masked)**, and
+  `AGENT_BIND=/a:/b`.
 - Everything else under `$HOME` (dotfiles, chezmoi source, `~/.config`,
-  `~/bin`) is **read-only**.
+  `~/bin`) is **read-only** (writable with `--dotfiles`).
 
 Flags (all opt-in, lifted generically by `_agent-shim` so they work for every
 agent — add a new one in TWO places: the shim's `case` + the script's parser):
@@ -116,26 +123,39 @@ Registered in `~/.claude/settings.json` → `hooks.PreToolUse`:
 
 | Hook command | Source | Purpose |
 |---|---|---|
-| `deny-secrets.sh` | `dot_claude/hooks/` (ours) | regex-block secret-extraction commands (rbw/bw/gpg/ssh-add/`cat *.pem`/`cat ~/.ssh`…). Matches **Bash + Read/Edit/Write/NotebookEdit/Glob/Grep**. |
-| `dcg` | [Dicklesworthstone/destructive_command_guard](https://github.com/Dicklesworthstone/destructive_command_guard) (binary at `~/.local/bin/dcg`) | block destructive ops: `rm -rf`, destructive git, DB drops, k8s/docker/cloud/terraform, supply-chain, AST-level interpreter-escape. Per-rule allowlist: `dcg allow <rule-id>` → `~/.config/dcg/allowlist.toml`. |
+| `deny-secrets.sh` | `dot_claude/hooks/` (ours) | regex-block secret-extraction commands (rbw/bw/gpg/ssh-add/`cat *.pem`/`cat ~/.ssh`…). Matches **Bash + Read/Edit/Write/NotebookEdit/Glob/Grep**. **Claude-only.** |
+| `bunx cc-safety-net@0.9.0 --claude-code` | [kenryu42/claude-code-safety-net](https://github.com/kenryu42/claude-code-safety-net) (npm `cc-safety-net`, bun-cached) | destructive git/fs command catcher. Replaced `dcg` on Claude 2026-05-28. Custom rules: `~/.cc-safety-net/config.json` / project `.safety-net.json`. |
 | `rtk hook claude` | RTK | token-optimizing command rewrite (not security). |
 
-`dot_claude/hooks/destructive-guard.sh` is a **retired no-op** (superseded by
-`dcg` 2026-05-22); kept only so a stale reference returns exit 0.
+**Destructive-guard migration (2026-05-28): standardizing on claude-code-safety-net
+across all agents** (replaces the old `dcg` binary, which was Claude-only):
 
-**Related project not installed:**
-[kenryu42/claude-code-safety-net](https://github.com/kenryu42/claude-code-safety-net)
-— a multi-agent destructive-command catcher (Claude/Codex/OpenCode/Gemini/
-Copilot). We use `dcg` instead, which is broader but **Claude-only**. See
-"Known gaps" for the resulting codex/opencode exposure.
+| Agent | Wiring | Status |
+|---|---|---|
+| Claude | `settings.json` PreToolUse → `bunx cc-safety-net@0.9.0 --claude-code` | ✅ done (dcg removed) |
+| OpenCode | `opencode.jsonc` → `"plugin": ["cc-safety-net"]` | ✅ done |
+| Codex | plugin marketplace + `/plugins` install + `/hooks` trust (TUI) | ⏳ **needs your terminal** — no raw CLI hook mode for Codex |
+
+`dot_claude/hooks/destructive-guard.sh` is a **retired no-op**. The old `dcg`
+binary (`~/.local/bin/dcg`) is now unused once Codex is migrated — uninstall
+with its `uninstall.sh` then.
 
 ### Tier 4 — agent-vault (credential broker)
-Opt-in MITM HTTPS proxy. The agent gets a session token + proxy URL, never
-the real key; the proxy substitutes credentials on outbound requests and
-blocks unregistered hosts. Engaged via `--agent-vault` (sets `HTTPS_PROXY`,
-binds the MITM CA inside the sandbox). Daemon: `agent-vault.service` (systemd
---user, TPM2-sealed master). Full setup + MCP-through-AV in
+MITM HTTPS proxy. The agent gets a session token + proxy URL, never the real
+key; the proxy substitutes credentials on outbound requests and blocks
+unregistered hosts. Engaged via `--agent-vault` (sets `HTTPS_PROXY`, binds the
+MITM CA inside the sandbox). Daemon: `agent-vault.service` (systemd --user,
+TPM2-sealed master). Full setup + MCP-through-AV in
 [`AGENT-VAULT.md`](./AGENT-VAULT.md).
+
+> **DECISION (2026-05-28): move to always-on, fail-closed** (every agent
+> routes HTTPS through the broker; no broker → no API egress). **Not yet
+> activated** — two blockers: (1) `agent-vault.service` is enabled but the
+> daemon was **not reachable** (`127.0.0.1:14321` refused) — start + verify it;
+> (2) the token-mint flow is **missing from `~/.envrc`** (no `AGENT_VAULT_*`
+> vars), so `AGENT_VAULT_SESSION_TOKEN` is unset. Once both are fixed, wire
+> always-on into `_agent-shim` (mint token + pass `--agent-vault`, fail-closed
+> with a clear error if the health check fails).
 
 ## MCP tools — single source of truth → per-agent sync
 
@@ -190,13 +210,13 @@ curl -s http://127.0.0.1:14321/health    # broker control API
    the whole codebase and exfiltrate it anywhere. FS isolation without network
    isolation is incomplete (Anthropic ships both for this reason). agent-vault
    *would* close it (blocks unregistered hosts) but is opt-in + can be down.
-2. **Tier 4 is opt-in and degrades silently.** Default forwards the per-agent
-   key as plaintext env; if the broker daemon is down, agents fall back to env
-   keys with no error. The most secure path is off unless you ask for it.
-3. **Tier 3 is Claude-only.** `dcg` + `deny-secrets` are `settings.json`
-   hooks; **codex/opencode have no destructive-command or secret-deny hook**.
-   They rely solely on the bwrap sandbox (Tier 2). claude-code-safety-net
-   would cover all agents if multi-agent guarding is wanted.
+2. **Tier 4 not yet always-on (in progress).** Decision is always-on
+   fail-closed (above); until wired, the default path forwards the per-agent
+   key as plaintext env. Blocked on the daemon + token-mint flow.
+3. **Tier 3 destructive guard: Claude+OpenCode done, Codex pending.**
+   cc-safety-net is wired on Claude + OpenCode; Codex still needs its TUI
+   plugin install (no raw CLI hook mode). `deny-secrets` (secret-READ guard)
+   remains **Claude-only** — codex/opencode rely on the bwrap sandbox for that.
 4. **MCP supply chain.** stdio MCPs run `npx …@latest` inside the sandbox with
    the agent's full access; unpinned releases are a supply-chain vector.
 5. **deny-secrets is a regex blocklist** — bypassable via `base64`,
@@ -208,4 +228,6 @@ curl -s http://127.0.0.1:14321/health    # broker control API
   `chezmoi apply ~/bin/agent-isolated`, re-run `--self-test`.
 - Add a generic agent flag → shim `case` **and** `agent-isolated` parser.
 - Add/remove an MCP → edit `.chezmoidata/mcp.yaml`, `chezmoi apply`.
-- `settings.json` is **not** chezmoi-tracked — edit it live.
+- `settings.json` IS chezmoi-tracked (`dot_claude/settings.json`) but heavily
+  live-edited → edit `~/.claude/settings.json`, then `chezmoi re-add` (which
+  auto-commits + pushes — see the chezmoi note up top).

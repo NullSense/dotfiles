@@ -9,6 +9,7 @@ Claude
 Codex
 COLMAP
 context7
+Context7
 corepack
 Cortiq
 Dasha

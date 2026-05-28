@@ -7,11 +7,14 @@
 #   agent-isolated --self-test                   # run negative + positive verifications
 #   AGENT_UNSANDBOX=1 agent-isolated <agent> …   # bypass the sandbox entirely (escape hatch)
 #
-# Default behaviour: agent runs with tmpfs `/` and tmpfs `$HOME`, then a curated
-# allowlist of read-only system paths and read-write state/workspace mounts.
-# It cannot see ~/.ssh, ~/.gnupg, ~/.config/rbw, the rbw or SSH-agent sockets,
-# the chezmoi `private_*` sources, atuin history, the cliphist DB, or any
-# secret-bearing env var (BW_SESSION, AGENT_VAULT_SESSION_TOKEN, etc.).
+# Default behaviour (deny-then-allow read model): agent runs with tmpfs `/`
+# plus a READ-ONLY bind of all of `$HOME`, so it can read the whole codebase,
+# configs and tooling without per-path allow-listing. Secrets are then carved
+# back OUT with tmpfs/null overlays, and WRITES are confined to each agent's
+# own state dirs + the workspace/project roots. It cannot see ~/.ssh, ~/.gnupg,
+# the rbw/Bitwarden/atuin stores, browser profiles, keyrings, the cliphist DB,
+# the chezmoi source tree (SECRETS.md + private_*), or any secret-bearing env
+# var (BW_SESSION, AGENT_VAULT_SESSION_TOKEN, etc.).
 #
 # Escape hatches re-mount specific surfaces when a workflow legitimately needs
 # them; all default off:
@@ -129,46 +132,44 @@ UID_NUM="$(id -u)"
 XRD="${XDG_RUNTIME_DIR:-/run/user/$UID_NUM}"
 CHEZMOI_ROOT="$HOME/.local/share/chezmoi"
 
-# Pin workspace: bind cwd ONLY if it's a real project dir, not $HOME itself
-# or one of the secret-bearing roots. Binding $HOME exposes ~/.ssh, ~/.gnupg,
-# etc.; binding ~/.local/share/chezmoi exposes SECRETS.md and private_dot_ssh.
-#
-# Bare $HOME is denied as an EXACT match only — an earlier version listed
-# "$HOME" inside the subtree-deny loop and the `$_deny/*` glob made it match
-# every project under $HOME, silently sandboxing the agent out of every
-# real workspace. Subtree denies still apply to the secret-bearing dirs.
+# Decide whether to bind cwd as the WRITABLE workspace. Under the read floor
+# below, all of $HOME is already readable — this only governs WRITE access.
+# We refuse to make bare $HOME or a secret-bearing root writable (you don't
+# want an agent writing across your whole home, and secret dirs are masked
+# anyway). When refused, $HOME stays readable and the agent simply gets no
+# extra write scope — cd into a project, or pass AGENT_BIND.
 WORKSPACE="${PWD:-$HOME}"
 WORKSPACE_DENY_SUBTREE=(
-    "$HOME/.local/share/chezmoi"           # contains SECRETS.md, private_dot_ssh
+    "$HOME/.local/share/chezmoi"           # SECRETS.md, private_dot_ssh
     "$HOME/.ssh"
     "$HOME/.gnupg"
-    "$HOME/.config"                        # too broad — bind specific subdirs only
+    "$HOME/.config"                        # too broad to make writable
     "$HOME/.agent-vault"
     "$HOME/.local/share/keyrings"
     "$HOME/.password-store"
     "$HOME/.aws"
     "$HOME/.kube"
     "$HOME/.docker"
-    "$HOME/.cache"                         # cliphist/db, browser caches
+    "$HOME/.cache"
     "$HOME/.mozilla"
 )
 WORKSPACE_BIND=0
 case "$WORKSPACE" in
     "$HOME")
-        echo "agent-isolated: cwd is bare \$HOME (would expose ~/.ssh, ~/.gnupg, etc); running in tmpfs \$HOME instead" >&2
+        echo "agent-isolated: cwd is bare \$HOME; not binding it writable. \$HOME is readable; writes limited to project dirs (cd into one, or set AGENT_BIND)." >&2
         ;;
     "$HOME"/*)
         WORKSPACE_BIND=1
         for _deny in "${WORKSPACE_DENY_SUBTREE[@]}"; do
             if [[ "$WORKSPACE" == "$_deny" ]] || [[ "$WORKSPACE" == "$_deny"/* ]]; then
                 WORKSPACE_BIND=0
-                echo "agent-isolated: cwd ($WORKSPACE) is under a denied subtree ($_deny); running in tmpfs \$HOME instead" >&2
+                echo "agent-isolated: cwd ($WORKSPACE) is under a secret/denied subtree ($_deny); not binding it writable." >&2
                 break
             fi
         done
         ;;
     *)
-        echo "agent-isolated: cwd outside \$HOME ($WORKSPACE); running in tmpfs \$HOME instead" >&2
+        echo "agent-isolated: cwd outside \$HOME ($WORKSPACE); not mounted. Running from \$HOME — set AGENT_BIND=$WORKSPACE to mount it." >&2
         ;;
 esac
 (( WORKSPACE_BIND == 0 )) && WORKSPACE="$HOME"
@@ -218,25 +219,37 @@ for _bin in rbw rofi-rbw bw secret-tool keyctl op doppler vault ykman \
 done
 unset _bin
 
-# HOME: empty tmpfs, then explicit re-binds.
-ARGS+=( --tmpfs "$HOME" )
+# ── HOME: deny-then-allow read model ───────────────────────────────
+# Floor: bind ALL of $HOME read-only so the agent can read the whole
+# codebase, configs and tooling without per-path allow-listing (this is the
+# friction fix — npx/mise/cargo/.local/bin/dotfiles are all just readable).
+# Writable carve-outs and secret masks layer on top. Order is load-bearing,
+# since later bwrap args win:
+#   (1) ro-bind $HOME      read floor
+#   (2) rw binds           agent state + workspace + Programming + AGENT_BIND
+#   (3) secret masks       carve secrets back out (THE boundary now)
+#   (4) --ssh/--rbw/--gpg  re-expose one surface on explicit request (later)
+ARGS+=( --ro-bind "$HOME" "$HOME" )
 
-# Per-agent state (rw). Includes each agent's auth file — that's expected
-# (the agent must reach its own API). We are NOT trying to hide the agent's
-# own API key from itself; we're hiding *other* secrets.
+# (2) Writable carve-outs — each agent's own state/auth (expected writable;
+# we hide *other* secrets, never the agent's own API access).
 ARGS+=(
-    --bind     "$HOME/.claude"      "$HOME/.claude"
-    --bind-try "$HOME/.claude.json" "$HOME/.claude.json"
-    --bind-try "$HOME/.codex"       "$HOME/.codex"
+    --bind     "$HOME/.claude"               "$HOME/.claude"
+    --bind-try "$HOME/.claude.json"          "$HOME/.claude.json"
+    --bind-try "$HOME/.local/state/claude"   "$HOME/.local/state/claude"
+    --bind-try "$HOME/.codex"                "$HOME/.codex"
+    --bind-try "$HOME/.config/opencode"      "$HOME/.config/opencode"
+    --bind-try "$HOME/.local/share/opencode" "$HOME/.local/share/opencode"
+    --bind-try "$HOME/.local/state/opencode" "$HOME/.local/state/opencode"
 )
 
-# Workspace roots (rw). ~/Programming is always exposed so agents reach any
-# project regardless of launch cwd (the WORKSPACE/cwd bind below only mounts
-# the single dir you launched from). Ad-hoc dirs can be added per-invocation
-# via AGENT_BIND — colon-separated absolute paths — e.g.
-#   AGENT_BIND=/srv/data:/mnt/scratch codex
+# Workspace roots (rw). ~/Programming is always writable so agents reach any
+# project regardless of launch cwd. Ad-hoc dirs via AGENT_BIND (colon-
+# separated absolute paths), e.g. AGENT_BIND=/srv/data:/mnt/scratch codex.
 # bwrap seals its mount namespace at launch, so this is the ONLY way to grant
-# access; there is no in-session "add a folder" once the agent is running.
+# access — there is no in-session "add a folder" once running. Secret masks
+# (3) are applied AFTER these, so AGENT_BIND can't re-expose a masked secret;
+# use the --ssh/--rbw/--gpg hatches for that.
 ARGS+=( --bind-try "$HOME/Programming" "$HOME/Programming" )
 if [[ -n "${AGENT_BIND:-}" ]]; then
     IFS=':' read -ra _extra_binds <<< "$AGENT_BIND"
@@ -246,80 +259,55 @@ if [[ -n "${AGENT_BIND:-}" ]]; then
     unset _b _extra_binds
 fi
 
-# Agent binaries + runtime tooling (read-only). mise is bound because
-# Claude Code spawns stdio MCP servers via npx, and npx lives at
-# ~/.local/share/mise/installs/node/<ver>/bin/npx. Without it, MCP servers
-# like react-grab-mcp / playwright / chrome-devtools fail to start.
-# HTTP MCP servers (context7, exa) don't need this — they go over the
-# network, which --share-net keeps open.
-ARGS+=(
-    --ro-bind     "$HOME/.local/bin"           "$HOME/.local/bin"
-    --ro-bind-try "$HOME/.local/share/claude"  "$HOME/.local/share/claude"
-    --ro-bind-try "$HOME/.local/share/mise"    "$HOME/.local/share/mise"
-    --ro-bind-try "$HOME/.cache/mise"          "$HOME/.cache/mise"
-    --ro-bind-try "$HOME/.cargo"               "$HOME/.cargo"
-    --ro-bind-try "$HOME/.cache/npx"           "$HOME/.cache/npx"
-)
-
-# chezmoi source — bind only the safe top-level entries. Deliberately
-# NOT bound: `private_dot_ssh/`, `SECRETS.md`, anything else `private_*`.
-# The tmpfs $HOME ensures un-bound paths simply don't exist.
-ARGS+=(
-    --bind     "$CHEZMOI_ROOT/bin"          "$CHEZMOI_ROOT/bin"
-    --bind     "$CHEZMOI_ROOT/dot_config"   "$CHEZMOI_ROOT/dot_config"
-    --bind     "$CHEZMOI_ROOT/dot_local"    "$CHEZMOI_ROOT/dot_local"
-    --bind     "$CHEZMOI_ROOT/dot_claude"   "$CHEZMOI_ROOT/dot_claude"
-    --bind     "$CHEZMOI_ROOT/dot_codex"    "$CHEZMOI_ROOT/dot_codex"
-    --bind-try "$CHEZMOI_ROOT/dot_lmstudio" "$CHEZMOI_ROOT/dot_lmstudio"
-    --bind-try "$CHEZMOI_ROOT/root"         "$CHEZMOI_ROOT/root"
-)
-for f in dot_zshrc dot_zshenv dot_bashrc dot_gitconfig dot_tmux.conf dot_vimrc \
-         dot_profile dot_envrc mcp-sync.sh omarchy-bootstrap.sh readme.md; do
-    [[ -e "$CHEZMOI_ROOT/$f" ]] && \
-        ARGS+=( --bind "$CHEZMOI_ROOT/$f" "$CHEZMOI_ROOT/$f" )
-done
-
-# Within dot_config, skip private_* entries (chezmoi convention for 0700-mode).
-for entry in "$CHEZMOI_ROOT"/dot_config/*; do
-    name="${entry##*/}"
-    if [[ "$name" == private_* ]]; then
-        # already covered by parent --bind dot_config above? Yes — but we want
-        # to *mask* it. Overlay tmpfs:
-        ARGS+=( --tmpfs "$entry" )
-    fi
-done
-
-# Target dotfiles at $HOME root (where chezmoi apply writes).
-for f in .zshrc .zshenv .bashrc .gitconfig .tmux.conf .vimrc .profile .envrc; do
-    [[ -e "$HOME/$f" ]] && ARGS+=( --bind "$HOME/$f" "$HOME/$f" )
-done
-
-# ~/.config target subdirs/files — chezmoi-managed list, with denylist.
-# CONFIG_DENYLIST: anything secret-bearing or potentially containing it.
-CONFIG_DENYLIST=(atuin agent-vault op rbw Bitwarden google-chrome chromium
-                 BraveSoftware Vivaldi 1Password gh gh-cli gnupg)
-in_denylist() {
-    local item="$1" d
-    for d in "${CONFIG_DENYLIST[@]}"; do
-        [[ "$item" == "$d" ]] && return 0
-    done
-    return 1
-}
-while IFS= read -r entry; do
-    [[ -z "$entry" ]] && continue
-    in_denylist "$entry" && continue
-    [[ ! -e "$HOME/.config/$entry" ]] && continue
-    ARGS+=( --bind "$HOME/.config/$entry" "$HOME/.config/$entry" )
-done < <(chezmoi managed --include=files 2>/dev/null \
-            | awk -F/ '$1==".config"{print $2}' | sort -u)
-
-# User script dir.
-ARGS+=( --bind "$HOME/bin" "$HOME/bin" )
-
-# Workspace.
+# cwd workspace (rw) — only when it's a real project dir (see checks above).
 if (( WORKSPACE_BIND )); then
     ARGS+=( --bind "$WORKSPACE" "$WORKSPACE" )
 fi
+
+# (3) Secret masks — THE security boundary under the read floor. The floor
+# made all of $HOME readable; these overlays carve the secrets back out, so
+# this is a fail-CLOSED denylist: anything NOT listed here stays readable by
+# the agent. Add new secret locations as they appear. tmpfs hides a dir; a
+# /dev/null overlay hides an individual file/socket (can't tmpfs a non-dir).
+# return 0 explicitly: a bare `[[ -e ]] && …` makes the function return 1 when
+# the path is absent, which would trip `set -e` at the call site (unlike the
+# same expression written inline, which bash exempts as part of an && list).
+mask_dir()  { [[ -e "$1" ]] && ARGS+=( --tmpfs "$1" ); return 0; }
+mask_file() { [[ -e "$1" ]] && ARGS+=( --ro-bind /dev/null "$1" ); return 0; }
+
+# chezmoi source — SECRETS.md + nested private_* at many depths. Masked
+# wholesale: the agent never needs the *source* (deployed targets under $HOME
+# stay readable via the floor), and one tmpfs can't be defeated by a new
+# private_* slipping past a selective filter. Edit source on the host, or run
+# with AGENT_UNSANDBOX=1 for dotfile-management tasks.
+mask_dir "$CHEZMOI_ROOT"
+
+# Home-level credential stores + sensitive caches.
+for _m in .ssh .gnupg .aws .kube .docker .password-store .agent-vault \
+          .mozilla .local/share/keyrings .local/share/rbw .cache/cliphist \
+          .cache/rbw .cache/chromium .cache/google-chrome \
+          .cache/BraveSoftware .cache/mozilla; do
+    mask_dir "$HOME/$_m"
+done
+
+# atuin shell-history DB + timestamped backups.
+for _m in "$HOME/.local/share/atuin" "$HOME"/.local/share/atuin.bak.*; do
+    mask_dir "$_m"
+done
+
+# ~/.config secret children (the rest of ~/.config stays readable).
+for _m in rbw Bitwarden "Bitwarden CLI" atuin op 1Password gh gh-cli gnupg \
+          agent-vault sops age doppler google-chrome chromium BraveSoftware \
+          Vivaldi; do
+    mask_dir "$HOME/.config/$_m"
+done
+
+# Secret files / sockets.
+for _m in .git-credentials .netrc .npmrc .pypirc .bitwarden-ssh-agent.sock \
+          .cache/rofi-rbw.runcache; do
+    mask_file "$HOME/$_m"
+done
+unset _m
 
 # Runtime sockets (selective).
 ARGS+=(
@@ -501,11 +489,17 @@ if (( SELF_TEST )); then
     run neg "~/.config/rbw hidden"             "ls $HOME/.config/rbw"
     run neg "~/.config/Bitwarden hidden"       "ls $HOME/.config/Bitwarden"
     run neg "~/.config/atuin hidden"           "ls $HOME/.config/atuin"
-    run neg "~/.bitwarden-ssh-agent.sock hidden" "ls $HOME/.bitwarden-ssh-agent.sock"
+    run neg "bitwarden-ssh sock neutralized"   "test -S $HOME/.bitwarden-ssh-agent.sock && echo LIVE"
     run neg "SECRETS.md hidden"                "cat $CHEZMOI_ROOT/SECRETS.md"
     run neg "private_dot_ssh hidden"           "ls $CHEZMOI_ROOT/private_dot_ssh"
+    run neg "chezmoi source masked"            "ls $CHEZMOI_ROOT"
     run neg "~/.cache/cliphist hidden"         "ls $HOME/.cache/cliphist"
     run neg "~/.local/share/keyrings hidden"   "ls $HOME/.local/share/keyrings"
+    run neg "~/.local/share/atuin hidden"      "ls $HOME/.local/share/atuin"
+    run neg "~/.local/share/rbw hidden"        "ls $HOME/.local/share/rbw"
+    run neg "~/.cache/rbw hidden"              "ls $HOME/.cache/rbw"
+    run neg "~/.config/chromium hidden"        "ls $HOME/.config/chromium"
+    run neg "~/.config/Bitwarden hidden (2)"   "ls '$HOME/.config/Bitwarden CLI'"
     run neg "~/.git-credentials hidden"        "cat $HOME/.git-credentials"
     run neg "rbw socket hidden"                "ls $XRD/rbw"
     run neg "dbus session hidden"              "ls $XRD/bus"
@@ -519,7 +513,8 @@ if (( SELF_TEST )); then
     run pos "/usr/bin readable"                'ls /usr/bin | head -1'
     run pos "chezmoi binary visible"           'command -v chezmoi'
     run pos "hypr config dir bound"            "ls $HOME/.config/hypr | head -1"
-    run pos "chezmoi source bound"             "ls $CHEZMOI_ROOT/dot_config | head -1"
+    run pos "home dotfiles readable"           "head -1 $HOME/.gitconfig"
+    run pos "non-secret config readable"       "ls $HOME/.config/nvim | head -1"
     run pos "Wayland socket reachable"         "ls $XRD/wayland-1"
     run pos "agent state dir writable"         "touch $HOME/.claude/.sandbox-test && rm $HOME/.claude/.sandbox-test && echo ok"
 

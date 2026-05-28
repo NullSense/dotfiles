@@ -13,6 +13,7 @@ corepack
 Cortiq
 Dasha
 dokploy
+Dokploy
 .env
 Exa
 Gemma
@@ -27,6 +28,7 @@ kubectl
 LM Studio
 Matas
 mise
+Mise
 MITM
 neovim
 Nihal

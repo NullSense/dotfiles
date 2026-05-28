@@ -1,0 +1,36 @@
+# Agent-stack tool manifest + task runner.
+#   mise install         → provision the pinned tools below
+#   mise run bootstrap    → full machine setup (idempotent)
+#   mise run doctor       → health-check the stack
+#   mise run update-mcp   → re-sync MCP servers from the single source of truth
+#   mise run update-tools → reconcile installed tools to these pins
+# See README.md for the full runbook.
+
+[tools]
+# Pinned via mise backends (reproducible across distros).
+node               = "22.22.3"      # runtime for cc-safety-net + npx MCP servers
+bun                = "1.3.14"       # fast runner for the cc-safety-net hook
+"github:Infisical/cli" = "0.43.87"  # infisical — secret pull + `infisical run`
+"npm:cc-safety-net"    = "0.9.0"    # destructive-command guard (all agents)
+
+# NOT mise-managed (installed by `mise run bootstrap` via lib/distro.sh):
+#   bubblewrap, github-cli (gh), openssh, git, curl  → distro package manager
+#     (universally packaged; no version-pin guessing, security updates via distro)
+# NOT mise-managed (external):
+#   agent-vault → Infisical Agent Vault binary; see ../arch-install/AGENT-VAULT.md
+
+[tasks.bootstrap]
+description = "Provision the agent stack on this machine (idempotent)"
+run = "bash lib/bootstrap.sh"
+
+[tasks.doctor]
+description = "Health-check the agent stack — green/red board"
+run = "bash lib/doctor.sh"
+
+[tasks.update-mcp]
+description = "Re-sync MCP servers from .chezmoidata/mcp.yaml to every agent"
+run = "chezmoi apply && echo '✓ MCP synced (mcp-sync run_onchange)'"
+
+[tasks.update-tools]
+description = "Reconcile installed tools to the pins in this manifest"
+run = "mise install"

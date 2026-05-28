@@ -10,9 +10,12 @@ and given tools. This is the **map**; deep-dives are linked per section.
 
 | Topic | Doc / file |
 |---|---|
+| **Setup / deploy runbook** | [`../../agent-stack/README.md`](../../agent-stack/README.md) (`mise run bootstrap`/`doctor`) |
+| Deploy design spec | [`../../agent-stack/DESIGN.md`](../../agent-stack/DESIGN.md) |
 | Credential broker (HTTPS proxy) | [`AGENT-VAULT.md`](./AGENT-VAULT.md) |
 | Agent state backup/restore | [`RECOVER-AGENT-STATE.md`](./RECOVER-AGENT-STATE.md) |
 | Full machine install runbook | [`RUNBOOK.md`](./RUNBOOK.md) |
+| Commit signing | `bin/executable_git-sign-ssh`, `dot_config/systemd/user/git-sign-agent.service` |
 | Sandbox wrapper (source) | `bin/executable_agent-isolated` → `~/bin/agent-isolated` |
 | Dispatch shim (source) | `bin/executable__agent-shim` → `~/bin/_agent-shim` |
 | MCP source-of-truth | `.chezmoidata/mcp.yaml` |
@@ -86,10 +89,15 @@ broad env. Disable per-call with `AGENT_NO_INFISICAL=1`.
   this masklist IS the security boundary (fail-closed; see the script).
 - WRITES confined to: each agent's own state dirs, the cwd workspace (if a
   real project), **`~/Programming` (always RW)**, **`~/.cache` (tool caches —
-  uv/sigstore/go/npx/cargo/mise; secret cache children stay masked)**, and
-  `AGENT_BIND=/a:/b`.
-- Everything else under `$HOME` (dotfiles, chezmoi source, `~/.config`,
-  `~/bin`) is **read-only** (writable with `--dotfiles`).
+  uv/sigstore/go/npx/cargo/mise; secret cache children stay masked)**,
+  `AGENT_BIND=/a:/b`, and (since 2026-05-28, **default-on**) the **config
+  surface**: chezmoi source, `~/.config`, `~/.local/{bin,share}`, `~/bin`, and
+  the `$HOME` rc files. Secrets are re-masked *after* these binds, so configs
+  are writable but `~/.config/rbw`, browser profiles, `SECRETS.md`, `private_*`
+  etc. stay hidden.
+- Why config-surface is writable by default: agents kept "losing" chezmoi edits
+  to an empty tmpfs (silent data loss). Now edits persist; `chezmoi apply` works
+  in-sandbox. (`--dotfiles` is now a no-op kept for back-compat.)
 
 Flags (all opt-in, lifted generically by `_agent-shim` so they work for every
 agent — add a new one in TWO places: the shim's `case` + the script's parser):
@@ -193,10 +201,36 @@ don't hand-edit the agent configs. See memory `project_chezmoi_mcp_sync.md`.
 | App env secrets | **Infisical** | `DATABASE_URL`, `JWT_SECRET`, … | Tier 1 `infisical run` |
 | Brokered HTTPS keys | **Agent Vault** | LLM/MCP API keys (agent never sees) | Tier 4 proxy (opt-in `--agent-vault`) |
 
+## Git auth — signing + push (rebuilt 2026-05-28)
+
+Decoupled, minimal-privilege; no single credential grants push + sign +
+server-auth.
+
+- **Commit signing** — a **dedicated sign-only ed25519 key** lives in its own
+  `git-sign-agent.service` (systemd --user), NOT in the Bitwarden agent.
+  `gpg.ssh.program = ~/bin/git-sign-ssh` forces git's signer to that socket on
+  host *and* in-sandbox (agent-isolated binds the socket + sets `SSH_AUTH_SOCK`
+  to it by default). The key is registered on GitHub as a **Signing key**
+  (never Authentication) and is in no `authorized_keys`, so it **cannot
+  authenticate** anywhere — worst case if leaked is a verifiable, revocable
+  commit signature.
+  - *Why not the Bitwarden agent for signing?* An agent socket grants *use of
+    every key it holds, for any sign op* (SSH auth IS a signature). Binding
+    Bitwarden's socket would let the sandbox sign auth challenges with your
+    auth key. A separate sign-only key in its own agent is the isolation.
+- **Push** — HTTPS via gh's credential helper (`gh auth setup-git`), host-side.
+  SSH `git@github.com:` URLs are rewritten to HTTPS (`url.insteadOf`). gh's
+  OAuth token lives in the keyring (masked from sandboxes) → agents commit,
+  **push runs host-side** (`!git push` / human). No GitHub App, no minted
+  tokens. Bitwarden's auth key stays for server SSH (opt-in `--ssh`).
+- **Setup/repro**: [`../../agent-stack/`](../../agent-stack/) (`mise run
+  bootstrap` / `doctor`).
+
 ## Verification
 
 ```sh
-~/bin/agent-isolated --self-test         # 33 checks (run from a project dir)
+cd ~/.local/share/chezmoi/agent-stack && mise run doctor   # full green/red board
+~/bin/agent-isolated --self-test         # 34 checks (run from a project dir)
 ~/bin/agent-isolated codex --dry-run     # inspect the bwrap argv
 dcg allow                                # list dcg allowlisted rules
 systemctl --user status agent-vault      # broker health (Tier 4)

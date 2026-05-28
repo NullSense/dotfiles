@@ -119,6 +119,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/home/nullsense/.claude/hooks/context-mode-cache-heal.mjs\""
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
@@ -127,10 +137,21 @@
   },
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true,
-    "rust-analyzer-lsp@claude-plugins-official": true
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "claude-mem@thedotmack": true,
+    "context-mode@context-mode": true,
+    "security-guidance@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "context-mode": {
+      "source": {
+        "source": "github",
+        "repo": "mksglu/context-mode"
+      }
+    }
   },
   "sandbox": {
-    "enabled": true,
+    "enabled": false,
     "network": {
       "allowAllUnixSockets": true
     },
@@ -143,16 +164,11 @@
         "/run/user/1000/gnupg",
         "~/.gnupg"
       ],
-      "allowRead": [
-        "~/Programming"
-      ]
+      "allowRead": ["~/Programming"]
     }
   },
   "effortLevel": "high",
   "editorMode": "vim",
   "skipAutoPermissionPrompt": true,
-  "additionalDirectories": [
-    "~/Programming",
-    "~/.cargo"
-  ]
+  "additionalDirectories": ["~/Programming", "~/.cargo"]
 }

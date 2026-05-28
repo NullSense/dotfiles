@@ -230,6 +230,22 @@ ARGS+=(
     --bind-try "$HOME/.codex"       "$HOME/.codex"
 )
 
+# Workspace roots (rw). ~/Programming is always exposed so agents reach any
+# project regardless of launch cwd (the WORKSPACE/cwd bind below only mounts
+# the single dir you launched from). Ad-hoc dirs can be added per-invocation
+# via AGENT_BIND — colon-separated absolute paths — e.g.
+#   AGENT_BIND=/srv/data:/mnt/scratch codex
+# bwrap seals its mount namespace at launch, so this is the ONLY way to grant
+# access; there is no in-session "add a folder" once the agent is running.
+ARGS+=( --bind-try "$HOME/Programming" "$HOME/Programming" )
+if [[ -n "${AGENT_BIND:-}" ]]; then
+    IFS=':' read -ra _extra_binds <<< "$AGENT_BIND"
+    for _b in "${_extra_binds[@]}"; do
+        [[ -n "$_b" ]] && ARGS+=( --bind-try "$_b" "$_b" )
+    done
+    unset _b _extra_binds
+fi
+
 # Agent binaries + runtime tooling (read-only). mise is bound because
 # Claude Code spawns stdio MCP servers via npx, and npx lives at
 # ~/.local/share/mise/installs/node/<ver>/bin/npx. Without it, MCP servers

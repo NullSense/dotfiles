@@ -22,6 +22,7 @@ Hermes
 Hyprland
 hyprwhspr
 infisical
+Infisical
 kubectl
 LM Studio
 Matas

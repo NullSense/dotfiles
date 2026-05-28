@@ -15,21 +15,35 @@ path=(
   $path
 )
 
-export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+# Setting LC_ALL forces every LC_* category and makes per-program locale
+# overrides impossible (e.g. `LC_TIME=C ls -l` for sortable timestamps). LANG
+# alone is enough for utf-8 default behavior; let programs override the rest.
+export LANG=en_US.UTF-8
 export EDITOR=nvim VISUAL=nvim MANPAGER='nvim +Man!'
 export COLORTERM=truecolor TERMINAL=ghostty
 
 # Wayland / Qt / Mozilla
-# Don't hardcode XDG_CURRENT_DESKTOP — the compositor sets it (sway via its
-# launcher, Hyprland via env.conf). Only fall back if the session left it empty.
+# Don't hardcode XDG_CURRENT_DESKTOP / XDG_SESSION_TYPE — the compositor and
+# systemd-logind set them per session. Hardcoding lies if we ever land on
+# TTY / X11. Only fall back if the session left them empty.
 : "${XDG_CURRENT_DESKTOP:=$XDG_SESSION_DESKTOP}"
-export XDG_CURRENT_DESKTOP XDG_SESSION_TYPE=wayland
-export MOZ_ENABLE_WAYLAND=1 MOZ_DBUS_REMOTE=1
+export XDG_CURRENT_DESKTOP
+export MOZ_ENABLE_WAYLAND=1
 export QT_QPA_PLATFORM=wayland QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 
-# AMD ROCm (RX 6750 XT) — Arch's ROCm 7.x has no /opt/rocm/hip subdir
-export ROCM_PATH=/opt/rocm HIP_PATH=/opt/rocm
-export LD_LIBRARY_PATH="$ROCM_PATH/lib:${LD_LIBRARY_PATH:-}"
+# AMD ROCm (RX 6750 XT) — Arch's ROCm 7.x has no /opt/rocm/hip subdir.
+# Gated on /opt/rocm so non-GPU systems don't inherit a phantom lib path.
+# The case-test prevents the LD_LIBRARY_PATH entry from accumulating duplicates
+# when zshrc is sourced inside an already-set environment (nested zsh, IDE
+# integrated terminals, tmux respawns) — previously each child shell prepended
+# another copy.
+if [[ -d /opt/rocm/lib ]]; then
+  export ROCM_PATH=/opt/rocm HIP_PATH=/opt/rocm
+  case ":${LD_LIBRARY_PATH:-}:" in
+    *":$ROCM_PATH/lib:"*) ;;
+    *) export LD_LIBRARY_PATH="$ROCM_PATH/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+  esac
+fi
 
 export BUN_INSTALL="$HOME/.bun"
 export PNPM_HOME="$HOME/.local/share/pnpm"
@@ -43,7 +57,19 @@ source "$ZINIT_HOME/zinit.zsh"
 # ZVM_INIT_MODE=sourcing prevents zvm from clobbering bindings set after it.
 ZVM_INIT_MODE=sourcing
 ZVM_VI_INSERT_ESCAPE_BINDKEY=jk
-ZVM_LINE_INIT_MODE=$ZVM_MODE_INSERT
+# zvm only defines ZVM_MODE_INSERT="i" *after* the plugin is sourced, so the
+# old `ZVM_LINE_INIT_MODE=$ZVM_MODE_INSERT` line expanded to an empty string
+# and the setting was silently a no-op (zvm fell back to "last mode"). Use
+# the literal value so each new prompt actually starts in insert mode.
+ZVM_LINE_INIT_MODE=i
+# Default ZVM_KEYTIMEOUT is 0.4s — the time zvm waits after ESC to see if
+# more keys follow (to disambiguate `jk` from a bare ESC and to swallow
+# arrow-key escape sequences). At 0.4s, pressing ESC then quickly `gg` lands
+# the first `g` while zvm is still in disambiguation state, so vi commands
+# "sometimes don't work." 0.05s is well under typical deliberate-keystroke
+# latency, and `jk` still fires because the two keys of that chord land
+# within ~30ms when typed as a real chord.
+ZVM_KEYTIMEOUT=0.05
 zinit ice depth=1
 zinit light jeffreytse/zsh-vi-mode
 
@@ -86,7 +112,13 @@ command -v starship &>/dev/null && eval "$(starship init zsh)"
 # happens after the widget is actually defined (avoids fast-syntax-highlighting
 # "unhandled ZLE widget" warning). fzf-tab's ctrl-space:toggle only fires
 # inside the picker, so they don't conflict.
-bindkey -s '^\' 'yy\n'                              # Ctrl-\ → yazi launcher
+#
+# Ctrl-\ → yazi launcher. Under ZVM_INIT_MODE=sourcing, zvm_init runs at
+# source-time (line 74), so its after_init pass iterates zvm_after_init_commands
+# while it's empty. Any later `zvm_after_init_commands+=(…)` is appended to a
+# dead array. Direct bindkey works because sourcing-mode zvm does not rebind
+# the main keymap after this point — that's the whole reason for sourcing mode.
+bindkey -s '^\' 'yy\n'
 
 # ─── Hooks & functions ──────────────────────────────────────────────────────
 autoload -U add-zsh-hook
@@ -126,7 +158,11 @@ yy() {
 #
 # unalias the names in case a legacy alias snuck back in via zshaliases
 # (some omarchy/agent-vault setups define `alias claude='agent-vault …'`).
-unalias claude codex opencode 2>/dev/null
+# `unalias` returns 1 on the first missing name and skips the rest, so loop
+# per-name to guarantee all three get cleared regardless of which (if any)
+# alias actually exists.
+for _agent in claude codex opencode; do unalias "$_agent" 2>/dev/null; done
+unset _agent
 
 # Deliberate-unsandbox convenience: <name>-raw runs the agent outside bwrap.
 # Implementation: invoke the real binary directly at ~/.local/bin/<agent>,
@@ -140,8 +176,8 @@ unalias claude codex opencode 2>/dev/null
 # ~/.gnupg, ~/.config/rbw, .env files, etc.) even in -raw mode — defense
 # in depth, deliberately layered above bwrap.
 alias claude-raw='$HOME/.local/bin/claude'
-alias codex-raw='$HOME/.local/bin/codex'
-alias opencode-raw='$HOME/.local/bin/opencode'
+alias codex-raw='/usr/bin/codex'
+alias opencode-raw='/usr/bin/opencode'
 
 # zoxide MUST be last: it installs a chpwd hook + precmd, and zoxide's doctor
 # warns if any later sourced file (aliases, hooks, secrets) registers chpwd

@@ -152,8 +152,12 @@ keymap({ "n", "v" }, ",", function()
 	require("blink.chartoggle").toggle_char_eol(",")
 end, { desc = "Toggle , at eol" })
 
--- Blink Tree
-keymap("n", "<C-n>", "<cmd>BlinkTree toggle<cr>", { desc = "Toggle file tree" })
+-- Neo-tree — sidebar file explorer. `:Neotree toggle reveal` composes two
+-- arg-style flags: `toggle` flips open/closed, `reveal` focuses the active
+-- buffer in the tree on open. With `follow_current_file.enabled = true` in
+-- the plugin opts (plugins/editor.lua), subsequent buffer switches keep the
+-- tree synced automatically — no per-buffer remap or autocmd needed.
+keymap("n", "<C-n>", "<cmd>Neotree toggle reveal<cr>", { desc = "Toggle file tree (reveal current file)" })
 
 -- Outline
 keymap("n", "<leader>o", "<cmd>Outline<CR>", { desc = "Toggle outline" })

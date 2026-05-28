@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "auto",
+    "allow": [
+      "Read(~/Programming/**)",
+      "Read(~/.local/share/chezmoi/**)",
+      "Bash(ls:*)",
+      "Bash(rg:*)",
+      "Bash(fd:*)",
+      "Bash(jq:*)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm tsc:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash list:*)",
+      "Bash(rtk proxy git diff:*)",
+      "Bash(rtk proxy git apply:*)",
+      "Bash(rtk proxy git format-patch:*)",
+      "Bash(chezmoi status:*)",
+      "Bash(chezmoi diff:*)",
+      "Bash(chezmoi managed:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./server/.env)",
+      "Read(./server/.env.*)",
+      "Read(./secrets/**)",
+      "Read(~/.ssh/id_*)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.config/gh/hosts.yml)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~/*)",
+      "Bash(rm -rf $HOME*)"
+    ]
+  },
+  "additionalDirectories": [
+    "~/Programming"
+  ],
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "allowWrite": [
+        "~/.config/mise",
+        "~/.cache/mise",
+        "~/.local/share/mise",
+        "~/Programming"
+      ]
+    }
+  },
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_NO_FLICKER": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
+  },
+  "cleanupPeriodDays": 9999,
+  "editorMode": "vim",
+  "statusLine": {
+    "type": "command",
+    "command": "bash $HOME/.claude/statusline.sh",
+    "timeout": 5
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "bash $HOME/.claude/hooks/deny-secrets.sh" }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "dcg" }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "rtk hook claude" }
+        ]
+      },
+      {
+        "matcher": "Read|Edit|Write|NotebookEdit|Glob|Grep",
+        "hooks": [
+          { "type": "command", "command": "bash $HOME/.claude/hooks/deny-secrets.sh" }
+        ]
+      }
+    ],
+    "Notification": [
+      { "hooks": [ { "type": "command", "command": "bash $HOME/.claude/hooks/attention.sh set" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "bash $HOME/.claude/hooks/attention.sh clear" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "bash $HOME/.claude/hooks/attention.sh clear" } ] }
+    ]
+  },
+  "effortLevel": "high",
+  "skipAutoPermissionPrompt": true,
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
+  }
+}

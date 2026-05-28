@@ -30,6 +30,7 @@ from .config import AppConfig
 from .lmstudio import LMStudioClient
 from .nllb import NLLBClient
 from .services.rewrite import RewriteService
+from .transcript_log import TranscriptLogger
 from .services.surya import SuryaService
 from .services.textgen import TextGenError, TextGenService
 from .services.translate import TranslateError, TranslateService
@@ -62,7 +63,16 @@ class Daemon:
             surya_bin=config.surya_bin,
             gfx_override=config.surya_gfx_override,
         )
-        self._rewrite = RewriteService(self._lms, self._vocab, self._windows)
+        self._transcript_log = TranscriptLogger(
+            path=config.transcript_log_path,
+            enabled=config.transcript_log_enabled,
+            hash_chain=config.transcript_log_hash_chain,
+        )
+        self._rewrite = RewriteService(
+            self._lms, self._vocab, self._windows,
+            self._transcript_log,
+            log_full_prompt=config.transcript_log_full_prompt,
+        )
         self._vision = VisionService(
             self._lms,
             surya=self._surya,
@@ -209,7 +219,11 @@ class Daemon:
 
     async def _op_rewrite(self, req: dict[str, Any]) -> dict[str, Any]:
         text = req.get("text", "")
-        result = await self._rewrite.rewrite(text)
+        result = await self._rewrite.rewrite(
+            text,
+            asr_model=req.get("asr_model", ""),
+            asr_backend=req.get("asr_backend", ""),
+        )
         return {
             "ok": not result.fell_back,
             "text": result.text,

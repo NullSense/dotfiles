@@ -1,7 +1,13 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "cleanupPeriodDays": 9999,
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_NO_FLICKER": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
+  },
   "permissions": {
-    "defaultMode": "auto",
     "allow": [
       "Read(~/Programming/**)",
       "Read(~/.local/share/chezmoi/**)",
@@ -42,75 +48,111 @@
       "Bash(rm -rf /*)",
       "Bash(rm -rf ~/*)",
       "Bash(rm -rf $HOME*)"
-    ]
-  },
-  "additionalDirectories": [
-    "~/Programming"
-  ],
-  "sandbox": {
-    "enabled": true,
-    "filesystem": {
-      "allowWrite": [
-        "~/.config/mise",
-        "~/.cache/mise",
-        "~/.local/share/mise",
-        "~/Programming"
-      ]
-    }
-  },
-  "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
-    "CLAUDE_CODE_NO_FLICKER": "1",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
-  },
-  "cleanupPeriodDays": 9999,
-  "editorMode": "vim",
-  "statusLine": {
-    "type": "command",
-    "command": "bash $HOME/.claude/statusline.sh",
-    "timeout": 5
+    ],
+    "defaultMode": "auto"
   },
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "bash $HOME/.claude/hooks/deny-secrets.sh" }
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/deny-secrets.sh"
+          }
         ]
       },
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "dcg" }
+          {
+            "type": "command",
+            "command": "bunx cc-safety-net@0.9.0 --claude-code"
+          }
         ]
       },
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "rtk hook claude" }
+          {
+            "type": "command",
+            "command": "rtk hook claude"
+          }
         ]
       },
       {
         "matcher": "Read|Edit|Write|NotebookEdit|Glob|Grep",
         "hooks": [
-          { "type": "command", "command": "bash $HOME/.claude/hooks/deny-secrets.sh" }
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/deny-secrets.sh"
+          }
         ]
       }
     ],
     "Notification": [
-      { "hooks": [ { "type": "command", "command": "bash $HOME/.claude/hooks/attention.sh set" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh set"
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "bash $HOME/.claude/hooks/attention.sh clear" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh clear"
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "bash $HOME/.claude/hooks/attention.sh clear" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh clear"
+          }
+        ]
+      }
     ]
   },
-  "effortLevel": "high",
-  "skipAutoPermissionPrompt": true,
+  "statusLine": {
+    "type": "command",
+    "command": "bash $HOME/.claude/statusline.sh"
+  },
   "enabledPlugins": {
-    "superpowers@claude-plugins-official": true
-  }
+    "superpowers@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowAllUnixSockets": true
+    },
+    "filesystem": {
+      "allowWrite": [
+        "~/.config/mise",
+        "~/.cache/mise",
+        "~/.local/share/mise",
+        "~/Programming",
+        "/run/user/1000/gnupg",
+        "~/.gnupg"
+      ],
+      "allowRead": [
+        "~/Programming"
+      ]
+    }
+  },
+  "effortLevel": "high",
+  "editorMode": "vim",
+  "skipAutoPermissionPrompt": true,
+  "additionalDirectories": [
+    "~/Programming",
+    "~/.cargo"
+  ]
 }

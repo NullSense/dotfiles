@@ -10,7 +10,24 @@ Both must produce sensible markdown.
 
 from __future__ import annotations
 
+import importlib.util
+
+import pytest
+
 from src.services.chandra_parse import parse_chandra_to_markdown
+
+
+# The HTML-format path needs the optional "ocr" extra (beautifulsoup4 +
+# the official chandra lib). Skip those tests when the deps aren't present;
+# the JSON/GGUF path tests run unconditionally.
+_needs_bs4 = pytest.mark.skipif(
+    importlib.util.find_spec("bs4") is None,
+    reason="optional 'beautifulsoup4' not installed (extra: ocr)",
+)
+_needs_chandra = pytest.mark.skipif(
+    importlib.util.find_spec("chandra") is None,
+    reason="optional 'chandra' OCR lib not installed (extra: ocr)",
+)
 
 
 # ---------------------------------------------------------------------
@@ -124,6 +141,7 @@ def test_json_html_entities_decoded():
 # ---------------------------------------------------------------------
 # HTML format (official model output)
 
+@_needs_chandra
 def test_html_path_uses_official_parser():
     raw = (
         '<div data-label="Section-Header" data-bbox="0 0 100 30"><h1>Hello</h1></div>'
@@ -135,6 +153,7 @@ def test_html_path_uses_official_parser():
     assert "World" in out
 
 
+@_needs_bs4
 def test_html_table_post_processed_to_gfm():
     raw = (
         '<div data-label="Table" data-bbox="0 0 100 100">'
@@ -160,6 +179,7 @@ def test_html_complex_table_kept_as_html():
     assert "<table" in out  # untouched
 
 
+@_needs_chandra
 def test_html_page_headers_filtered():
     raw = (
         '<div data-label="Page-Header" data-bbox="0 0 100 20"><p>Hide me</p></div>'

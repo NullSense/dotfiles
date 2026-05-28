@@ -19,6 +19,17 @@ def _config_dir() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
 
 
+def _state_dir() -> Path:
+    return Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
+
+
+def _envbool(name: str, default: bool) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return v.strip().lower() not in ("0", "false", "no", "off", "")
+
+
 @dataclass(frozen=True, slots=True)
 class AppConfig:
     """Runtime configuration. All fields settable via env vars (HYPRWHSPR_AI_*)."""
@@ -76,6 +87,12 @@ class AppConfig:
     # JIT-loaded by LM Studio (no manual model swap needed).
     granite_model_id: str
 
+    # Transcript+rewrite logging (append-only JSONL, SHA-256 hash chain).
+    transcript_log_enabled: bool
+    transcript_log_path: Path
+    transcript_log_hash_chain: bool
+    transcript_log_full_prompt: bool
+
     @classmethod
     def from_env(cls) -> "AppConfig":
         run = _runtime_dir()
@@ -107,4 +124,11 @@ class AppConfig:
             chandra_model_id=_env("HYPRWHSPR_AI_CHANDRA_MODEL", "chandra-ocr-2"),
             qwen_model_id=_env("HYPRWHSPR_AI_QWEN_MODEL", "qwen_qwen3.6-35b-a3b"),
             granite_model_id=_env("HYPRWHSPR_AI_GRANITE_MODEL", "granite-vision-3.3-2b"),
+            transcript_log_enabled=_envbool("HYPRWHSPR_AI_LOG", True),
+            transcript_log_path=Path(_env(
+                "HYPRWHSPR_AI_LOG_PATH",
+                str(_state_dir() / "hyprwhspr-ai" / "transcripts.jsonl"),
+            )),
+            transcript_log_hash_chain=_envbool("HYPRWHSPR_AI_LOG_HASHCHAIN", True),
+            transcript_log_full_prompt=_envbool("HYPRWHSPR_AI_LOG_FULL_PROMPT", False),
         )

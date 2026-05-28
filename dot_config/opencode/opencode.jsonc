@@ -76,6 +76,7 @@
     }
   },
   "plugin": [
-    "@tarquinen/opencode-dcp@latest"
+    "@tarquinen/opencode-dcp@latest",
+    "cc-safety-net"
   ]
 }

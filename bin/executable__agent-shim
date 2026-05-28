@@ -9,8 +9,8 @@
 # a real on-disk script that PATH-shadows the real binary, we get
 # system-level enforcement regardless of how the agent is invoked.
 #
-# The shim lifts known wrapper flags (--ssh / --gpg / --rbw / --agent-vault)
-# from "$@" so `claude --ssh` reaches agent-isolated correctly — its arg
+# The shim lifts known wrapper flags (--ssh / --gpg / --rbw / --agent-vault
+# / --dotfiles) from "$@" so `claude --ssh` reaches agent-isolated correctly — its arg
 # parser breaks out of flag parsing the moment it sees the agent name.
 #
 # Bypasses (intentional, for emergency use):
@@ -35,7 +35,7 @@ for arg in "$@"; do
     fi
     case "$arg" in
         --) saw_terminator=1; passthrough+=("$arg") ;;
-        --ssh|--gpg|--rbw|--agent-vault)
+        --ssh|--gpg|--rbw|--agent-vault|--dotfiles)
             wrapper_flags+=("$arg") ;;
         *) passthrough+=("$arg") ;;
     esac

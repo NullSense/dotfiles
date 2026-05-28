@@ -30,11 +30,14 @@ import logging
 import re
 from typing import Any
 
-from bs4 import BeautifulSoup
-from chandra.output import parse_markdown as _chandra_parse_markdown
-
 
 log = logging.getLogger(__name__)
+
+
+# `bs4` and the official `chandra` lib are imported lazily inside the two
+# HTML-path helpers below. They are heavy, OCR-only optional dependencies
+# (extra "ocr"); the JSON/GGUF path needs neither, so the module must import
+# cleanly without them.
 
 
 # ---------- HTML format (official) — minimal post-processing of tables ----------
@@ -46,6 +49,7 @@ def _table_html_to_gfm(table_html: str) -> str | None:
     """Convert a simple HTML table to GFM. Returns None if too complex
     (rowspan/colspan/ragged rows) so caller keeps the raw HTML."""
     try:
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(table_html, "html.parser")
     except Exception:
         return None
@@ -94,6 +98,7 @@ def _post_process_tables(markdown: str) -> str:
 def _parse_html_format(raw: str) -> str:
     """Run the official chandra parser, then convert simple tables to GFM."""
     try:
+        from chandra.output import parse_markdown as _chandra_parse_markdown
         md = _chandra_parse_markdown(
             raw,
             include_headers_footers=False,

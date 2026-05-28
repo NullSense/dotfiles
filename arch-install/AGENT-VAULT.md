@@ -1,5 +1,8 @@
 # Agent Vault — credential broker for AI agents
 
+> Part of the agent stack — see [`AGENTS.md`](./AGENTS.md) for the full
+> pipeline (shims → infisical → bwrap → agent → MCP) and where this fits.
+
 This is the third leg of the secrets stack:
 
 | Layer | Tool | Holds |
@@ -28,7 +31,7 @@ When this doesn't help (still need normal operational hygiene):
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Agent Vault daemon (systemd --user, started at sway up)  │
+│ Agent Vault daemon (systemd --user, Hyprland session)    │
 │   Master password: TPM2-sealed credential                │
 │   Listens: 127.0.0.1:14321 (control), :14322 (MITM)      │
 │   Stores: AES-256-GCM credentials in ~/.agent-vault/     │
@@ -226,22 +229,41 @@ av-add-credential ANTHROPIC_API_KEY     # prompts silently for value, registers
 
 (Helper script lives at `~/.local/bin/av-add-credential` if installed.)
 
-### 6. How agents use the vault — wrapper aliases
+### 6. How agents use the vault
 
-The official, supported pattern is the `agent-vault vault run` wrapper. It
-creates a vault-scoped session, sets `HTTPS_PROXY` and CA trust on the wrapped
-process **only** (your normal shell stays clean), and installs the Agent
-Vault skill into claude. Token dies when the agent exits.
+> **CURRENT WIRING (updated 2026-05-28).** Agent Vault is **opt-in**, not the
+> always-on transparent layer this section originally described. Typing
+> `claude`/`codex`/`opencode` routes through the `~/bin` shims →
+> `_agent-shim` → `infisical run` → `agent-isolated` (bwrap sandbox); see
+> [`AGENTS.md`](./AGENTS.md) for the full pipeline. Agent Vault enters the
+> loop **only** when you pass `--agent-vault`:
+>
+> ```bash
+> claude --agent-vault          # route this session's HTTPS through the broker
+> codex  --agent-vault
+> ```
+>
+> The flag (lifted by `_agent-shim`, handled in `agent-isolated`) sets
+> `HTTPS_PROXY`/CA trust **inside the sandbox** for that one invocation. There
+> are no `alias claude='agent-vault vault run …'` aliases anymore — that
+> earlier approach (below) is kept for reference / ad-hoc use only.
 
-Aliases hide the wrapping (defined in `~/bin/zshaliases`):
+The underlying mechanism is the `agent-vault vault run` wrapper: it creates a
+vault-scoped session, sets `HTTPS_PROXY` and CA trust on the wrapped process
+**only** (your normal shell stays clean), and the token dies when the process
+exits. Use it directly for ad-hoc commands:
 
 ```bash
-alias claude='agent-vault vault run --vault default -- claude'
-alias codex='agent-vault vault run --vault default -- codex'
-alias opencode='agent-vault vault run --vault default -- opencode'
+agent-vault vault run --vault default -- curl https://api.openai.com/v1/models
+agent-vault vault run --vault default -- $SHELL      # transient broker subshell
 ```
 
-So you just type `claude` and the broker is in the loop transparently.
+The historical always-on aliases were:
+
+```bash
+# RETIRED — superseded by the --agent-vault flag on the sandbox wrapper.
+alias claude='agent-vault vault run --vault default -- claude'
+```
 
 **Why we DON'T use a global `~/.envrc`** — early in setup we tried exporting the
 proxy/CA env vars at shell scope via direnv. Don't do this. It poisons every

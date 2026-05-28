@@ -68,9 +68,14 @@ def cmd_ping(args: argparse.Namespace) -> int:
 
 def cmd_rewrite(args: argparse.Namespace) -> int:
     text = args.text if args.text else sys.stdin.read()
-    resp = _send({"op": "rewrite", "text": text})
-    # Always print SOMETHING — the post_transcription_hook contract is:
-    # non-empty stdout replaces the dictation, empty stdout = passthrough.
+    req: dict[str, Any] = {"op": "rewrite", "text": text}
+    asr_model = os.environ.get("HYPRWHSPR_MODEL")
+    asr_backend = os.environ.get("HYPRWHSPR_BACKEND")
+    if asr_model:
+        req["asr_model"] = asr_model
+    if asr_backend:
+        req["asr_backend"] = asr_backend
+    resp = _send(req)
     out = resp.get("text", "")
     if out:
         sys.stdout.write(out)
@@ -184,6 +189,22 @@ def cmd_text_task(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_log(args: argparse.Namespace) -> int:
+    from .config import AppConfig
+    from .transcript_log import verify_chain
+
+    cfg = AppConfig.from_env()
+    if args.log_cmd == "verify":
+        res = verify_chain(cfg.transcript_log_path)
+        if res.ok:
+            print(f"OK: {res.count} records, chain intact")
+            return 0
+        print(f"FAIL: {res.error} (after {res.count} good records)", file=sys.stderr)
+        return 1
+    print(f"unknown log subcommand: {args.log_cmd}", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="hyprwhspr-ai",
                                 description="CLI for the hyprwhspr-ai coordinator daemon.")
@@ -242,6 +263,11 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("text", nargs="?", help="text to operate on (default: stdin)")
     sp.add_argument("--question", help="for task=ask")
     sp.set_defaults(fn=cmd_text_task)
+
+    sp = sub.add_parser("log", help="inspect the transcript log")
+    log_sub = sp.add_subparsers(dest="log_cmd", required=True)
+    log_sub.add_parser("verify", help="verify the hash chain integrity")
+    sp.set_defaults(fn=cmd_log)
 
     args = p.parse_args(argv)
     return args.fn(args)

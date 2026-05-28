@@ -2,7 +2,7 @@
 # agent-isolated — bubblewrap sandbox for AI coding agents (claude, codex, opencode).
 #
 # Usage:
-#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--agent-vault] [--dry-run] [-- <agent args>]
+#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--agent-vault] [--dotfiles] [--dry-run] [-- <agent args>]
 #   agent-isolated sh                            # interactive shell inside the sandbox
 #   agent-isolated --self-test                   # run negative + positive verifications
 #   AGENT_UNSANDBOX=1 agent-isolated <agent> …   # bypass the sandbox entirely (escape hatch)
@@ -26,6 +26,14 @@
 #   --agent-vault   Set HTTPS_PROXY/CA cert/session token for credential
 #                   injection on outbound HTTPS via the host's agent-vault.
 #                   Agent talks to APIs but never sees upstream tokens.
+#   --dotfiles      Flip the config surface to READ-WRITE so the agent can
+#                   manage your dotfiles: chezmoi source + ~/.config + the
+#                   $HOME rc files + ~/bin. Supports the edit-source →
+#                   `chezmoi apply` loop from inside the sandbox. Secrets
+#                   (SECRETS.md, private_*, ~/.config/rbw, …) STAY masked —
+#                   this is NOT *-raw. Use for "update my hypr/waybar/zsh
+#                   config" tasks; default-off because configs are read-only
+#                   normally (writes confined to projects).
 #
 # Default-on (low-risk, broadly useful):
 #   plannotator     Bind ~/.{local/share,config,cache}/plannotator so the
@@ -73,6 +81,7 @@ ALLOW_SSH=0
 ALLOW_GPG=0
 ALLOW_RBW=0
 ALLOW_AGENT_VAULT=0
+ALLOW_DOTFILES=0
 # Default-on: plannotator's binds are narrow (3 dirs under $HOME, no
 # secrets), broadly useful (review / annotate flows), and harmless when
 # the binary isn't installed. Flip with --no-plannotator for the rare
@@ -88,6 +97,7 @@ while [[ $# -gt 0 ]]; do
         --gpg)            ALLOW_GPG=1; shift ;;
         --rbw)            ALLOW_RBW=1; shift ;;
         --agent-vault)    ALLOW_AGENT_VAULT=1; shift ;;
+        --dotfiles)       ALLOW_DOTFILES=1; shift ;;
         --plannotator)    ALLOW_PLANNOTATOR=1; shift ;;  # accepted for symmetry
         --no-plannotator) ALLOW_PLANNOTATOR=0; shift ;;
         --dry-run)        DRY_RUN=1; shift ;;
@@ -243,6 +253,13 @@ ARGS+=(
     --bind-try "$HOME/.local/state/opencode" "$HOME/.local/state/opencode"
 )
 
+# Tool caches (rw). Build/test tooling (uv, sigstore-rust, lefthook, go, npx,
+# cargo, mise, pip…) writes to ~/.cache; read-only here breaks "regular
+# coding" with EROFS. Bound RW wholesale — secret-bearing cache children
+# (cliphist, rbw, browser profiles) are re-masked in the secret-mask block
+# below, so this exposes only non-secret tool caches.
+ARGS+=( --bind-try "$HOME/.cache" "$HOME/.cache" )
+
 # Workspace roots (rw). ~/Programming is always writable so agents reach any
 # project regardless of launch cwd. Ad-hoc dirs via AGENT_BIND (colon-
 # separated absolute paths), e.g. AGENT_BIND=/srv/data:/mnt/scratch codex.
@@ -264,6 +281,24 @@ if (( WORKSPACE_BIND )); then
     ARGS+=( --bind "$WORKSPACE" "$WORKSPACE" )
 fi
 
+# --dotfiles: flip the config surface to RW so the agent can manage dotfiles
+# (chezmoi source + ~/.config + $HOME rc files + ~/bin) and run the
+# edit-source → `chezmoi apply` loop in-sandbox. These RW binds go BEFORE the
+# secret masks (3), so the masks still re-hide every secret child afterwards:
+# config-writable, secrets still invisible — NOT *-raw. chezmoi is bound RW
+# here and its SECRETS.md + private_* are selectively re-masked in (3).
+if (( ALLOW_DOTFILES )); then
+    ARGS+=(
+        --bind "$CHEZMOI_ROOT" "$CHEZMOI_ROOT"
+        --bind "$HOME/.config" "$HOME/.config"
+        --bind "$HOME/bin"     "$HOME/bin"
+    )
+    for _f in .zshrc .zshenv .bashrc .gitconfig .tmux.conf .vimrc .profile .envrc; do
+        [[ -e "$HOME/$_f" ]] && ARGS+=( --bind "$HOME/$_f" "$HOME/$_f" )
+    done
+    unset _f
+fi
+
 # (3) Secret masks — THE security boundary under the read floor. The floor
 # made all of $HOME readable; these overlays carve the secrets back out, so
 # this is a fail-CLOSED denylist: anything NOT listed here stays readable by
@@ -275,12 +310,22 @@ fi
 mask_dir()  { [[ -e "$1" ]] && ARGS+=( --tmpfs "$1" ); return 0; }
 mask_file() { [[ -e "$1" ]] && ARGS+=( --ro-bind /dev/null "$1" ); return 0; }
 
-# chezmoi source — SECRETS.md + nested private_* at many depths. Masked
-# wholesale: the agent never needs the *source* (deployed targets under $HOME
-# stay readable via the floor), and one tmpfs can't be defeated by a new
-# private_* slipping past a selective filter. Edit source on the host, or run
-# with AGENT_UNSANDBOX=1 for dotfile-management tasks.
-mask_dir "$CHEZMOI_ROOT"
+# chezmoi source secrets. Default: mask the WHOLE source tree (the agent never
+# needs the *source* — deployed targets under $HOME stay readable via the
+# floor — and one tmpfs can't be defeated by a new private_* slipping past a
+# selective filter). With --dotfiles the tree is bound RW above, so instead
+# re-mask just the secret-bearing entries: SECRETS.md + every private_* at any
+# depth (dirs → tmpfs, files → /dev/null).
+if (( ALLOW_DOTFILES )); then
+    mask_file "$CHEZMOI_ROOT/SECRETS.md"
+    while IFS= read -r _p; do
+        if [[ -d "$_p" ]]; then ARGS+=( --tmpfs "$_p" )
+        else ARGS+=( --ro-bind /dev/null "$_p" ); fi
+    done < <(find "$CHEZMOI_ROOT" -name 'private_*' -prune 2>/dev/null)
+    unset _p
+else
+    mask_dir "$CHEZMOI_ROOT"
+fi
 
 # Home-level credential stores + sensitive caches.
 for _m in .ssh .gnupg .aws .kube .docker .password-store .agent-vault \

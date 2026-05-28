@@ -43,6 +43,7 @@ proxy
 Qwen
 Rugile
 sudo
+Tailscale
 Tensil
 Tmux
 Ubaid

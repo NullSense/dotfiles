@@ -59,7 +59,11 @@ if [[ ! -f "${DESKTOP_DIR}/helium.desktop" ]] || [[ "$CURRENT" != "$LATEST" ]]; 
     # Desktop file (rewrite Exec to point at our stable AppImage path)
     DSK=$(find "${WORK}/squashfs-root" -maxdepth 2 -name '*.desktop' | head -1 || true)
     if [[ -n "$DSK" ]]; then
-      sed -E "s|^Exec=.*|Exec=${APPIMAGE_PATH} %U|; s|^Icon=.*|Icon=helium|" \
+      # --disable-features=WaylandWpColorManagerV1: Chromium's Wayland color-mgmt
+      # protocol greens whites on this wide-gamut (cm=dp3) display; Zen/Firefox is
+      # immune. Tradeoff: disables in-browser HDR/P3 until upstream fixes the
+      # white-point negotiation (Brave#50027 still open as of Chromium 148).
+      sed -E "s|^Exec=.*|Exec=${APPIMAGE_PATH} --disable-features=WaylandWpColorManagerV1 %U|; s|^Icon=.*|Icon=helium|" \
         "$DSK" > "${DESKTOP_DIR}/helium.desktop"
     fi
   fi

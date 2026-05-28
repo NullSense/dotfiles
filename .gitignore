@@ -8,3 +8,7 @@ arch-install/user_credentials.json
 arch-install/install.log
 arch-install/*.bak
 arch-install/*.bak.*
+# python build artifacts (never track)
+__pycache__/
+*.pyc
+*.pyo

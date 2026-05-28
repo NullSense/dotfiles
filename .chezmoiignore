@@ -31,3 +31,7 @@ arch-install/**
 # `~/.local/bin/omarchy-bg-aggregate [theme-name]`.
 .config/omarchy/backgrounds
 .config/omarchy/backgrounds/**
+
+# python build artifacts
+**/__pycache__
+**/*.pyc

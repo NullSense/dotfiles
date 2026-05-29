@@ -274,7 +274,16 @@ ARGS+=(
     --bind-try "$HOME/.cargo"      "$HOME/.cargo"
     --bind-try "$HOME/.rustup"     "$HOME/.rustup"
     --bind-try "$HOME/go"          "$HOME/go"
+    --bind-try "$HOME/.ansible"    "$HOME/.ansible"
 )
+
+# XDG_STATE_HOME (rw) — tool runtime state lives here, not just caches. mise
+# keeps its trusted-config + tool state under ~/.local/state/mise; read-only
+# meant mise refused to trust project mise.toml in a fresh worktree, so every
+# mise-shimmed pre-commit tool (gitleaks, lefthook, ansible-lint) failed. Bound
+# wholesale like ~/.local/share above; no secrets live here (keyrings/atuin/rbw
+# are under ~/.local/share and stay masked in (3)).
+ARGS+=( --bind-try "$HOME/.local/state" "$HOME/.local/state" )
 
 # Workspace roots (rw). ~/Programming is always writable so agents reach any
 # project regardless of launch cwd. Ad-hoc dirs via AGENT_BIND (colon-

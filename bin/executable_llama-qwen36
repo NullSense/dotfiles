@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# llama-server wrapper for Qwen3.6-35B-A3B APEX-MTP
-# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, gfx1031) + 64GB DDR5-5800
+# llama-server wrapper for Qwen3.6-35B-A3B APEX-MTP via Vulkan (RADV)
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
 # Model:    mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF (I-Quality, ~24GB)
-# Features: MTP self-spec + ngram-map-k4v chained, 128k ctx, MoE CPU offload, persistent slot cache
+# Features: MTP self-spec, 128k ctx, MoE CPU offload, persistent slot cache.
+#           (ngram-map-k4v was dropped 2026-05-21 — see the note above the spec flags)
+#
+# Why Vulkan, not ROCm/HIP: ROCm 7.2.3 lacks a gfx1031 Tensile library, and Tensile-symlink
+# workarounds still trip hipBLAS SGEMM internal errors during decode. Vulkan/RADV is the
+# stable path on RDNA2 — ~10% slower decode than working HIP would be, but actually works.
 set -euo pipefail
 
-# RDNA2 gfx1031 -> gfx1030 override. ROCm 7.2.3 has native gfx1031 but llama.cpp-hip
-# may still be built against gfx1030; the override is a safe no-op when not needed.
-export HSA_OVERRIDE_GFX_VERSION=10.3.0
-export GPU_TARGETS=gfx1030
+# Constrain Vulkan to the discrete GPU (0). The 9700X also exposes a tiny Raphael iGPU
+# at index 1 that we don't want kernels landing on.
+export GGML_VK_VISIBLE_DEVICES=0
 
-# ROCm 7.2.3 advertises the CPU as a HIP fallback device (ROCm1). --device ROCm0
-# below pins to the real GPU, but also hide it from device discovery so --fit / device
-# routing can never accidentally land kernels on the CPU-as-HIP path.
-export ROCR_VISIBLE_DEVICES=0
-export HIP_VISIBLE_DEVICES=0
+# RADV dedicated transfer queue: routes CPU→GPU expert weight transfers (--n-cpu-moe path)
+# through a second Vulkan queue so they don't contend with compute submissions on the
+# graphics queue. Per llama.cpp PR #19976 ("vulkan: improve partial offloading performance
+# on AMD") this helps any partial offload, and incidentally reduces compositor stutter on
+# the same GPU because inference no longer monopolizes a single queue. Needs Mesa 26+.
+export RADV_PERFTEST="${RADV_PERFTEST:+$RADV_PERFTEST,}transfer_queue"
 
 MODEL="${MODEL:-$HOME/.lmstudio/models/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf}"
 TEMPLATE="${TEMPLATE:-$HOME/.config/llama-cpp/qwen36-merged-fakezeta-allanchan-froggeric.jinja}"
@@ -22,8 +27,7 @@ SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots}"
 PORT="${PORT:-8080}"
 mkdir -p "$SLOTS_DIR"
 
-# MODE selects sampler + reasoning. `reasoning auto` lets the template/client decide;
-# `on` and `off` are explicit. preserve_thinking is still a template-kwarg (no CLI flag).
+# MODE selects sampler + reasoning. preserve_thinking is a template-kwarg (no CLI flag).
 MODE="${MODE:-code}"
 case "$MODE" in
   code)   TEMP=0.6; TOPP=0.95; PRES=0.0; REASON=on;  PRESERVE=true  ;;  # precise coding (Qwen-recommended)
@@ -32,19 +36,34 @@ case "$MODE" in
   *) echo "MODE must be code | chat | fast"; exit 1 ;;
 esac
 
-# MoE CPU offload sizing for 12 GB VRAM + ~24 GB Q4 MoE:
-#   Routed experts ~75% of model (~18 GB / 40 layers ≈ 450 MB/layer).
-#   Budget: 12 GB VRAM - 6 GB non-MoE - 0.75 GB KV (Q8 @ 128k) - 1.5 GB compute = ~3.7 GB
-#   → keep experts of ~6-8 layers on GPU → NCPUMOE 33 (32-34 sweet spot).
-#   Override at the CLI: NCPUMOE=30 ~/bin/llama-qwen36
-NCPUMOE="${NCPUMOE:-33}"
+# MoE CPU offload for 12 GB VRAM + ~24 GB Q4 MoE.
+# Budget rationale: routed experts ~75% of model (~18 GB / 40 layers ≈ 450 MB/layer);
+#   12 GB VRAM − ~6 GB non-MoE − 0.75 GB KV (Q8 @ 128k) − ~1.5 GB compute ≈ 3.7 GB for experts.
+# Empirical sweep 2026-05-21 (Vulkan, 128k ctx, Q8 KV, fa on) — monotonic curve:
+#   28 → 31.7 t/s (no MTP)  30 → 29.1   32 → 27.2   36 → 23.7
+# NCPUMOE=28 is the sweet spot — VRAM headroom is sufficient at 128k.
+# Override at the CLI: NCPUMOE=30 ~/bin/llama-qwen36
+NCPUMOE="${NCPUMOE:-28}"
 
+# --- Notes on the flags below (kept OUT of the exec block on purpose: an inline comment
+#     inside a backslash-continued command truncates it — the previous revision silently
+#     dropped every flag after --ubatch-size, i.e. threads/sampling/MTP/metrics) ---
+#
+# batch-size 3072 (raised 2048→3072 on 2026-05-21): larger logical batches improve PP
+#   throughput for CPU+GPU MoE (DocShotgun guide) via fewer CPU→GPU transfer rounds.
+#   Held at 3072 not 4096 — VRAM is ~11.5/12 GiB at long ctx and the compute buffer
+#   scales with batch-size, so 4096 may OOM. Bump only if 3072 holds at 90k+ ctx.
+#
+# ngram-map-k4v removed 2026-05-21: caused a vector OOB crash when slot context was
+#   rewound across an opencode session boundary (idle + new conversation). In live logs
+#   it gave only ~21% of accepted tokens (388/1822) vs MTP's 79% — not worth the
+#   instability. MTP self-spec (draft-mtp) alone carries the bulk of the spec speedup.
 exec llama-server \
   --model "$MODEL" \
   --alias "qwen3.6-35b-a3b-apex" \
   --chat-template-file "$TEMPLATE" \
   --host 127.0.0.1 --port "$PORT" \
-  --device ROCm0 \
+  --device Vulkan0 \
   --fit off \
   --n-gpu-layers 99 \
   --n-cpu-moe "$NCPUMOE" \
@@ -56,7 +75,7 @@ exec llama-server \
   --flash-attn on \
   --cache-type-k q8_0 \
   --cache-type-v q8_0 \
-  --batch-size 2048 \
+  --batch-size 3072 \
   --ubatch-size 512 \
   --threads 8 \
   --threads-batch 8 \
@@ -74,8 +93,4 @@ exec llama-server \
   --spec-type draft-mtp \
     --spec-draft-n-max 2 \
     --spec-draft-p-min 0.0 \
-  --spec-type ngram-map-k4v \
-    --spec-ngram-map-k4v-size-n 16 \
-    --spec-ngram-map-k4v-size-m 24 \
-    --spec-ngram-map-k4v-min-hits 1 \
   --metrics

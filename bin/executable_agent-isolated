@@ -260,6 +260,22 @@ ARGS+=(
 # below, so this exposes only non-secret tool caches.
 ARGS+=( --bind-try "$HOME/.cache" "$HOME/.cache" )
 
+# Dev-tool state/install dirs that live OUTSIDE ~/.cache. Read-only here breaks
+# any tool that writes its install/build cache — bun in particular dies with
+# "Unexpected accessing temporary directory" because its default BUN_INSTALL=
+# ~/.bun is read-only (that's the recurring claude-mem-hook failure). These hold
+# caches + downloaded toolchains/packages, not secrets; the token files (.npmrc,
+# .cargo/credentials*) are masked in the secret block (3) below.
+ARGS+=(
+    --bind-try "$HOME/.bun"        "$HOME/.bun"
+    --bind-try "$HOME/.npm"        "$HOME/.npm"
+    --bind-try "$HOME/.pnpm-store" "$HOME/.pnpm-store"
+    --bind-try "$HOME/.deno"       "$HOME/.deno"
+    --bind-try "$HOME/.cargo"      "$HOME/.cargo"
+    --bind-try "$HOME/.rustup"     "$HOME/.rustup"
+    --bind-try "$HOME/go"          "$HOME/go"
+)
+
 # Workspace roots (rw). ~/Programming is always writable so agents reach any
 # project regardless of launch cwd. Ad-hoc dirs via AGENT_BIND (colon-
 # separated absolute paths), e.g. AGENT_BIND=/srv/data:/mnt/scratch codex.
@@ -345,6 +361,7 @@ done
 
 # Secret files / sockets.
 for _m in .git-credentials .netrc .npmrc .pypirc .bitwarden-ssh-agent.sock \
+          .cargo/credentials.toml .cargo/credentials \
           .cache/rofi-rbw.runcache; do
     mask_file "$HOME/$_m"
 done

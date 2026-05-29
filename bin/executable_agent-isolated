@@ -7,11 +7,12 @@
 #   agent-isolated --self-test                   # run negative + positive verifications
 #   AGENT_UNSANDBOX=1 agent-isolated <agent> …   # bypass the sandbox entirely (escape hatch)
 #
-# Default behaviour (deny-then-allow read model): agent runs with tmpfs `/`
-# plus a READ-ONLY bind of all of `$HOME`, so it can read the whole codebase,
-# configs and tooling without per-path allow-listing. Secrets are then carved
-# back OUT with tmpfs/null overlays, and WRITES are confined to each agent's
-# own state dirs + the workspace/project roots. It cannot see ~/.ssh, ~/.gnupg,
+# Default behaviour (read-broad, secrets-masked model): agent runs with tmpfs `/`
+# plus a READ-WRITE bind of all of `$HOME`, so it can read the whole codebase and
+# write the way normal tools expect (atomic temp+rename saves to dotfiles like
+# ~/.claude.json work — the old read-only floor broke those with EROFS). Secrets
+# are carved back OUT with tmpfs/null overlays that hide the real inode, so they
+# stay both unreadable and unwritable. It cannot see ~/.ssh, ~/.gnupg,
 # the rbw/Bitwarden/atuin stores, browser profiles, keyrings, the cliphist DB,
 # the chezmoi source tree (SECRETS.md + private_*), or any secret-bearing env
 # var (BW_SESSION, AGENT_VAULT_SESSION_TOKEN, etc.).
@@ -166,7 +167,7 @@ WORKSPACE_DENY_SUBTREE=(
 WORKSPACE_BIND=0
 case "$WORKSPACE" in
     "$HOME")
-        echo "agent-isolated: cwd is bare \$HOME; not binding it writable. \$HOME is readable; writes limited to project dirs (cd into one, or set AGENT_BIND)." >&2
+        echo "agent-isolated: cwd is bare \$HOME — all of \$HOME is read-write (secrets stay masked); cd into a project if you want a tighter scope." >&2
         ;;
     "$HOME"/*)
         WORKSPACE_BIND=1
@@ -229,23 +230,27 @@ for _bin in rbw rofi-rbw bw secret-tool keyctl op doppler vault ykman \
 done
 unset _bin
 
-# ── HOME: deny-then-allow read model ───────────────────────────────
-# Floor: bind ALL of $HOME read-only so the agent can read the whole
-# codebase, configs and tooling without per-path allow-listing (this is the
-# friction fix — npx/mise/cargo/.local/bin/dotfiles are all just readable).
-# Writable carve-outs and secret masks layer on top. Order is load-bearing,
-# since later bwrap args win:
-#   (1) ro-bind $HOME      read floor
-#   (2) rw binds           agent state + workspace + Programming + AGENT_BIND
-#   (3) secret masks       carve secrets back out (THE boundary now)
+# ── HOME: writable floor, secrets masked out ───────────────────────
+# Floor: bind ALL of $HOME READ-WRITE so the agent can read the whole codebase
+# AND apps that save via atomic temp+rename (Claude Code's ~/.claude.json,
+# editors, `chezmoi apply` to rc files) work — a single-file bind mount can't be
+# rename-replaced and its RO parent can't hold the temp, so the old ro-floor
+# broke every such writer with EROFS. Secret masks layer on TOP (tmpfs/dev-null
+# overlays hide the real inode regardless of floor rw/ro), so READ-protection is
+# unchanged; only WRITE scope widened. Order is load-bearing (later args win):
+#   (1) bind $HOME (rw)    write floor  [was --ro-bind; flipped 2026-05-29]
+#   (2) rw binds           redundant now but harmless (dir mounts don't block
+#                          rename of files inside them) — kept for clarity
+#   (3) secret masks       carve secrets back out (THE boundary)
 #   (4) --ssh/--rbw/--gpg  re-expose one surface on explicit request (later)
-ARGS+=( --ro-bind "$HOME" "$HOME" )
+# NB: do NOT add single-FILE --bind lines under this floor — they become
+# mountpoints that re-break atomic-rename. Dir binds are fine.
+ARGS+=( --bind "$HOME" "$HOME" )
 
 # (2) Writable carve-outs — each agent's own state/auth (expected writable;
 # we hide *other* secrets, never the agent's own API access).
 ARGS+=(
     --bind     "$HOME/.claude"               "$HOME/.claude"
-    --bind-try "$HOME/.claude.json"          "$HOME/.claude.json"
     --bind-try "$HOME/.local/state/claude"   "$HOME/.local/state/claude"
     --bind-try "$HOME/.codex"                "$HOME/.codex"
     --bind-try "$HOME/.config/opencode"      "$HOME/.config/opencode"
@@ -321,10 +326,10 @@ ARGS+=(
     --bind-try "$HOME/.local/bin"   "$HOME/.local/bin"
     --bind-try "$HOME/.local/share" "$HOME/.local/share"
 )
-for _f in .zshrc .zshenv .bashrc .gitconfig .tmux.conf .vimrc .profile .envrc; do
-    [[ -e "$HOME/$_f" ]] && ARGS+=( --bind "$HOME/$_f" "$HOME/$_f" )
-done
-unset _f
+# (rc-file single-file binds removed 2026-05-29 with the rw floor: those dotfiles
+# are now writable via the floor, and as bind mounts they BROKE atomic-rename
+# writers — `chezmoi apply`/editors saving ~/.zshrc etc. failed exactly like
+# ~/.claude.json did. Normal writable files under the floor; no bind needed.)
 
 # (3) Secret masks — THE security boundary under the read floor. The floor
 # made all of $HOME readable; these overlays carve the secrets back out, so

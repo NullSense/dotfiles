@@ -19,6 +19,17 @@
 set -euo pipefail
 LOG="${XDG_RUNTIME_DIR:-/tmp}/deny-secrets.log"
 
+# Deliberate-exposure escape hatch: when the user has explicitly opted out of
+# the bwrap sandbox (AGENT_UNSANDBOX=1), honor that here too — this is the
+# bypass the deny messages below already promise. By design this drops the
+# secret-gate for unsandboxed runs; the sandbox remains the primary boundary.
+# (Chosen 2026-05-29; previously the hook fired even under AGENT_UNSANDBOX=1,
+# contradicting its own deny text.)
+if [[ "${AGENT_UNSANDBOX:-0}" == "1" ]]; then
+    printf '[%s] bypass: AGENT_UNSANDBOX=1\n' "$(date -Iseconds)" >> "$LOG" 2>/dev/null || true
+    exit 0
+fi
+
 event="$(cat)"
 tool="$(printf '%s' "$event" | jq -r '.tool_name // ""' 2>/dev/null || echo)"
 

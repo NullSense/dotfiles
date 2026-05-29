@@ -5,6 +5,7 @@ model_auto_compact_token_limit = 233000
 personality = "pragmatic"
 web_search = "live"
 suppress_unstable_features_warning = true
+plan_mode_reasoning_effort = "high"
 
 [projects."/home/nullsense/Programming/Tensil"]
 trust_level = "trusted"
@@ -60,6 +61,12 @@ trust_level = "trusted"
 [projects."/home/nullsense/dotfiles"]
 trust_level = "trusted"
 
+[projects."/home/nullsense/Programming/lucide-similarity-explorer"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/infra"]
+trust_level = "trusted"
+
 [notice]
 hide_full_access_warning = true
 hide_gpt5_1_migration_prompt = true
@@ -72,7 +79,7 @@ hide_gpt5_1_migration_prompt = true
 unified_exec = true
 apply_patch_freeform = true
 shell_snapshot = true
-codex_hooks = true
+hooks = true
 
 [plugins."github@openai-curated"]
 enabled = true
@@ -99,3 +106,11 @@ args = ["-u", "HTTPS_PROXY", "-u", "HTTP_PROXY", "npx", "-y", "chrome-devtools-m
 [mcp_servers.react-grab-mcp]
 command = "npx"
 args = ["-y", "@react-grab/mcp", "--stdio"]
+
+[hooks.state]
+
+[hooks.state."/home/nullsense/.codex/hooks.json:stop:0:0"]
+trusted_hash = "sha256:61130bff68b73e1edd6541b811eb6e6c297cff970fa56f293ea76d15fbcffa92"
+
+[hooks.state."/home/nullsense/.codex/hooks.json:stop:1:0"]
+trusted_hash = "sha256:e34b01eb25803a4e4009f36753fa27807a6bb342484e4977d6e628bc7b476074"

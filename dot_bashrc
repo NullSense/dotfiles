@@ -15,3 +15,4 @@ command -v mise &>/dev/null && eval "$(mise activate bash)"
 # LM Studio CLI: PATH is set in ~/.zshenv (zsh's universal env file).
 # If you ever switch to bash as default shell, mirror that block here.
 
+. "$HOME/.cargo/env"

@@ -45,3 +45,4 @@ fi
 
 # Agent Vault is per-process via `agent-vault vault run`, not blanket-exported
 # in shells, so HTTPS_PROXY / NO_PROXY are not set here.
+. "$HOME/.cargo/env"

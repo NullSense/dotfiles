@@ -13,3 +13,4 @@ export _JAVA_AWT_WM_NONREPARENTING=1 # Fix Java apps
 
 # LM Studio CLI: PATH is set in ~/.zshenv (zsh's universal env file).
 
+. "$HOME/.cargo/env"

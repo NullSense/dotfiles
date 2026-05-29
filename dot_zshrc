@@ -186,3 +186,7 @@ command -v zoxide   &>/dev/null && eval "$(zoxide init zsh --cmd cd)"
 
 # LM Studio CLI: PATH entry consolidated to dot_zshenv (single canonical source).
 
+
+# proto
+export PROTO_HOME="$XDG_DATA_HOME/proto";
+export PATH="$PROTO_HOME/shims:$PROTO_HOME/bin:$PATH";

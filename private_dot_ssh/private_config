@@ -3,6 +3,10 @@
 # Never reference IdentityFile pointing to plaintext private keys on disk.
 
 Host *
+    Host *
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10m
     # Identity & agent
     AddKeysToAgent          no                    # agent is Bitwarden, not local cache
     # IdentitiesOnly intentionally NOT set globally — with only the Bitwarden
@@ -38,3 +42,15 @@ Host github.com
     HostName github.com
     User git
     # IdentityFile intentionally omitted — agent presents the key.
+    #
+
+Host nullsense-arch
+    HostName nullsense-arch
+    User nullsense
+    ProxyCommand ~/.ssh/wake-and-connect.sh %h %p
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+
+Host oneplus-phone op
+    HostName oneplus-8t-homelab
+    User u0_a171

@@ -8,3 +8,4 @@ x-scheme-handler/claude-cli=claude-code-url-handler.desktop
 # while constructing BrushVfs". Waybar buttons bypass MIME (`thunar $HOME`).
 inode/directory=thunar.desktop
 application/x-directory=thunar.desktop
+x-scheme-handler/webcal=helium.desktop

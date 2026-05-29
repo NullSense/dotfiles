@@ -16,3 +16,18 @@ include=~/.config/omarchy/current/theme/mako.ini
 # everywhere else and want consistency. 11px is a touch denser than
 # omarchy's default so longer notification bodies fit in 420px width.
 font=Hack Nerd Font Mono 11
+
+# 'cinema' mode — auto-added by hypr-cinema-mode.service while any window is
+# fullscreen (films, games). Keeps notifications visible but unobtrusive: a 2s
+# glance instead of 5s, title-forward compact format, smaller icon. Critical
+# notifications stay sticky. mako can't do fullscreen-awareness natively, so the
+# watcher flips this mode via `makoctl mode -a/-r cinema`.
+# (anchor/width/layer are global-only in mako, so we can't move/shrink the box.)
+[mode=cinema]
+default-timeout=2000
+format=<b>%s</b> %b
+max-icon-size=24
+
+[mode=cinema urgency=critical]
+default-timeout=0
+format=<b>%s</b>\n%b

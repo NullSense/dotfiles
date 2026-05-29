@@ -1,0 +1,16 @@
+[Unit]
+Description=Hyprland fullscreen → mako cinema mode (quiet notifications)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hypr-cinema-mode
+Restart=always
+RestartSec=2
+# Idle most of the time; only acts on fullscreen enter/exit events.
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=graphical-session.target

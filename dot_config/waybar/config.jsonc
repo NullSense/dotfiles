@@ -27,6 +27,7 @@
         "custom/aiquota",
         "custom/hyprwhspr",
         "custom/xt3-status",
+        "custom/notifications",
         "idle_inhibitor",
         "group/display",
         "group/system",
@@ -194,6 +195,23 @@
         "on-click": "$HOME/.config/waybar/xt3-action.sh restart",
         "on-click-right": "$HOME/.config/waybar/xt3-action.sh stop",
         "on-click-middle": "$HOME/.config/waybar/xt3-action.sh status"
+    },
+    "custom/notifications": {
+        // mako state pill: 󰂜 idle · 󰂚 pending/cinema · 󰂛 do-not-disturb.
+        // Refresh is signal-driven (SIGRTMIN+11, fired by click actions and the
+        // hypr-cinema-mode watcher on fullscreen) with a slow interval fallback
+        // for pending-count freshness (mako has no change signal to subscribe).
+        "exec": "$HOME/.config/waybar/notifications.sh",
+        "return-type": "json",
+        "interval": 10,
+        "signal": 11,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click": "sh -c 'makoctl mode -t do-not-disturb; pkill -SIGRTMIN+11 -u $(id -u) waybar'",
+        "on-click-right": "sh -c 'makoctl dismiss -a; pkill -SIGRTMIN+11 -u $(id -u) waybar'",
+        "on-click-middle": "sh -c 'makoctl restore; pkill -SIGRTMIN+11 -u $(id -u) waybar'"
     },
     "idle_inhibitor": {
         "format": "{icon}",

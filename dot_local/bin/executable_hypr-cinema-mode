@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""hypr-cinema-mode — flip mako into a quiet 'cinema' mode while fullscreen.
+
+Listens on Hyprland's `.socket2.sock` for `fullscreen>>` events. When a window
+enters fullscreen (e.g. mpv playing a film), adds mako's `cinema` mode (shorter
+timeouts + compact format, defined in ~/.config/mako/config) so notifications
+stay visible but unobtrusive over the content. Removes it on fullscreen exit.
+
+Uses `makoctl mode -a/-r` (add/remove, not set) so it composes cleanly with a
+manually toggled do-not-disturb. Signals waybar (SIGRTMIN+11) on every change so
+the custom/notifications pill updates instantly.
+
+Socket-finding mirrors hypr-waybar-bridge: the systemd user service may start
+before Hyprland exports HYPRLAND_INSTANCE_SIGNATURE, so resolve from disk too.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+UID = os.getuid()
+XDG = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{UID}"))
+WAYBAR_SIG = "SIGRTMIN+11"
+FULLSCREEN_RE = re.compile(r"^fullscreen>>(\d)")
+
+
+def find_socket() -> Path | None:
+    his = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    base = XDG / "hypr"
+    if his:
+        sock = base / his / ".socket2.sock"
+        if sock.is_socket():
+            return sock
+    if not base.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in base.iterdir() if (p / ".socket2.sock").is_socket()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return (candidates[0] / ".socket2.sock") if candidates else None
+
+
+def run(*args: str) -> None:
+    subprocess.run(
+        args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+    )
+
+
+def set_cinema(on: bool) -> None:
+    run("makoctl", "mode", "-a" if on else "-r", "cinema")
+    run("pkill", f"-{WAYBAR_SIG}", "-u", str(UID), "waybar")
+
+
+def stream_events(sock_path: Path) -> None:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.connect(str(sock_path))
+        buf = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                return  # Hyprland closed — outer loop reconnects.
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                m = FULLSCREEN_RE.match(line.decode("utf-8", "replace"))
+                if m:
+                    set_cinema(m.group(1) == "1")
+
+
+def main() -> None:
+    # Clear any stale cinema mode left by an unclean previous exit.
+    run("makoctl", "mode", "-r", "cinema")
+    while True:
+        sock = find_socket()
+        if sock is None:
+            time.sleep(2)
+            continue
+        try:
+            stream_events(sock)
+        except (ConnectionError, OSError) as e:
+            print(f"hypr-cinema-mode: {e}", file=sys.stderr)
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    main()

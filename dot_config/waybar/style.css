@@ -87,6 +87,7 @@ window#waybar.hidden { opacity: 0; }
 #custom-agents,
 #custom-sudo,
 #custom-hyprwhspr,
+#custom-notifications,
 #custom-xt3-status {
     background: @bg0;
     color: @fg0;
@@ -96,6 +97,13 @@ window#waybar.hidden { opacity: 0; }
     border-radius: 0;
     transition: background 120ms ease, border-color 120ms ease;
 }
+
+/* Notification pill state colors. idle = dim bell, active = pending count,
+ * cinema = quiet/fullscreen, dnd = notifications suppressed. */
+#custom-notifications.idle   { color: @gray;   opacity: 0.6; }
+#custom-notifications.active  { color: @yellow; }
+#custom-notifications.cinema { color: @aqua;   }
+#custom-notifications.dnd     { color: @red;    }
 
 /* Edge pills sit flush against the screen edge. */
 .modules-left  > widget:first-child > * { margin-left:  6px; }

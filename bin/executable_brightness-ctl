@@ -13,15 +13,27 @@
 #      otherwise exit. This collapses N rapid scrolls into ~one DDC call
 #      per panel-response cycle (~500–1000 ms) instead of queuing N of them.
 #
-# Caching: `ddcutil detect` costs ~330ms per call and the bus IDs are stable
-# until you replug a monitor. We cache the detected display numbers in
-# $XDG_RUNTIME_DIR; run `brightness-ctl flush` after a docking change.
+# Monitor identification — why we DON'T cache:
+#   The previous design cached `ddcutil detect` *Display N* numbers in
+#   $XDG_RUNTIME_DIR until `flush`/reboot. Two ways that silently dropped the
+#   MSI MAG274QRF-QD:
+#     (a) `Display N` is a sequential label ddcutil reassigns each detect over
+#         whatever buses respond *that instant*. The MSI's DDC controller is
+#         documented (see sleep.conf.d/00-msi-ddc-safe.conf) to half-sleep and
+#         stop answering; a detect taken then numbers only the OLED, and the
+#         cache pins that for the whole session → MSI never gets setvcp.
+#     (b) bus renumber on resume left the cached number pointing at nothing.
+#   Fix: address by the kernel **I2C bus number** (`--bus`), which is welded to
+#   the physical DP/HDMI connector and survives ddcutil's relabelling; and
+#   re-detect inside each background burst so a detect that momentarily missed
+#   the MSI self-heals on the very next adjustment instead of staying wrong.
+#   The detect cost (~330 ms) is paid at most once per scroll *burst* (the
+#   flock coalesces), and never on the synchronous pill/OSD path — invisible.
 
 set -eu
 
 F="${XDG_RUNTIME_DIR:-/tmp}/brightness"
 LOCK="${XDG_RUNTIME_DIR:-/tmp}/brightness.lock"
-CACHE="${XDG_RUNTIME_DIR:-/tmp}/ddc-displays"
 MIN=0
 MAX=100
 SIGNAL_NUM=8   # waybar custom/brightness has "signal": 8
@@ -36,14 +48,16 @@ case "${1:-get}" in
         exit 0
         ;;
     flush)
-        rm -f "$CACHE"
-        echo "ddc-displays cache cleared"
+        # No-op kept for backward compatibility: there is no display cache to
+        # clear anymore (every apply re-detects). Safe for old callers.
+        echo "brightness-ctl: no display cache (re-detects per apply); nothing to flush"
         exit 0
         ;;
     resync)
-        # Hotplug recovery: refresh display cache and force-apply the current
-        # state value to every monitor (including any that just appeared).
-        rm -f "$CACHE"
+        # Hotplug / resume recovery: force-apply the current state value to
+        # every monitor detected right now. force=1 also makes the worker take
+        # several detect+apply passes, so a panel still settling its DDC link
+        # (the MSI right after DPMS-on) gets caught instead of missed once.
         new="$cur"
         force=1
         ;;
@@ -71,28 +85,42 @@ if [ "$force" = 0 ] && command -v omarchy-swayosd-brightness >/dev/null 2>&1; th
     omarchy-swayosd-brightness "$new" >/dev/null 2>&1 &
 fi
 
-# Detect monitors once (cache survives until `flush` or reboot).
-if [ ! -s "$CACHE" ]; then
-    ddcutil detect --terse 2>/dev/null \
-        | awk '/^Display [0-9]+$/{print $2}' \
-        > "$CACHE"
-fi
-
-# Background worker: single-instance, coalescing.
+# Background worker: single-instance, coalescing, self-healing.
 #   `flock -n` → if a worker is already running, exit; that worker will pick up
 #   our latest state on its next loop iteration. No pile-up of stale calls.
 (
     flock -n 9 || exit 0
+
+    # resync takes a few passes (catch a late-waking MSI); normal adjusts once.
+    if [ "${force:-0}" = 1 ]; then min_passes=3; else min_passes=1; fi
+
     applied=""
+    passes=0
     while :; do
         wanted=$(cat "$F" 2>/dev/null || echo 100)
-        [ "$wanted" = "$applied" ] && exit 0
-        for d in $(cat "$CACHE"); do
-            ddcutil --display "$d" --noverify --sleep-multiplier 0.1 \
-                setvcp 10 "$wanted" >/dev/null 2>&1 &
-        done
-        wait
-        applied="$wanted"
+        if [ "$wanted" = "$applied" ] && [ "$passes" -ge "$min_passes" ]; then
+            exit 0
+        fi
+
+        # Re-detect every iteration: parse the stable I2C bus number from each
+        # *valid* Display block (skip "Invalid display" / phantom adapters).
+        buses=$(ddcutil detect 2>/dev/null | awk '
+            /^Display [0-9]/   { valid = 1 }
+            /^Invalid display/ { valid = 0 }
+            valid && /I2C bus:/ { b = $NF; sub(/.*i2c-/, "", b); print b }
+        ')
+
+        if [ -n "$buses" ]; then
+            for b in $buses; do
+                ddcutil --bus "$b" --noverify --sleep-multiplier 0.1 \
+                    setvcp 10 "$wanted" >/dev/null 2>&1 &
+            done
+            wait
+            applied="$wanted"
+        fi
+
+        passes=$((passes + 1))
+        [ "$passes" -lt "$min_passes" ] && sleep 0.5
     done
 ) 9>"$LOCK" </dev/null >/dev/null 2>&1 &
 disown 2>/dev/null || true

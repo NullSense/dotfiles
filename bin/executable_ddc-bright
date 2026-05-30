@@ -1,0 +1,54 @@
+#!/usr/bin/env sh
+# Adjust hardware brightness (DDC/CI VCP 0x10) on all detected monitors in lockstep.
+# Calls run in parallel so total latency ~= one ddcutil round-trip, not N of them.
+#
+# Monitors are addressed by their stable I2C **bus number** (`--bus`), parsed
+# fresh from `ddcutil detect` on every invocation. We never reuse ddcutil's
+# sequential `Display N` labels: those are reassigned each detect over whichever
+# buses answer that instant, so a panel that was briefly unresponsive (the MSI
+# MAG274QRF-QD half-sleeps — see sleep.conf.d/00-msi-ddc-safe.conf) gets a
+# different number or vanishes, and a `--display N` write lands on the wrong
+# panel or nowhere. The bus number is welded to the physical connector.
+#
+# Usage:
+#   ddc-bright +10        # brighter by 10 on every display
+#   ddc-bright -10        # dimmer  by 10 on every display
+#   ddc-bright 50         # absolute: set every display to 50
+
+set -eu
+arg="${1:-}"
+[ -z "$arg" ] && { echo "usage: $0 [+N|-N|N]" >&2; exit 2; }
+
+# Stable I2C bus number from each *valid* Display block (skip phantom adapters).
+buses=$(ddcutil detect 2>/dev/null | awk '
+    /^Display [0-9]/   { valid = 1 }
+    /^Invalid display/ { valid = 0 }
+    valid && /I2C bus:/ { b = $NF; sub(/.*i2c-/, "", b); print b }
+')
+[ -z "$buses" ] && { echo "no displays detected" >&2; exit 1; }
+
+MIN=0
+MAX=100
+
+clamp() { awk -v n="$1" -v lo="$MIN" -v hi="$MAX" 'BEGIN{if(n<lo)n=lo;if(n>hi)n=hi;printf"%d",n}'; }
+
+case "$arg" in
+    +*) op="+"; val="${arg#+}" ;;
+    -*) op="-"; val="${arg#-}" ;;
+    *)  op="";  val=$(clamp "$arg") ;;
+esac
+
+# For relative changes, compute the post-change target on each display and
+# clamp it to [MIN, MAX] so we can't scroll the screen into invisibility.
+for b in $buses; do
+    if [ -n "$op" ]; then
+        cur=$(ddcutil --bus "$b" --terse getvcp 10 2>/dev/null | awk '{print $4}')
+        [ -z "$cur" ] && cur=50
+        target=$(awk -v c="$cur" -v o="$op" -v v="$val" 'BEGIN{print (o=="+")?c+v:c-v}')
+        target=$(clamp "$target")
+        ddcutil --bus "$b" setvcp 10 "$target" >/dev/null 2>&1 &
+    else
+        ddcutil --bus "$b" setvcp 10 "$val" >/dev/null 2>&1 &
+    fi
+done
+wait

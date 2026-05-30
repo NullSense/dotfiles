@@ -62,15 +62,6 @@
         ]
       },
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bunx cc-safety-net@0.9.0 --claude-code"
-          }
-        ]
-      },
-      {
         "matcher": "Read|Edit|Write|NotebookEdit|Glob|Grep",
         "hooks": [
           {

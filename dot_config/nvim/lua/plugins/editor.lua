@@ -203,48 +203,79 @@ return {
 		end,
 	},
 	{
-		-- replaces iamcco/markdown-preview.nvim (browser-based preview, slow
-		-- to update, requires yarn build). render-markdown.nvim renders
-		-- headings / code-fence backgrounds / tables / checkboxes / link icons
-		-- directly in the buffer using treesitter. Spec straight from the
-		-- README; depends on the markdown + markdown_inline parsers which are
-		-- already in plugins/editor.lua's nvim-treesitter `parsers` list.
-		-- mini.icons is provided by plugins/ui.lua.
+		-- IN-BUFFER rendering (always on while editing markdown). Renders
+		-- headings, code-fence backgrounds, tables, checkboxes, callouts,
+		-- bullets, LaTeX and link icons directly in the buffer via treesitter.
+		-- Pairs with live-preview.nvim below, which gives an on-demand,
+		-- full-fidelity browser preview (Mermaid, KaTeX, exact GitHub CSS).
+		-- Depends on the markdown + markdown_inline parsers (already in the
+		-- nvim-treesitter `parsers` list above). mini.icons from plugins/ui.lua.
 		"MeanderingProgrammer/render-markdown.nvim",
 		ft = { "markdown" },
 		dependencies = { "nvim-treesitter/nvim-treesitter", "echasnovski/mini.icons" },
-		opts = {},
+		opts = {
+			heading = {
+				sign = true,
+				icons = { "󰲡 ", "󰲣 ", "󰲥 ", "󰲧 ", "󰲩 ", "󰲫 " },
+			},
+			code = {
+				sign = false,
+				width = "block",
+				right_pad = 1,
+				border = "thin",
+				language_icon = true,
+				language_name = true,
+			},
+			bullet = {
+				icons = { "●", "○", "◆", "◇" },
+			},
+			checkbox = {
+				enabled = true,
+				unchecked = { icon = "󰄱 " },
+				checked = { icon = "󰱒 " },
+			},
+			pipe_table = {
+				preset = "round",
+			},
+			link = {
+				image = "󰥶 ",
+				email = "󰀓 ",
+				hyperlink = "󰌹 ",
+			},
+		},
+		keys = {
+			{ "<leader>mt", "<cmd>RenderMarkdown buf_toggle<cr>", desc = "Markdown: toggle in-buffer render" },
+		},
 	},
 	{
-		"epwalsh/obsidian.nvim",
-		version = "*", -- recommended, use latest release instead of latest commit
-		lazy = true,
-		ft = "markdown",
-		dependencies = {
-			"nvim-lua/plenary.nvim",
+		-- ON-DEMAND browser preview. Pure-Lua backend (no Node/Deno/yarn
+		-- build to break, which is why iamcco/markdown-preview.nvim was
+		-- dropped). Live updates as you type, scroll sync, KaTeX math,
+		-- Mermaid diagrams, working internal/relative links, GitHub CSS.
+		-- Also previews HTML/CSS/JS, AsciiDoc and SVG. fzf-lua (already in
+		-- this file) powers `:LivePreview pick`.
+		"brianhuster/live-preview.nvim",
+		dependencies = { "ibhagwan/fzf-lua" },
+		cmd = "LivePreview",
+		ft = { "markdown", "html", "asciidoc", "svg" },
+		opts = {
+			port = 5500,
+			browser = "default",
+			-- true: webroot = the open file's own directory, URL = its basename.
+			-- Means `:LivePreview start` always previews the current buffer no
+			-- matter what :pwd is (and sibling images/links resolve). Tradeoff:
+			-- parent-dir links (`../other.md`) won't resolve; if you need
+			-- repo-wide relative links, set this false and `:cd` to the repo root.
+			dynamic_root = true,
+			sync_scroll = true,
 		},
-		opts = function()
-			-- Check if WSL path exists, fallback to home directory
-			local meditation_path = "/mnt/c/Users/matas/OneDrive/Documents/MEDITATION"
-			local fallback_path = vim.fn.expand("~/Documents/MEDITATION")
-
-			local path_to_use = vim.fn.isdirectory(meditation_path) == 1 and meditation_path or fallback_path
-
-			return {
-				workspaces = {
-					{
-						name = "Meditation",
-						path = path_to_use,
-					},
-				},
-			}
+		config = function(_, opts)
+			require("livepreview.config").set(opts)
 		end,
 		keys = {
-			{
-				mode = "v",
-				"<leader>on",
-				"<cmd>Obsidian extract_note<cr>",
-			},
+			{ "<leader>mp", "<cmd>LivePreview start<cr>", desc = "Markdown: browser preview (start)" },
+			{ "<leader>ms", "<cmd>LivePreview close<cr>", desc = "Markdown: browser preview (stop)" },
+			{ "<leader>mf", "<cmd>LivePreview pick<cr>", desc = "Markdown: pick file to preview" },
 		},
 	},
 }

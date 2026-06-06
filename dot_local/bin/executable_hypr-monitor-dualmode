@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# AORUS FO32U2 dual-mode auto-scale.
+#
+# The FO32U2 has a hardware "resolution switch" button that flips the panel
+# between two EDIDs: 4K (3840x2160@240) and FHD (1920x1080@240). The
+# `mode = highres` line in monitors.conf already makes Hyprland auto-select the
+# highest-refresh mode for whichever EDID is live, so refresh rate is always
+# maxed. This helper only fixes the SCALE so the logical desktop stays
+# 1920x1080 in both positions (4K => 2.0, FHD => 1.0).
+#
+# It runs once at session start and again on every monitor hotplug (pressing
+# the switch makes the output disconnect/reconnect, which Hyprland reports as
+# `monitoradded`).
+#
+# NOTE: this panel tops out at 240Hz in BOTH modes. The FO32U2 (non-Pro) is a
+# 4K@240 monitor; its FHD position is also 240Hz, not 480Hz. Verified from the
+# live EDID: the FHD EDID advertises range 48-240Hz, max dotclock 610MHz, which
+# cannot even express a 480Hz (~1210MHz) timing. If a future firmware adds an
+# FHD-480 mode, `highres` will pick it up automatically with no change here.
+set -euo pipefail
+
+OUT="DP-1"
+
+apply() {
+    local w h scale
+    read -r w h < <(hyprctl -j monitors all 2>/dev/null \
+        | jq -r --arg o "$OUT" '.[]|select(.name==$o)|"\(.width) \(.height)"') || return 0
+    [ -n "${w:-}" ] || return 0
+    case "${w}x${h}" in
+        3840x2160) scale=2.0 ;;
+        1920x1080) scale=1.0 ;;
+        *)         return 0 ;;   # unknown mode: leave Hyprland's own choice alone
+    esac
+    hyprctl keyword monitor "$OUT, highres, 0x0, $scale, bitdepth, 10, cm, dp3" >/dev/null
+}
+
+case "${1:-}" in
+    --watch)
+        apply   # initial sync at session start
+        sock="${XDG_RUNTIME_DIR}/hypr/${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
+        socat -U - "UNIX-CONNECT:${sock}" 2>/dev/null | while read -r line; do
+            case "$line" in
+                monitoradded*|monitoraddedv2*)
+                    sleep 0.5   # let the new EDID settle before reading resolution
+                    apply
+                    ;;
+            esac
+        done
+        ;;
+    *)
+        apply
+        ;;
+esac

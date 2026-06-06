@@ -100,7 +100,12 @@ zstyle ':fzf-tab:complete:(\\|*/|)ls:*' fzf-preview 'eza -1 --color=always --ico
 # ─── Tool integrations ──────────────────────────────────────────────────────
 # fzf widgets (Ctrl-T file, Alt-C cd; Ctrl-R is owned by atuin below)
 source /usr/share/fzf/key-bindings.zsh
-source /usr/share/fzf/completion.zsh
+# Do NOT source /usr/share/fzf/completion.zsh: it eagerly binds Tab (^I) to
+# fzf-completion at startup, but zicompinit + fzf-tab load later in turbo
+# (wait lucid). So on the first prompt Tab is bound to a completion widget
+# before the completion system exists → Tab does nothing until turbo fires.
+# fzf-tab owns Tab post-turbo and is mutually exclusive with fzf's
+# completion.zsh (per fzf-tab docs), so the `**<Tab>` trigger is dead anyway.
 
 command -v mise     &>/dev/null && eval "$(mise activate zsh)"
 command -v atuin    &>/dev/null && eval "$(atuin init zsh)"

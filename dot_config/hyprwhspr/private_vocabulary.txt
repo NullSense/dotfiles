@@ -43,6 +43,7 @@ Pieter
 proxy
 Qwen
 Rugile
+SearXNG
 sudo
 Tailscale
 Tensil

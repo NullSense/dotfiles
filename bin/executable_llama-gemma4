@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# llama-server wrapper for Gemma4-12B-it Claude-Opus-distill + MTP via Vulkan (RADV)
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# Model:    yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF (Q4_K_M, 7.4GB, dense 12B)
+#           + MTP draft head (gemma-4-12B-it-MTP-Q8_0.gguf, 0.44GB) — lossless self-spec.
+# Card:     https://huggingface.co/yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF
+#
+# MTP needs llama.cpp b9553+ (Gemma 4 MTP merged 2026-06-07); this box runs b9585.
+# Card-recommended sampling: temp 1.0, top_p 0.95, top_k 64, thinking ON
+# (enable_thinking template kwarg — template is the one EMBEDDED in the GGUF, no
+# external .jinja exists for this repo; --jinja activates it).
+#
+# Why Vulkan, not ROCm/HIP: same story as llama-qwen36 — ROCm 7.2.3 has no gfx1031
+# Tensile library. Vulkan/RADV is the stable path on RDNA2.
+#
+# Unlike the Qwen3.6 MoE setup there is NO --n-cpu-moe here: dense 12B at Q4_K_M
+# fits entirely in 12GB VRAM, so decode runs full-speed on GPU. Gemma 4 is
+# mostly sliding-window attention (5:1 SWA:full, tiny global KV heads), and
+# llama.cpp's default window-sized SWA cache makes 131k ctx cheap enough to
+# keep on-GPU. NOTE the SWA trade-off: prompt-cache reuse only works for
+# strict prefix-extension (normal chat appends are fine); --cache-reuse /
+# context-shift are unsupported for SWA models, hence absent below.
+set -euo pipefail
+
+# Constrain Vulkan to the discrete GPU (0); index 1 is the Raphael iGPU.
+export GGML_VK_VISIBLE_DEVICES=0
+
+# RADV dedicated transfer queue (see llama-qwen36 for rationale; harmless here
+# since we're fully offloaded, still reduces compositor contention).
+# RADV_PERFTEST=transfer_queue is deprecated on this Mesa — the knob moved.
+export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+
+MODEL_DIR="$HOME/.lmstudio/models/yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF"
+MODEL="${MODEL:-$MODEL_DIR/gemma4-opus48-Q4_K_M.gguf}"
+DRAFT="${DRAFT:-$MODEL_DIR/gemma-4-12B-it-MTP-Q8_0.gguf}"
+SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots-gemma4}"
+PORT="${PORT:-8082}"   # 8080 = llama-qwen36, 8081 = taken (system), 1234 = LM Studio
+# 131072 = card-stated max. Measured 2026-06-11: full 131k on-GPU, 11.7/12.3 GiB
+# total system VRAM (incl. ~2.4 GiB desktop), 65.9 t/s decode, MTP acceptance 68%.
+# (GGUF metadata claims n_ctx_train=262144, but the card says 131k — and 262k
+# KV wouldn't fit anyway.)
+CTX="${CTX:-131072}"
+mkdir -p "$SLOTS_DIR"
+
+# MODE selects thinking + sampler defaults. Clients can override BOTH per request:
+# samplers via the usual OpenAI params, thinking via "chat_template_kwargs":
+# {"enable_thinking": false} in the request body (hyprwhspr-rewrite does this).
+#   think — Opus-distill reasoning (card-recommended sampling). ChatGPTBox, coding.
+#   fast  — thinking disabled server-side for minimum latency. Dictation-only server.
+MODE="${MODE:-think}"
+case "$MODE" in
+  think) REASON=on;  TEMP=1.0; TOPP=0.95; TOPK=64 ;;
+  fast)  REASON=off; TEMP=0.7; TOPP=0.95; TOPK=64 ;;
+  *) echo "MODE must be think | fast"; exit 1 ;;
+esac
+
+exec llama-server \
+  --model "$MODEL" \
+  --alias "gemma4-opus-distill" \
+  --host 127.0.0.1 --port "$PORT" \
+  --device Vulkan0 \
+  --fit off \
+  --n-gpu-layers 99 \
+  --ctx-size "$CTX" \
+  --slot-save-path "$SLOTS_DIR" \
+  --slot-prompt-similarity 0.5 \
+  --flash-attn on \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --threads 8 \
+  --threads-batch 8 \
+  --parallel 1 \
+  --no-mmap \
+  --temp "$TEMP" \
+  --top-p "$TOPP" \
+  --top-k "$TOPK" \
+  --min-p 0.0 \
+  --repeat-penalty 1.0 \
+  --jinja \
+  --reasoning "$REASON" \
+  --model-draft "$DRAFT" \
+    --spec-type draft-mtp \
+    --spec-draft-n-max 4 \
+    --n-gpu-layers-draft 99 \
+  --metrics

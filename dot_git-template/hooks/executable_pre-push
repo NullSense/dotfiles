@@ -15,6 +15,12 @@ command -v trufflehog >/dev/null 2>&1 || exit 0
 zero="0000000000000000000000000000000000000000"
 found=0
 
+# --no-update: trufflehog's self-updater tries to overwrite its own binary on
+# every run and exits 1 when it can't (e.g. installed root-owned in
+# /usr/local/bin). With --fail that generic exit-1 is indistinguishable from a
+# real finding, so the hook blocked clean pushes for weeks (the "phantom
+# verified secret" — scan reported verified_secrets:0 but exit was 1). Pinning
+# --no-update makes a non-zero exit mean an actual finding again.
 while read -r local_ref local_sha remote_ref remote_sha; do
   # Skip deletes
   [ "$local_sha" = "$zero" ] && continue
@@ -27,7 +33,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   fi
 
   # --fail returns non-zero on findings; --results=verified filters to live creds only
-  if ! trufflehog git "file://$(git rev-parse --show-toplevel)" \
+  if ! trufflehog --no-update git "file://$(git rev-parse --show-toplevel)" \
       --since-commit="${remote_sha}" --branch="${local_sha}" \
       --results=verified --fail 2>&1; then
     found=1

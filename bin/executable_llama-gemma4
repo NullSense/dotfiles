@@ -85,11 +85,15 @@ fi
 # 5-18s behind it (hyprwhspr hook caps at 4.5s → raw ASR injected). KVU pools
 # the full -c across slots dynamically (no per-slot ctx halving, ~zero extra
 # VRAM); idle overflow spills to --cache-ram.
-# ⚠ MEASURED COST on this box (b9585 Vulkan): NP=2+KVU drops single-stream
-# generation 55 → ~32 tok/s — with OR without MTP. Parallelism on the 12B is
-# expensive; use NP=1 when only one client matters, or the E4B (llama-gemma4b)
-# for batch work — it scales to 4 slots at 2.3x aggregate.
-NP="${NP:-2}"
+# ⚠ MEASURED COST on this box (b9585 Vulkan, 2026-06-11): ANY NP>1 drops the
+# 12B's single-stream generation 55 → ~33 tok/s — with or without MTP, with or
+# without KVU — and NP=2 aggregate (~30-39 tok/s) never beats NP=1 sequential
+# (55 tok/s). Parallel slots are a strict loss on this model+backend, so the
+# default is 1. The dictation-queueing problem that motivated NP=2 was caused
+# by benchmark traffic; if rewrites queue again, point hyprwhspr at the E4B
+# (`hyprwhspr-ai backend` + llama-gemma4b) instead — it scales to 4 slots at
+# 2.3x aggregate (171 tok/s) and is 2x faster per request anyway.
+NP="${NP:-1}"
 KVU="${KVU:-on}"
 PAR_ARGS=(--parallel "$NP")
 if [[ "$NP" != 1 && "$KVU" == "on" ]]; then

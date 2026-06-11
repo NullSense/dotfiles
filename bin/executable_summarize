@@ -1,0 +1,358 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["trafilatura>=1.8", "httpx>=0.27"]
+# ///
+"""summarize — parallel article summarization against a local llama-server.
+
+Built 2026-06-11 from measured prompt research (see ~/notes/SUMMARIZATION.md).
+Default target is the Gemma 4 E4B box (~/bin/llama-gemma4b, :8083, 4 slots);
+pass --base http://127.0.0.1:8082 to route a must-be-thorough document to the
+12B instead.
+
+  summarize https://example.com/article ~/notes/paper.html doc.txt
+  summarize - < article.txt
+  summarize --json https://example.com/a | jq .key_facts
+  summarize --type conceptual https://en.wikipedia.org/wiki/CRISPR
+
+Design notes (all measured locally or evidence-backed, links in the doc):
+- one-shot example + density rules: E4B fact retention 11/18 -> 15/18 and
+  16/16 (beats the 12B's 15) on the reference articles
+- length control in bullets/sentences, never words/tokens (~99% compliance)
+- grounding system message; constraints restated after the article
+- trafilatura boilerplate-stripping before the model (universal production
+  pattern); inputs over ~6k tokens get chunk -> summary-of-summaries because
+  the E4B loses coherence past ~8k input tokens
+"""
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import json
+import pathlib
+import sys
+
+import httpx
+import trafilatura
+
+# ~6k tokens at ~3.5 chars/token — past this the E4B starts confabulating the
+# back half, so we switch to hierarchical summarization (Chrome's pattern).
+CHUNK_THRESHOLD_CHARS = 21_000
+CHUNK_TARGET_CHARS = 14_000
+
+SYSTEM_PROMPT = (
+    "You are a precise, factual summarizer. Only use information explicitly "
+    "stated in the article — no outside knowledge, no inference, no "
+    "speculation; if uncertain, omit. Preserve names, numbers, dates, and "
+    "technical identifiers exactly as written. Write densely: no filler "
+    "phrases, no meta-commentary about the article. Output plain text and "
+    "Markdown only — NEVER LaTeX or math markup (write '0.1 uSv', '10^-7 Sv', "
+    "'25.4 m^2', not $-delimited expressions). Respond ONLY with the summary."
+)
+
+# One-shot example: the format demonstration is what moves Gemma-class models
+# (shot 0->1 is the big ICL gain). Served prompts share this prefix, so the
+# server's prompt cache makes it ~free after the first request.
+ONESHOT = """\
+EXAMPLE ARTICLE:
+The Morris worm, released on 2 November 1988 by Cornell graduate student \
+Robert Tappan Morris, was one of the first computer worms distributed via the \
+Internet. It exploited known vulnerabilities in sendmail, finger, and \
+rsh/rexec, along with weak passwords. Due to a flaw in its reinfection-rate \
+logic (a 1-in-7 chance check), it infected machines multiple times, rendering \
+an estimated 6,000 UNIX machines — roughly 10% of the Internet at the time — \
+unusable. Cleanup costs were estimated between $100,000 and $10 million. \
+Morris became the first person convicted under the 1986 Computer Fraud and \
+Abuse Act, receiving 400 hours of community service and a $10,050 fine.
+
+EXAMPLE SUMMARY:
+**The Morris worm, released 2 November 1988 by Cornell student Robert Tappan \
+Morris, was among the first Internet-distributed worms and crippled ~10% of \
+the Internet.**
+
+*   **Mechanism:** Exploited known vulnerabilities in sendmail, finger, and \
+rsh/rexec plus weak passwords; a flawed 1-in-7 reinfection check caused \
+repeated infection of the same hosts.
+*   **Impact:** An estimated 6,000 UNIX machines rendered unusable; cleanup \
+costs estimated at $100,000-$10 million.
+*   **Legal outcome:** Morris became the first person convicted under the \
+1986 Computer Fraud and Abuse Act — 400 hours community service and a \
+$10,050 fine.
+"""
+
+TEMPLATES = {
+    # Validated dense one-shot variant — default; best on fact-dense material.
+    "news": (
+        "Summarize the following article in 150-200 words for a technically "
+        "literate reader.\n\n"
+        "Density rules:\n"
+        "- Every sentence must carry concrete information; no filler phrases "
+        "like \"the article discusses\".\n"
+        "- Preserve EVERY important number, date, named person, organization, "
+        "and technical term exactly as written (e.g. version numbers, file "
+        "names, statute references, counts).\n"
+        "- Prefer specific facts over generalities: \"5,078 flights "
+        "cancelled\" beats \"many flights cancelled\".\n"
+        "- Only information explicitly stated in the article; no outside "
+        "knowledge, no speculation.\n"
+        "- Plain text and Markdown only — never LaTeX/math markup; write "
+        "units as plain characters (0.1 uSv, 10^-7 Sv).\n\n"
+        "Structure: one-sentence takeaway in bold, then bullet points grouped "
+        "by theme.\n\n"
+        f"{ONESHOT}\n"
+        "ARTICLE:\n{body}\n\n"
+        "Remember: facts only from the article; keep every important number "
+        "and name; cover the whole article including the middle sections."
+    ),
+    # QA-decomposition — wins on conceptual/explanatory material
+    # (+9-30% ROUGE, ACL 2025; measured 14/16 here).
+    "conceptual": (
+        "ARTICLE:\n{body}\n\n"
+        "Work in two steps.\n\n"
+        "STEP 1 — Under \"ANSWERS:\", answer these questions in one line "
+        "each, using only the article (pay equal attention to all parts, "
+        "including the middle):\n"
+        "1. What is the subject and how does it work?\n"
+        "2. Who are the key people and organizations?\n"
+        "3. What are the key numbers, dates, and technical identifiers?\n"
+        "4. What are the outcomes, impacts, or applications?\n"
+        "5. What risks, controversies, or limitations are mentioned?\n\n"
+        "STEP 2 — Under \"SUMMARY:\", write the summary for a technically "
+        "literate reader using your answers: one bold takeaway sentence, "
+        "then 5-7 bullet points, each carrying specific facts from your "
+        "answers.\n\n"
+        "Remember: facts only from the article, keep every important number "
+        "and name."
+    ),
+}
+
+# JSON mode gets its own instruction — the markdown one-shot template makes
+# the model write bullets inside the "summary" string and waste tokens.
+JSON_TEMPLATE = (
+    "Read the article and fill the JSON schema:\n"
+    "- summary: 100-150 words of dense prose (no markdown, no bullets), "
+    "preserving the important numbers, dates, names.\n"
+    "- key_facts: 5-10 short strings, each one specific fact carrying a "
+    "number, date, name, or identifier.\n"
+    "- entities: named people, organizations, products.\n"
+    "Only information explicitly stated in the article. Compact JSON, no "
+    "extra whitespace.\n\n"
+    "ARTICLE:\n{body}"
+)
+
+CHUNK_PROMPT = (
+    "Summarize the following section of a longer article in 5-7 dense "
+    "sentences. Preserve every important number, date, named person, "
+    "organization, and technical term exactly as written. Only information "
+    "explicitly stated in the text.\n\nSECTION:\n{body}"
+)
+
+JSON_SCHEMA = {
+    "name": "article_summary",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string",
+                        "description": "150-200 word dense summary"},
+            "key_facts": {"type": "array", "items": {"type": "string"},
+                          "description": "specific facts with numbers/names/dates"},
+            "entities": {"type": "array", "items": {"type": "string"},
+                         "description": "named people, organizations, products"},
+        },
+        "required": ["summary", "key_facts", "entities"],
+        "additionalProperties": False,
+    },
+}
+
+
+def die(msg: str) -> "None":
+    print(f"summarize: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_input(src: str) -> tuple[str, str]:
+    """Return (title, plain text) for a URL, file path, or '-' (stdin)."""
+    if src == "-":
+        return ("stdin", sys.stdin.read())
+    if src.startswith(("http://", "https://")):
+        downloaded = trafilatura.fetch_url(src)
+        if not downloaded:
+            raise RuntimeError(f"fetch failed: {src}")
+        meta = trafilatura.extract_metadata(downloaded)
+        text = trafilatura.extract(downloaded, favor_recall=True)
+        if not text:
+            raise RuntimeError(f"no article content extracted: {src}")
+        title = (meta.title if meta and meta.title else src)
+        return (title, text)
+    p = pathlib.Path(src).expanduser()
+    if not p.is_file():
+        raise RuntimeError(f"not a file or URL: {src}")
+    raw = p.read_text(errors="replace")
+    if p.suffix.lower() in (".html", ".htm") or raw.lstrip()[:5].lower() in ("<!doc", "<html"):
+        text = trafilatura.extract(raw, favor_recall=True)
+        if not text:
+            raise RuntimeError(f"no article content extracted: {p}")
+        return (p.stem, text)
+    return (p.stem, raw)
+
+
+def chat(client: httpx.Client, base: str, messages: list[dict],
+         max_tokens: int, json_mode: bool = False) -> str:
+    body: dict = {
+        "model": "default",
+        "messages": messages,
+        "temperature": 0.3,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_tokens": max_tokens,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    if json_mode:
+        body["response_format"] = {"type": "json_schema",
+                                   "json_schema": JSON_SCHEMA}
+    r = client.post(f"{base}/v1/chat/completions", json=body)
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"].strip()
+
+
+def split_chunks(text: str) -> list[str]:
+    """Split on line boundaries into ~CHUNK_TARGET_CHARS pieces.
+
+    trafilatura emits single-\n paragraph breaks, so split per line and
+    hard-slice any single line that still exceeds the target."""
+    units: list[str] = []
+    for line in text.split("\n"):
+        while len(line) > CHUNK_TARGET_CHARS:
+            units.append(line[:CHUNK_TARGET_CHARS])
+            line = line[CHUNK_TARGET_CHARS:]
+        units.append(line)
+    chunks, cur, cur_len = [], [], 0
+    for u in units:
+        if cur and cur_len + len(u) > CHUNK_TARGET_CHARS:
+            chunks.append("\n".join(cur))
+            cur, cur_len = [], 0
+        cur.append(u)
+        cur_len += len(u) + 1
+    if cur:
+        chunks.append("\n".join(cur))
+    return chunks
+
+
+def summarize_one(client: httpx.Client, args, template: str,
+                  title: str, text: str) -> str:
+    if len(text) > CHUNK_THRESHOLD_CHARS and not args.no_chunk:
+        # Hierarchical: dense chunk digests, then the real template over them.
+        chunks = split_chunks(text)
+        digests = [
+            chat(client, args.base,
+                 [{"role": "system", "content": SYSTEM_PROMPT},
+                  {"role": "user", "content": CHUNK_PROMPT.format(body=c)}],
+                 max_tokens=400)
+            for c in chunks
+        ]
+        text = "\n\n".join(digests)
+        print(f"  [{title}: {len(chunks)} chunks -> summary of summaries]",
+              file=sys.stderr)
+    if args.json:
+        template = JSON_TEMPLATE
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": template.format(body=text)},
+    ]
+    out = chat(client, args.base, messages,
+               max_tokens=max(args.max_tokens, 1600) if args.json
+               else args.max_tokens,
+               json_mode=args.json)
+    if args.json:
+        out = json.dumps(json.loads(out))  # validate + compact; raises if truncated
+    elif "SUMMARY:" in out:
+        out = out.split("SUMMARY:", 1)[1].strip()  # drop QA scratchpad
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description="Parallel article summarization via local llama-server "
+                    "(default: Gemma 4 E4B on :8083 — start with "
+                    "~/bin/llama-gemma4b).")
+    ap.add_argument("inputs", nargs="+",
+                    help="URLs, file paths (txt/md/html), or - for stdin")
+    ap.add_argument("--type", choices=sorted(TEMPLATES),
+                    default="news", dest="kind",
+                    help="news = dense one-shot (default, fact-dense "
+                         "material); conceptual = QA-decomposition")
+    ap.add_argument("--prompt-file", type=pathlib.Path,
+                    help="custom template with {body} placeholder "
+                         "(overrides --type)")
+    ap.add_argument("--base", default="http://127.0.0.1:8083")
+    ap.add_argument("--concurrency", type=int, default=4,
+                    help="parallel requests (match server slots; default 4)")
+    ap.add_argument("--max-tokens", type=int, default=800)
+    ap.add_argument("--json", action="store_true",
+                    help="structured output: {summary, key_facts, entities}")
+    ap.add_argument("--out", type=pathlib.Path,
+                    help="write per-input .md/.json files here instead of stdout")
+    ap.add_argument("--no-chunk", action="store_true",
+                    help="disable the >~6k-token hierarchical chunking guard")
+    ap.add_argument("--timeout", type=float, default=300.0)
+    args = ap.parse_args()
+
+    template = (args.prompt_file.read_text() if args.prompt_file
+                else TEMPLATES[args.kind])
+
+    client = httpx.Client(timeout=args.timeout)
+    try:
+        client.get(f"{args.base}/health").raise_for_status()
+    except Exception:
+        die(f"no llama-server at {args.base} — start it with "
+            f"~/bin/llama-gemma4b (E4B, parallel) or ~/bin/llama-gemma4 "
+            f"(12B, thorough) and retry")
+
+    try:
+        docs = [load_input(s) for s in args.inputs]
+    except RuntimeError as e:
+        die(str(e))
+
+    if args.out:
+        args.out.mkdir(parents=True, exist_ok=True)
+
+    failures = 0
+    with concurrent.futures.ThreadPoolExecutor(args.concurrency) as ex:
+        futs = {ex.submit(summarize_one, client, args, template, t, x): t
+                for t, x in docs}
+        results = {}
+        for fut in concurrent.futures.as_completed(futs):
+            title = futs[fut]
+            try:
+                results[title] = fut.result()
+            except Exception as e:
+                failures += 1
+                results[title] = None
+                print(f"summarize: {title}: {e}", file=sys.stderr)
+
+    for title, _ in docs:  # preserve input order
+        out = results.get(title)
+        if out is None:
+            continue
+        if args.out:
+            ext = "json" if args.json else "md"
+            safe = "".join(c if c.isalnum() or c in " -_" else "_"
+                           for c in title)[:80].strip()
+            (args.out / f"{safe}.{ext}").write_text(out + "\n")
+        elif args.json:
+            print(out)
+        else:
+            if len(docs) > 1:
+                print(f"## {title}\n")
+            print(out)
+            print()
+
+    if args.out:
+        print(f"wrote {len(docs) - failures} summaries to {args.out}",
+              file=sys.stderr)
+    sys.exit(1 if failures else 0)
+
+
+if __name__ == "__main__":
+    main()

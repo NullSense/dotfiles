@@ -97,6 +97,11 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/attention.sh clear"
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.local/bin/hyprwhspr-learn-on-submit",
+            "timeout": 5
           }
         ]
       }
@@ -145,11 +150,17 @@
         "/run/user/1000/gnupg",
         "~/.gnupg"
       ],
-      "allowRead": ["~/Programming"]
+      "allowRead": [
+        "~/Programming"
+      ]
     }
   },
   "effortLevel": "high",
   "editorMode": "vim",
   "skipAutoPermissionPrompt": true,
-  "additionalDirectories": ["~/Programming", "~/.cargo"]
+  "additionalDirectories": [
+    "~/Programming",
+    "~/.cargo"
+  ],
+  "model": "claude-fable-5[1m]"
 }

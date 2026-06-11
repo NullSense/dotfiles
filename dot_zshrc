@@ -206,3 +206,11 @@ command -v zoxide   &>/dev/null && eval "$(zoxide init zsh --cmd cd)"
 # proto
 export PROTO_HOME="$XDG_DATA_HOME/proto";
 export PATH="$PROTO_HOME/shims:$PROTO_HOME/bin:$PATH";
+# hyprwhspr-ai learn-from-corrections push adapter: reports the command line
+# on Enter, but ONLY during the brief armed window after a voice dictation
+# (arm-file in $XDG_RUNTIME_DIR; absent otherwise — zero overhead/privacy
+# impact between dictations). Must load after zsh-vi-mode (sourced at line
+# ~74 with ZVM_INIT_MODE=sourcing, so ZLE is already re-initialized here).
+# Registers a zle line-finish hook, not chpwd — safe below zoxide.
+[[ -r ~/Programming/hyprwhspr-ai/integration/zsh/hyprwhspr-learn.zsh ]] && \
+  source ~/Programming/hyprwhspr-ai/integration/zsh/hyprwhspr-learn.zsh

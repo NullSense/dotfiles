@@ -80,13 +80,21 @@ fi
 # states of past prompts in system RAM (it is NOT a VRAM spill), but its
 # bookkeeping cost grows with size — measured up to 430ms per request at ~2 GiB.
 #
-# --parallel 2 --kv-unified (2026-06-11): live dictation rewrites were timing
-# out behind bench/agent traffic on the single slot (5-18s queue → hyprwhspr
-# 4.5s hook cap → raw ASR text injected). Two slots let a short rewrite be
-# scheduled alongside a long request, and similarity routing keeps the rewrite
-# prompt's prefix cached in its own slot. --kv-unified pools the full -c
-# across slots dynamically (NO per-slot ctx halving, ~zero extra VRAM); idle
-# overflow spills to --cache-ram.
+# NP (--parallel) + KVU (--kv-unified), 2026-06-11: two slots let a short
+# dictation rewrite be scheduled alongside a long request instead of queueing
+# 5-18s behind it (hyprwhspr hook caps at 4.5s → raw ASR injected). KVU pools
+# the full -c across slots dynamically (no per-slot ctx halving, ~zero extra
+# VRAM); idle overflow spills to --cache-ram.
+# ⚠ MEASURED COST on this box (b9585 Vulkan): NP=2+KVU drops single-stream
+# generation 55 → ~32 tok/s — with OR without MTP. Parallelism on the 12B is
+# expensive; use NP=1 when only one client matters, or the E4B (llama-gemma4b)
+# for batch work — it scales to 4 slots at 2.3x aggregate.
+NP="${NP:-2}"
+KVU="${KVU:-on}"
+PAR_ARGS=(--parallel "$NP")
+if [[ "$NP" != 1 && "$KVU" == "on" ]]; then
+  PAR_ARGS+=(--kv-unified)
+fi
 exec llama-server \
   --model "$MODEL" \
   --alias "gemma4-opus-distill" \
@@ -102,8 +110,7 @@ exec llama-server \
   --cache-type-v q8_0 \
   --threads 8 \
   --threads-batch 8 \
-  --parallel 2 \
-  --kv-unified \
+  "${PAR_ARGS[@]}" \
   --no-mmap \
   --temp "$TEMP" \
   --top-p "$TOPP" \

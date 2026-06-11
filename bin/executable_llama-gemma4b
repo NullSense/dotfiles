@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# llama-server wrapper for Gemma 4 E4B-it via Vulkan (RADV) — PARALLEL summarization box.
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# Model:    bartowski/google_gemma-4-E4B-it-GGUF (Q5_K_M, 5.5GB; MatFormer "effective 4B",
+#           raw 7.5B params, 42 layers). Same gemma4 arch as llama-gemma4's 12B.
+# Card:     https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
+#
+# Purpose: high-throughput batch work (article summarization at -np N) and as the
+# cheap hyprwhspr-ai dictation backend. KV here is exceptionally cheap — SWA
+# window is just 512 tokens (vs 1024 on the 12B) and 18 of 42 layers SHARE KV —
+# so many parallel slots cost almost nothing in VRAM.
+#
+# ⚠ VRAM exclusivity: 12GB fits EITHER this OR llama-gemma4 (12B), not both.
+#   Starting this next to a loaded 12B spills to GTT and craters both.
+#
+# Why Vulkan, not ROCm/HIP: ROCm has no gfx1031 Tensile library (see llama-qwen36).
+# Same SWA trade-offs as llama-gemma4: prompt-cache reuse = strict prefix
+# extension only; --cache-reuse / context-shift unsupported.
+set -euo pipefail
+
+# Discrete GPU only (index 1 is the Raphael iGPU).
+export GGML_VK_VISIBLE_DEVICES=0
+export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+
+MODEL_DIR="$HOME/.lmstudio/models/bartowski/google_gemma-4-E4B-it-GGUF"
+MODEL="${MODEL:-$MODEL_DIR/google_gemma-4-E4B-it-Q5_K_M.gguf}"
+SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots-gemma4b}"
+PORT="${PORT:-8083}"   # 8080 = qwen36, 8082 = gemma4 12B, 8081 = taken, 1234 = LM Studio
+CTX="${CTX:-65536}"    # POOLED across slots (--kv-unified). GGUF n_ctx_train = 131072.
+mkdir -p "$SLOTS_DIR"
+
+# Parallel slots. --kv-unified pools the full -c dynamically (no per-slot ctx
+# halving): 4 articles in flight share 65536 tokens however they need. E4B's
+# tiny SWA cache makes the marginal slot ~free; raise NP for bigger batches.
+NP="${NP:-4}"
+
+# MODE — sampler + reasoning defaults; per-request overrides always win
+# (OpenAI params for samplers, chat_template_kwargs {"enable_thinking": ...}).
+#   sum  — summarization/extraction: thinking off, low temp. Faithful, fast. (default)
+#   chat — Google's recommended Gemma sampling, thinking on.
+MODE="${MODE:-sum}"
+case "$MODE" in
+  sum)  REASON=off; TEMP=0.3; TOPP=0.95; TOPK=64 ;;
+  chat) REASON=on;  TEMP=1.0; TOPP=0.95; TOPK=64 ;;
+  *) echo "MODE must be sum | chat"; exit 1 ;;
+esac
+
+# Vision is optional — the mmproj costs ~1GB VRAM that summarization doesn't need.
+# MMPROJ=on to enable image input.
+MMPROJ_ARGS=()
+if [[ "${MMPROJ:-off}" == "on" ]]; then
+  MMPROJ_ARGS=(--mmproj "$MODEL_DIR/mmproj-google_gemma-4-E4B-it-f16.gguf")
+fi
+
+# --cache-ram 2048: cap host-RAM prompt cache (default 8192) — bookkeeping cost
+# grows with size, measured ~430ms/request at ~2GiB on the 12B.
+exec llama-server \
+  --model "$MODEL" \
+  --alias "gemma4-e4b" \
+  --host 127.0.0.1 --port "$PORT" \
+  --device Vulkan0 \
+  --fit off \
+  --n-gpu-layers 99 \
+  --ctx-size "$CTX" \
+  --parallel "$NP" \
+  --kv-unified \
+  --slot-save-path "$SLOTS_DIR" \
+  --slot-prompt-similarity 0.5 \
+  --flash-attn on \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --threads 8 \
+  --threads-batch 8 \
+  --no-mmap \
+  --temp "$TEMP" \
+  --top-p "$TOPP" \
+  --top-k "$TOPK" \
+  --min-p 0.0 \
+  --repeat-penalty 1.0 \
+  --jinja \
+  --reasoning "$REASON" \
+  --cache-ram 2048 \
+  "${MMPROJ_ARGS[@]}" \
+  --metrics

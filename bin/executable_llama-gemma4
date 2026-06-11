@@ -79,6 +79,14 @@ fi
 # --cache-ram 2048: cap the host-RAM prompt cache (default 8192). It saves KV
 # states of past prompts in system RAM (it is NOT a VRAM spill), but its
 # bookkeeping cost grows with size — measured up to 430ms per request at ~2 GiB.
+#
+# --parallel 2 --kv-unified (2026-06-11): live dictation rewrites were timing
+# out behind bench/agent traffic on the single slot (5-18s queue → hyprwhspr
+# 4.5s hook cap → raw ASR text injected). Two slots let a short rewrite be
+# scheduled alongside a long request, and similarity routing keeps the rewrite
+# prompt's prefix cached in its own slot. --kv-unified pools the full -c
+# across slots dynamically (NO per-slot ctx halving, ~zero extra VRAM); idle
+# overflow spills to --cache-ram.
 exec llama-server \
   --model "$MODEL" \
   --alias "gemma4-opus-distill" \
@@ -94,7 +102,8 @@ exec llama-server \
   --cache-type-v q8_0 \
   --threads 8 \
   --threads-batch 8 \
-  --parallel 1 \
+  --parallel 2 \
+  --kv-unified \
   --no-mmap \
   --temp "$TEMP" \
   --top-p "$TOPP" \

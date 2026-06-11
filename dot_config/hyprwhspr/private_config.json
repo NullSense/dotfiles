@@ -38,7 +38,8 @@
     "SuperPlus": "Super+",
     "AltPlus": "Alt+",
     "CtrlPlus": "Ctrl+",
-    "ShiftPlus": "Shift+"
+    "ShiftPlus": "Shift+",
+    "ExaSearch": "Exa Search"
   },
   "post_transcription_hook": "/home/nullsense/.local/bin/hyprwhspr-ai-rewrite-hook"
 }

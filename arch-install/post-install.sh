@@ -5,10 +5,15 @@ set -euo pipefail
 
 echo "=== [1/11] (pacman config + service enables already handled by archinstall custom_commands) ==="
 
-echo "=== [2/11] zram (16GB compressed, single source of truth) ==="
+echo "=== [2/11] zram (ram/2 compressed, single source of truth) ==="
+# ram/2 (was ram/4): the cap costs nothing while unused — zram only consumes
+# RAM for data actually stored (zstd ≈ 2x compression in practice). ram/4
+# filled up on the 64GB box (idle daemons' cold pages) and overflowed ~3GB
+# onto the slow disk swapfile; ram/2 keeps the entire cold set in compressed
+# RAM. Worst realistic cost at the 32GB cap: ~16GB physical.
 sudo tee /etc/systemd/zram-generator.conf > /dev/null <<'ZRAM'
 [zram0]
-zram-size = ram / 4
+zram-size = ram / 2
 compression-algorithm = zstd
 swap-priority = 100
 fs-type = swap

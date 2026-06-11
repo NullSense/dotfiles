@@ -35,11 +35,15 @@ MODEL="${MODEL:-$MODEL_DIR/gemma4-opus48-Q4_K_M.gguf}"
 DRAFT="${DRAFT:-$MODEL_DIR/gemma-4-12B-it-MTP-Q8_0.gguf}"
 SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots-gemma4}"
 PORT="${PORT:-8082}"   # 8080 = llama-qwen36, 8081 = taken (system), 1234 = LM Studio
-# 131072 = card-stated max. Measured 2026-06-11: full 131k on-GPU, 11.7/12.3 GiB
-# total system VRAM (incl. ~2.4 GiB desktop), 65.9 t/s decode, MTP acceptance 68%.
-# (GGUF metadata claims n_ctx_train=262144, but the card says 131k — and 262k
-# KV wouldn't fit anyway.)
-CTX="${CTX:-131072}"
+# Context: 131072 (card max) DOES fit on paper — measured 65.9 t/s in isolation —
+# but it leaves only ~0.5 GiB VRAM slack next to a live desktop. The moment the
+# browser/Discord/Steam allocate, amdgpu evicts ~2.5 GiB of llama buffers to GTT
+# and decode craters to ~15-21 t/s (measured 2026-06-11; check with
+# mem_info_gtt_used on card1 — >1 GiB while serving = you're spilling).
+# 65536 frees ~1 GiB of headroom and is still plenty for ChatGPTBox/coding.
+# Use CTX=131072 only when the GPU is otherwise idle.
+# (GGUF metadata claims n_ctx_train=262144, but the card says 131k max.)
+CTX="${CTX:-65536}"
 mkdir -p "$SLOTS_DIR"
 
 # MODE selects thinking + sampler defaults. Clients can override BOTH per request:
@@ -54,6 +58,27 @@ case "$MODE" in
   *) echo "MODE must be think | fast"; exit 1 ;;
 esac
 
+# MTP speculative decoding. The card recommends n-max 4, but it also warns the
+# stock drafter has a lower hit rate on this finetune — live sessions measured
+# 23-42% acceptance (~1.1 accepted per 4-token draft round), where 4-deep
+# drafting is mostly waste. n-max 2 keeps the upside on agreeable spans and
+# halves the wasted draft work. SPECN=4 to restore the card's setting,
+# SPEC=off to disable speculation entirely (for A/B against plain decode).
+SPEC="${SPEC:-on}"
+SPECN="${SPECN:-2}"
+SPEC_ARGS=()
+if [[ "$SPEC" == "on" ]]; then
+  SPEC_ARGS=(
+    --model-draft "$DRAFT"
+    --spec-type draft-mtp
+    --spec-draft-n-max "$SPECN"
+    --n-gpu-layers-draft 99
+  )
+fi
+
+# --cache-ram 2048: cap the host-RAM prompt cache (default 8192). It saves KV
+# states of past prompts in system RAM (it is NOT a VRAM spill), but its
+# bookkeeping cost grows with size — measured up to 430ms per request at ~2 GiB.
 exec llama-server \
   --model "$MODEL" \
   --alias "gemma4-opus-distill" \
@@ -78,8 +103,6 @@ exec llama-server \
   --repeat-penalty 1.0 \
   --jinja \
   --reasoning "$REASON" \
-  --model-draft "$DRAFT" \
-    --spec-type draft-mtp \
-    --spec-draft-n-max 4 \
-    --n-gpu-layers-draft 99 \
+  --cache-ram 2048 \
+  "${SPEC_ARGS[@]}" \
   --metrics

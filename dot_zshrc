@@ -108,6 +108,17 @@ source /usr/share/fzf/key-bindings.zsh
 # completion.zsh (per fzf-tab docs), so the `**<Tab>` trigger is dead anyway.
 
 command -v mise     &>/dev/null && eval "$(mise activate zsh)"
+# mise task/CLI completions (task args complete via their `usage` specs).
+# Cached: regenerating on every shell start costs ~50ms; the cache is
+# refreshed when older than the mise binary.
+if command -v mise &>/dev/null; then
+  _mise_comp="${XDG_CACHE_HOME:-$HOME/.cache}/mise-completion.zsh"
+  if [[ ! -s $_mise_comp || $(command -v mise) -nt $_mise_comp ]]; then
+    mkdir -p "${_mise_comp:h}" && mise completion zsh >| "$_mise_comp" 2>/dev/null
+  fi
+  source "$_mise_comp"
+  unset _mise_comp
+fi
 command -v atuin    &>/dev/null && eval "$(atuin init zsh)"
 command -v direnv   &>/dev/null && eval "$(direnv hook zsh)"
 command -v starship &>/dev/null && eval "$(starship init zsh)"

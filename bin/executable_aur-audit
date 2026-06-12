@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# aur-audit — on-demand security audit of every installed AUR package.
+#
+# Replicates the high-value parts of aur-guard / traur without installing
+# anything: for each foreign (AUR) package it
+#   1. scans the cached/fetched PKGBUILD + .install for IOC families
+#      (via aur-build-guard --report), and
+#   2. queries the AUR RPC for maintainer / orphan / out-of-date / recent-edit
+#      status and flags MAINTAINER CHANGES vs. the last run (the #1 signal of
+#      an orphan-takeover supply-chain attack, e.g. Atomic Arch 2026-06).
+#
+# Read-only. Run it anytime, especially after `paru -Syu`.
+#   aur-audit            full audit
+#   aur-audit -q         only show packages with findings/changes
+#
+# Managed by chezmoi (bin/executable_aur-audit). Companion: aur-build-guard.
+set -uo pipefail
+
+QUIET=0; [ "${1:-}" = "-q" ] && QUIET=1
+GUARD="$(command -v aur-build-guard || echo "$HOME/bin/aur-build-guard")"
+STATE="${XDG_CACHE_HOME:-$HOME/.cache}/aur-audit"
+mkdir -p "$STATE"
+HIST="$STATE/maintainers.json"     # { "pkgbase": "maintainer-or-null" }
+[ -f "$HIST" ] || echo '{}' > "$HIST"
+
+# Exclude locally-generated *-debug packages: makepkg emits them as a side
+# effect of building, they have no AUR entry, and they mirror their parent.
+mapfile -t PKGS < <(pacman -Qqm | grep -vE -- '-debug$' | sort)
+[ ${#PKGS[@]} -eq 0 ] && { echo "No foreign/AUR packages installed."; exit 0; }
+echo "aur-audit: $(date '+%F %T') — ${#PKGS[@]} AUR packages"
+
+# --- 1. resolve a PKGBUILD dir per package (prefer paru/yay cache, else fetch) ---
+tmproot="$(mktemp -d)"; trap 'rm -rf "$tmproot"' EXIT
+pkgbuild_dir() {  # echoes a dir containing PKGBUILD for $1, or nothing
+  local p="$1" d
+  for d in "$HOME/.cache/paru/clone/$p" "$HOME/.cache/yay/$p"; do
+    [ -f "$d/PKGBUILD" ] && { echo "$d"; return; }
+  done
+  d="$tmproot/$p"; mkdir -p "$d"
+  if curl -fsSL --max-time 15 \
+       "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=$p" -o "$d/PKGBUILD" 2>/dev/null \
+     && [ -s "$d/PKGBUILD" ]; then echo "$d"; fi
+}
+
+# --- 2. one batched AUR RPC call for maintainer/orphan/ood/recent state ---
+RPC="$tmproot/rpc.json"
+args=""; for p in "${PKGS[@]}"; do args+="&arg[]=$p"; done
+curl -fsSL --max-time 30 "https://aur.archlinux.org/rpc/v5/info?${args#&}" -o "$RPC" 2>/dev/null || echo '{}' > "$RPC"
+
+# Emit, per package:  pkgbase<TAB>maintainer<TAB>flags  (flags: orphan,ood,recent)
+META="$tmproot/meta.tsv"
+python3 - "$RPC" "$HIST" > "$META" <<'PY'
+import json, sys, time
+rpc = json.load(open(sys.argv[1])) if True else {}
+results = rpc.get("results", []) if isinstance(rpc, dict) else []
+now = time.time()
+by_name = {}
+for r in results:
+    name = r.get("Name") or r.get("PackageBase")
+    by_name[name] = r
+for name, r in by_name.items():
+    m = r.get("Maintainer")
+    flags = []
+    if m is None: flags.append("orphan")
+    if r.get("OutOfDate"): flags.append("ood")
+    lm = r.get("LastModified") or 0
+    if now - lm < 72*3600: flags.append("recent")
+    print(f"{name}\t{m if m is not None else '∅'}\t{','.join(flags)}")
+# packages absent from RPC (deleted/renamed) are reported by the bash side
+PY
+
+declare -A MAINT FLAGS
+while IFS=$'\t' read -r name maint flags; do
+  [ -z "$name" ] && continue
+  MAINT["$name"]="$maint"; FLAGS["$name"]="$flags"
+done < "$META"
+
+# --- 3. load prior maintainers, walk packages, report ---
+prev_json="$(cat "$HIST")"
+prev_of() { python3 -c 'import json,sys; print(json.load(sys.stdin).get(sys.argv[1],""))' "$1" <<<"$prev_json"; }
+
+ioc_count=0; change_count=0; missing_count=0
+for p in "${PKGS[@]}"; do
+  notes=(); sev="ok"
+  m="${MAINT[$p]-__none__}"
+  fl="${FLAGS[$p]-}"
+  if [ "$m" = "__none__" ]; then
+    notes+=("not found in AUR (deleted/renamed/banned?) — investigate"); sev="warn"; ((missing_count++))
+  else
+    prev="$(prev_of "$p")"
+    if [ -n "$prev" ] && [ "$prev" != "$m" ]; then
+      notes+=("MAINTAINER CHANGED: '$prev' -> '$m' (orphan-takeover signal)"); sev="alert"; ((change_count++))
+    fi
+    case ",$fl," in *,orphan,*) notes+=("currently ORPHANED"); [ "$sev" = ok ] && sev="warn";; esac
+    case ",$fl," in *,recent,*) notes+=("modified in last 72h");; esac
+    case ",$fl," in *,ood,*) notes+=("flagged out-of-date");; esac
+  fi
+  # IOC scan of the PKGBUILD
+  d="$(pkgbuild_dir "$p")"
+  iocs=""
+  if [ -n "$d" ]; then
+    iocs="$("$GUARD" --report "$d" 2>/dev/null)"; rc=$?
+    if [ -n "$iocs" ]; then
+      [ "$rc" -gt 0 ] && { sev="alert"; ((ioc_count++)); } || { [ "$sev" = ok ] && sev="warn"; }
+    fi
+  else
+    notes+=("no PKGBUILD available to scan")
+  fi
+
+  if [ "$sev" = ok ]; then
+    [ "$QUIET" -eq 0 ] && printf '  \033[32mok\033[0m    %s\n' "$p"
+    continue
+  fi
+  color=33; [ "$sev" = alert ] && color=31
+  printf '  \033[1;%sm%-5s\033[0m %s\n' "$color" "$sev" "$p"
+  for n in "${notes[@]}"; do printf '          - %s\n' "$n"; done
+  [ -n "$iocs" ] && printf '%s\n' "$iocs"
+done
+
+# --- 4. persist current maintainer snapshot for next run's diff ---
+python3 - "$META" "$HIST" <<'PY'
+import json, sys
+snap = {}
+for line in open(sys.argv[1]):
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) >= 2 and parts[0]:
+        snap[parts[0]] = None if parts[1] == "∅" else parts[1]
+json.dump(snap, open(sys.argv[2], "w"), indent=0)
+PY
+
+echo "─────"
+printf 'Summary: %d IOC hit(s), %d maintainer change(s), %d missing-from-AUR.\n' \
+  "$ioc_count" "$change_count" "$missing_count"
+if [ $((ioc_count + change_count + missing_count)) -gt 0 ]; then
+  echo "Review flagged packages before your next AUR upgrade. Baseline saved to $HIST."
+  exit 2
+fi
+echo "Clean. Maintainer baseline saved to $HIST (changes will be flagged next run)."

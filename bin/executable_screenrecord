@@ -1,24 +1,42 @@
 #!/usr/bin/env bash
 # Screen recording via gpu-screen-recorder — Omarchy's flow, adapted.
 #
+# This is the SINGLE recording implementation for the box. Both entry points
+# route here:
+#   - Keybinds (SUPER+ALT+r etc.)      → ~/bin/screenrecord directly
+#   - Elephant menu → omarchy-menu     → omarchy-capture-screenrecording, which
+#                                         is shimmed to this script via ~/bin
+#                                         (PATH shadows omarchy's own copy).
+# Keeping one implementation means region-select, the privacy dot, and the
+# start notification behave identically no matter how recording was launched.
+#
 # Behavior:
-#   - First invocation:  pick monitor or region with slurp, start recording.
-#                        Saves to ~/Videos/screenrecording-TIMESTAMP.mp4
+#   - First invocation:  pick monitor or region with slurp (same UX as the
+#                        screenshot tool), start recording. Saves to
+#                        ~/Videos/screenrecording-TIMESTAMP.mp4
 #   - Second invocation: stops the recording, normalizes audio (-14 LUFS),
 #                        trims warmup frame, sends a clickable preview.
 #
 # Args (optional, can combine):
 #   --with-desktop-audio        record system audio
 #   --with-microphone-audio     record mic
+#   --with-webcam               overlay a floating webcam preview (ffplay)
+#   --webcam-device=/dev/videoN pick the webcam (auto-detects first if omitted)
 #   --resolution=WxH            cap resolution
+#   --stop-recording            stop if recording, else no-op (menu probe)
 #
-# Indicator:
-#   pkill -RTMIN+8 waybar       toggles a custom/screenrecord pill (if added).
+# Privacy dot:
+#   gpu-screen-recorder captures via DRM/KMS, which PipeWire never sees — so the
+#   privacy-dots backend can't light the "screen" dot for our own recordings.
+#   Instead, waybar's xt3-status.sh lights the dot whenever a gpu-screen-recorder
+#   process is alive, and we fire `pkill -RTMIN+8 waybar` on start/stop so it
+#   flips instantly. This is why portal mode is no longer needed for the dot.
 #
 # Requirements (install via paru if missing):
 #   - gpu-screen-recorder       (AUR; hardware-accelerated capture)
 #   - hyprpicker, slurp, grim   (already on the box)
 #   - ffmpeg, jq                (already on the box)
+#   - v4l2-ctl, ffplay          (only for --with-webcam)
 
 set -uo pipefail
 
@@ -34,14 +52,19 @@ mkdir -p "$OUTPUT_DIR"
 
 DESKTOP_AUDIO=false
 MIC_AUDIO=false
+WEBCAM=false
+WEBCAM_DEVICE=""
 RESOLUTION=""
 STOP=false
+FPS=60
 RECORDING_FILE="/tmp/screenrecord-current"
 
 for arg in "$@"; do
     case "$arg" in
         --with-desktop-audio)    DESKTOP_AUDIO=true ;;
         --with-microphone-audio) MIC_AUDIO=true ;;
+        --with-webcam)           WEBCAM=true ;;
+        --webcam-device=*)       WEBCAM_DEVICE="${arg#--webcam-device=}" ;;
         --resolution=*)          RESOLUTION="${arg#--resolution=}" ;;
         --stop-recording)        STOP=true ;;
     esac
@@ -54,6 +77,42 @@ default_resolution() {
     read -r w h < <(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | "\(.width) \(.height)"')
     if (( w > 3840 || h > 2160 )); then echo "3840x2160"; else echo "0x0"; fi
 }
+
+# Floating webcam preview via ffplay (cropped to the right half + downscaled).
+# Window title "WebcamOverlay" is matched by a Hyprland float rule and by cleanup.
+start_webcam_overlay() {
+    cleanup_webcam
+    if [[ -z $WEBCAM_DEVICE ]]; then
+        WEBCAM_DEVICE=$(v4l2-ctl --list-devices 2>/dev/null | grep -m1 "^[[:space:]]*/dev/video" | tr -d '\t')
+        if [[ -z $WEBCAM_DEVICE ]]; then
+            notify-send "No webcam devices found" -u critical -t 3000
+            return 1
+        fi
+    fi
+    local scale
+    scale=$(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | .scale')
+    local target_width
+    target_width=$(awk "BEGIN {printf \"%.0f\", 360 * $scale}")
+    local preferred_resolutions=("640x360" "1280x720" "1920x1080")
+    local video_size_arg=""
+    local available_formats
+    available_formats=$(v4l2-ctl --list-formats-ext -d "$WEBCAM_DEVICE" 2>/dev/null)
+    for resolution in "${preferred_resolutions[@]}"; do
+        if echo "$available_formats" | grep -q "$resolution"; then
+            video_size_arg="-video_size $resolution"
+            break
+        fi
+    done
+    # shellcheck disable=SC2086
+    ffplay -f v4l2 $video_size_arg -framerate 30 "$WEBCAM_DEVICE" \
+        -vf "crop=iw/2:ih,scale=${target_width}:-1" \
+        -window_title "WebcamOverlay" -noborder \
+        -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 \
+        -loglevel quiet &
+    sleep 1
+}
+
+cleanup_webcam() { pkill -f "WebcamOverlay" 2>/dev/null; }
 
 get_rectangles() {
     local ws=$(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | .activeWorkspace.id')
@@ -91,17 +150,38 @@ select_target() {
     if [[ -n $mon ]]; then echo "monitor:$mon"; else echo "region:${sw}x${sh}+${sx}+${sy}"; fi
 }
 
+# Human-readable summary for the start notification.
+audio_label() {
+    if [[ $DESKTOP_AUDIO == true && $MIC_AUDIO == true ]]; then echo "Desktop + Microphone"
+    elif [[ $DESKTOP_AUDIO == true ]]; then echo "Desktop"
+    elif [[ $MIC_AUDIO == true ]]; then echo "Microphone"
+    else echo "None (muted)"; fi
+}
+
+target_label() {
+    case $1 in
+        monitor:*) echo "Monitor ${1#monitor:} (full)" ;;
+        region:*)  echo "Region ${1#region:}" | sed -E 's/\+.*$//' ;;
+        *)         echo "$1" ;;
+    esac
+}
+
 start_recording() {
     local target
-    target=$(select_target) || return 1
+    target=$(select_target) || return 1   # user cancelled slurp → no notification
 
     local capture_args=()
+    local res_label
     case $target in
-        monitor:*) capture_args=(-w "${target#monitor:}" -s "${RESOLUTION:-$(default_resolution)}") ;;
+        monitor:*)
+            res_label="${RESOLUTION:-$(default_resolution)}"
+            capture_args=(-w "${target#monitor:}" -s "$res_label") ;;
         region:*)
             capture_args=(-w "${target#region:}")
-            [[ -n $RESOLUTION ]] && capture_args+=(-s "$RESOLUTION") ;;
+            res_label="native"
+            if [[ -n $RESOLUTION ]]; then capture_args+=(-s "$RESOLUTION"); res_label="$RESOLUTION"; fi ;;
     esac
+    [[ $res_label == "0x0" ]] && res_label="native"
 
     local audio_devs=""
     [[ $DESKTOP_AUDIO == true ]] && audio_devs="default_output"
@@ -112,8 +192,10 @@ start_recording() {
     local audio_args=()
     [[ -n $audio_devs ]] && audio_args=(-a "$audio_devs" -ac aac)
 
+    [[ $WEBCAM == true ]] && start_webcam_overlay
+
     local file="$OUTPUT_DIR/screenrecording-$(date +'%Y-%m-%d_%H-%M-%S').mp4"
-    gpu-screen-recorder "${capture_args[@]}" -k auto -f 60 -fm cfr \
+    gpu-screen-recorder "${capture_args[@]}" -k auto -f "$FPS" -fm cfr \
         -fallback-cpu-encoding yes -o "$file" "${audio_args[@]}" 2>/dev/null &
     local pid=$!
 
@@ -122,7 +204,20 @@ start_recording() {
     if kill -0 $pid 2>/dev/null; then
         echo "$file" > "$RECORDING_FILE"
         toggle_indicator
-        notify-send -t 2000 "Screen recording" "Started · $(basename "$file")"
+        local body
+        body="Capture:  $(target_label "$target")"$'\n'
+        body+="Audio:    $(audio_label)"$'\n'
+        body+="Quality:  ${res_label} · ${FPS} fps"
+        [[ $WEBCAM == true ]] && body+=$'\n'"Webcam:   on"
+        body+=$'\n'"File:     $(basename "$file")"$'\n'
+        body+=$'\n'"⏹  Stop: Super+Alt+R  ·  or Menu → Screenrecord"
+        notify-send -t 8000 -u normal -i media-record "  Recording started" "$body"
+    else
+        # gsr died before opening the file (e.g. encoder/capture failure)
+        cleanup_webcam
+        notify-send -u critical -t 5000 "Screen recording" \
+            "Failed to start. Run with OMARCHY_SCREENRECORD_DEBUG to inspect."
+        return 1
     fi
 }
 
@@ -151,6 +246,7 @@ stop_recording() {
     done
     pgrep -f "^gpu-screen-recorder" >/dev/null && pkill -9 -f "^gpu-screen-recorder"
 
+    cleanup_webcam
     toggle_indicator
     finalize
 

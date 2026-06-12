@@ -72,6 +72,19 @@ if command -v privacy-dots >/dev/null 2>&1; then
   [[ "$pd_class" == *scr-on* ]] && screen_active=1
 fi
 
+# gpu-screen-recorder captures via DRM/KMS, which PipeWire (and thus
+# privacy-dots) never sees. Light the screen dot ourselves whenever a recording
+# is live, and correct the tooltip so it doesn't read "Screen sharing: off"
+# mid-capture. This is why screen recording no longer needs portal mode.
+if pgrep -f '^gpu-screen-recorder' >/dev/null 2>&1; then
+  screen_active=1
+  if [[ -n "$pd_tooltip" && "$pd_tooltip" == *"Screen sharing:"* ]]; then
+    pd_tooltip=$(printf '%s' "$pd_tooltip" | sed -E 's/Screen sharing: [^|]*/Screen sharing: recording /')
+  else
+    pd_tooltip="Screen sharing: recording (gpu-screen-recorder)"
+  fi
+fi
+
 # --- X-T3 indicator ---------------------------------------------------------
 if ! camera_present; then
   xt3_glyph="$ICON_XT3_OFF"; xt3_color="$COLOR_XT3_OFF"

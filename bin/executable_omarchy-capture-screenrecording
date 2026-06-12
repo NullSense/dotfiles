@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Shim: shadow omarchy's own `omarchy-capture-screenrecording` so the elephant
+# menu (omarchy-menu → bare command name) runs OUR ~/bin/screenrecord instead.
+#
+# Why: omarchy's version forces whole-screen capture when
+# OMARCHY_SCREENRECORD_USE_PORTAL=true and otherwise diverges from the keybind
+# path. Routing both entry points through one script gives identical behavior:
+# slurp region-select (like the screenshot tool), the process-driven privacy
+# dot, and the rich start notification.
+#
+# ~/bin precedes ~/.local/share/omarchy/bin in PATH, so this wins by name
+# resolution and survives `omarchy-update` (which only touches omarchy's repo).
+# The arg interface is compatible: --with-desktop-audio, --with-microphone-audio,
+# --with-webcam, --webcam-device=, --resolution=, --stop-recording.
+#
+# To revert to omarchy's stock recorder: delete this shim (chezmoi forget +
+# remove the target) and the bare command falls back to omarchy's bin.
+exec "$HOME/bin/screenrecord" "$@"

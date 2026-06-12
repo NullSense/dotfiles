@@ -188,6 +188,7 @@
         "exec": "$HOME/.config/waybar/xt3-status.sh",
         "return-type": "json",
         "interval": 2,
+        "signal": 8,
         "format": "{}",
         "tooltip": true,
         "escape": false,

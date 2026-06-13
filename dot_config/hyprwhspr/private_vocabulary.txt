@@ -49,6 +49,7 @@ Tailscale
 Tensil
 Tmux
 Ubaid
+UBlock
 UUID
 vault
 Vicinae

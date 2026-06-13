@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""tev-fit — open image(s) in tev, sized to the actual image, fullscreen if large.
+
+Invoked by yazi's image opener (see ~/.config/yazi/yazi.toml). tev itself can't
+size its window to the image, so this wrapper:
+
+  1. launches `tev --hide-ui --auto-fit` (clean, image-only view),
+  2. measures the (first) image with ImageMagick `identify`,
+  3. finds the new tev window and the monitor it landed on, and
+  4. either resizes the floating window so on-screen pixels match the image's
+     real pixels (true 1:1), or — if the image is >=95% of that monitor in
+     either dimension — puts tev into real (total) fullscreen.
+
+Monitor geometry is taken from the monitor the window is ON (not the focused
+one), and accounts for fractional scale and 90/270 rotation, so it's correct on
+the rotated MSI as well as the 4K@2x FO32U2.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import time
+
+FULLSCREEN_FRAC = 0.95  # image >= this fraction of the monitor (either axis) -> fullscreen
+MIN_W, MIN_H = 200, 150  # don't shrink the window below this (logical px)
+
+
+def hypr_json(*args):
+    try:
+        out = subprocess.run(["hyprctl", "-j", *args],
+                             capture_output=True, text=True, timeout=5)
+        return json.loads(out.stdout)
+    except Exception:
+        return None
+
+
+def dispatch(*args):
+    subprocess.run(["hyprctl", "dispatch", *args],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def ensure_signature():
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return
+    rt = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    hd = os.path.join(rt, "hypr")
+    try:
+        sigs = sorted(os.listdir(hd),
+                      key=lambda s: os.path.getmtime(os.path.join(hd, s)),
+                      reverse=True)
+        if sigs:
+            os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = sigs[0]
+    except Exception:
+        pass
+
+
+def logical_size(mon):
+    """Return (Lw, Lh) logical px for a monitor, honoring scale + rotation."""
+    w, h = mon["width"], mon["height"]
+    scale = float(mon.get("scale", 1.0)) or 1.0
+    # transforms 1,3,5,7 are 90/270 rotations -> width/height swap
+    if mon.get("transform", 0) in (1, 3, 5, 7):
+        w, h = h, w
+    return w / scale, h / scale
+
+
+def main():
+    files = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if not files:
+        return 1
+    first = files[0]
+
+    ensure_signature()
+
+    # Remember tev windows that already exist so we can spot the new one.
+    before = {c["address"] for c in (hypr_json("clients") or [])
+              if c.get("class") == "tev"}
+
+    # Launch tev detached so the viewer outlives this wrapper.
+    subprocess.Popen(["tev", "--hide-ui", "--auto-fit", *sys.argv[1:]],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+    # Measure the first image (first frame for animations).
+    iw = ih = None
+    try:
+        out = subprocess.run(["identify", "-format", "%w %h\n", first],
+                             capture_output=True, text=True, timeout=10)
+        iw, ih = (int(x) for x in out.stdout.strip().splitlines()[0].split()[:2])
+    except Exception:
+        pass
+
+    # Wait (up to ~6s) for the new tev window to appear.
+    win = None
+    for _ in range(60):
+        for c in (hypr_json("clients") or []):
+            if c.get("class") == "tev" and c["address"] not in before:
+                win = c
+                break
+        if win:
+            break
+        time.sleep(0.1)
+    if not win:
+        return 0  # window never showed; nothing to do
+
+    addr = win["address"]
+    dispatch("focuswindow", f"address:{addr}")
+
+    if not iw or not ih:
+        return 0  # couldn't measure; leave tev at its default size
+
+    # Geometry of the monitor the window actually landed on.
+    mons = hypr_json("monitors") or []
+    mon = next((m for m in mons if m.get("id") == win.get("monitor")), None)
+    if mon is None:
+        mon = next((m for m in mons if m.get("focused")), None)
+    if mon is None:
+        return 0
+    scale = float(mon.get("scale", 1.0)) or 1.0
+    lw_mon, lh_mon = logical_size(mon)
+
+    # Image size in LOGICAL px for a true 1:1 (device px == image px) view.
+    want_w, want_h = iw / scale, ih / scale
+
+    if want_w >= FULLSCREEN_FRAC * lw_mon or want_h >= FULLSCREEN_FRAC * lh_mon:
+        dispatch("fullscreen", "0")  # total fullscreen on this monitor
+    else:
+        w = max(MIN_W, round(want_w))
+        h = max(MIN_H, round(want_h))
+        dispatch("resizewindowpixel", f"exact {w} {h},address:{addr}")
+        dispatch("centerwindow")  # centers the focused (tev) window
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

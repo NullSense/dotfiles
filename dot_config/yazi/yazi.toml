@@ -27,10 +27,11 @@ prepend_spotters = [
 # own (yazi stays usable, and quitting yazi won't kill the viewer). Hyprland
 # floats + centers it via the `match:class tev` rule in hypr/windows.conf.
 [opener]
-# --hide-ui drops tev's left sidebar/controls (toggle back with the UI key
-# inside tev); --auto-fit scales the image to the window. Clean image-only view.
+# tev-fit (~/bin) launches `tev --hide-ui --auto-fit` (clean, image-only view)
+# then sizes the floating window to the image's real pixels — or goes fullscreen
+# when the image is >=95% of the monitor. orphan=true so the viewer detaches.
 image = [
-	{ run = 'tev --hide-ui --auto-fit "$@"', desc = "View in tev (HDR)", orphan = true, for = "unix" },
+	{ run = 'tev-fit "$@"', desc = "View in tev (HDR, sized)", orphan = true, for = "unix" },
 ]
 
 [open]

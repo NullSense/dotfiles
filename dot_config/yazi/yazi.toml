@@ -13,3 +13,11 @@ image_quality = 75
 
 [tasks]
 image_alloc = 1073741824
+
+[plugin]
+# Tab on a hovered image -> rich spot panel (native dims + EXIF via exiftool).
+# Prepended so it wins over the built-in image spotter; needs perl-image-exiftool
+# for the EXIF rows, but degrades to the stock info if it's absent.
+prepend_spotters = [
+	{ mime = "image/*", run = "exif" },
+]

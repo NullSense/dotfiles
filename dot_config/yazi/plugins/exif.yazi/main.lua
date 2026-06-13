@@ -12,29 +12,51 @@ local M = {}
 -- Curated, broadly-interesting tags. exiftool only emits tags that exist, so
 -- the list self-filters per file (PNGs surface a few, camera JPEGs surface many).
 local TAGS = {
+	-- Dimensions / colour
 	"-ImageSize", "-Megapixels", "-ColorSpace", "-BitDepth", "-BitsPerSample",
+	-- Descriptive: titles, captions, comments, keywords, authorship
+	"-Title", "-ObjectName", "-Headline",
+	"-ImageDescription", "-Caption-Abstract", "-Description",
+	"-UserComment", "-Comment", "-Keywords", "-Subject",
+	"-Creator", "-By-line",
+	-- Camera
 	"-Make", "-Model", "-LensModel", "-LensID",
+	-- Exposure
 	"-FNumber", "-ExposureTime", "-ISO", "-FocalLength", "-FocalLengthIn35mmFormat",
 	"-ExposureCompensation", "-Flash", "-WhiteBalance",
+	-- Time
 	"-DateTimeOriginal", "-CreateDate",
+	-- Location
 	"-GPSPosition", "-GPSAltitude",
+	-- Misc
 	"-Software", "-Artist", "-Copyright", "-Orientation", "-Rating",
 }
 
+-- exiftool isn't always on PATH for GUI/uwsm-spawned processes (Arch only adds
+-- /usr/bin/vendor_perl via perlbin.sh in login shells), so fall back to it.
+local EXIFTOOL = { "exiftool", "/usr/bin/vendor_perl/exiftool" }
+
 local function exif_rows(job)
-	local args = { "-S", "-fast2", "-charset", "filename=utf8" }
+	local args = { "-S", "-fast", "-sep", ", ", "-charset", "filename=utf8" }
 	for _, t in ipairs(TAGS) do
 		args[#args + 1] = t
 	end
 	args[#args + 1] = tostring(job.file.url)
 
-	local output = Command("exiftool"):arg(args):stdout(Command.PIPED):stderr(Command.NULL):output()
-	if not output or output.stdout == "" then
-		return {} -- exiftool not installed, or produced nothing
+	local stdout
+	for _, bin in ipairs(EXIFTOOL) do
+		local output = Command(bin):arg(args):stdout(Command.PIPED):stderr(Command.NULL):output()
+		if output and output.stdout ~= "" then
+			stdout = output.stdout
+			break
+		end
+	end
+	if not stdout then
+		return {} -- exiftool not found, or the file carries none of these tags
 	end
 
 	local rows = { ui.Row({ "EXIF" }):style(ui.Style():fg("green")) }
-	for line in output.stdout:gmatch("[^\r\n]+") do
+	for line in stdout:gmatch("[^\r\n]+") do
 		local key, val = line:match("^(.-):%s*(.*)$")
 		if key and val and val ~= "" then
 			rows[#rows + 1] = ui.Row { "  " .. key .. ":", val }

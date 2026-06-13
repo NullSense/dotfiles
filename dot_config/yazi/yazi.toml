@@ -21,3 +21,17 @@ image_alloc = 1073741824
 prepend_spotters = [
 	{ mime = "image/*", run = "exif" },
 ]
+
+# Enter / `o` on an image -> open in tev (HDR / 10-bit / color-managed viewer).
+# `orphan = true` detaches it from yazi so the floating tev window lives on its
+# own (yazi stays usable, and quitting yazi won't kill the viewer). Hyprland
+# floats + centers it via the `match:class tev` rule in hypr/windows.conf.
+[opener]
+image = [
+	{ run = 'tev "$@"', desc = "View in tev (HDR)", orphan = true, for = "unix" },
+]
+
+[open]
+prepend_rules = [
+	{ mime = "image/*", use = "image" },
+]

@@ -1,0 +1,62 @@
+# Global fd ignore — gitignore syntax.
+# Respected automatically by EVERY fd invocation: fe/Ctrl-P, FZF_DEFAULT_COMMAND
+# /Ctrl-T, and nvim fzf-lua (all use fd). Override per-call with `fd -I`.
+# This is the single source of truth for "junk I never want in a file finder".
+
+# --- VCS internals ---
+.git/
+.hg/
+.svn/
+.jj/
+
+# --- caches ---
+*[Cc]ache*/
+.thumbnails/
+
+# --- language / package stores ---
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+__pycache__/
+.venv/
+venv/
+.tox/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.cargo/registry/
+.cargo/git/
+.rustup/
+.m2/
+.gradle/
+.nvm/
+.pyenv/
+.conda/
+go/pkg/
+
+# --- build output ---
+target/
+dist/
+build/
+out/
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+.parcel-cache/
+
+# --- apps / VMs / games runtimes ---
+.wine/
+.steam/
+Steam/
+.local/share/Steam/
+.mozilla/
+.electron*/
+.vscode*/
+.lmstudio/
+
+# --- editor scratch ---
+.config/nvim/undodir/
+undodir/
+*.swp

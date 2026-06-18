@@ -44,20 +44,15 @@ fe() {
     exec < /dev/tty
 
     IFS=$'\n' files_to_edit=($(
+        # Type-junk (caches, node_modules, build dirs, VM/app data) is excluded
+        # globally via ~/.config/fd/ignore. Here we only drop the bulky personal
+        # dirs you'd never open in an editor, keeping this $HOME-wide opener fast.
         fd --type f --hidden --follow \
-            --exclude ".git" \
-            --exclude ".config/nvim/undodir/" \
-            --exclude "node_modules" \
-            --exclude "target" \
-            --exclude "dist" \
-            --exclude "build" \
-            --exclude "*cache*" \
-            --exclude "*Cache*" \
-            --exclude ".mozilla" \
-            --exclude ".wine" \
-            --exclude ".conda" \
-            --exclude ".local/share/Steam" \
-            --exclude ".steam" \
+            --exclude Downloads --exclude Games --exclude AI \
+            --exclude Videos --exclude Music --exclude Pictures \
+            --exclude minecraft --exclude 'oneplus-8t-backup*' \
+            --exclude oneplus-homelab --exclude wsl-migration \
+            --exclude .local \
             . "$HOME" | \
             fzf --preview 'bat --style=numbers,changes --color=always --line-range :100 --wrap never {} 2>/dev/null || cat {}' \
             --preview-window='right:60%:wrap' \
@@ -76,35 +71,14 @@ fe() {
 zle -N fe
 bindkey "^p" fe
 
+# Type-junk excluded globally via ~/.config/fd/ignore; only personal-bulk here.
 export FZF_DEFAULT_COMMAND='
 fd --type f --hidden --follow \
-  --exclude ".git" \
-  --exclude ".mozilla" \
-  --exclude ".wine" \
-  --exclude "*cache*" \
-  --exclude "*Cache*" \
-  --exclude "node_modules" \
-  --exclude ".npm" \
-  --exclude ".yarn" \
-  --exclude ".pnpm-store" \
-  --exclude ".electron*" \
-  --exclude ".steam" \
-  --exclude ".conda" \
-  --exclude "Steam" \
-  --exclude "Music" \
-  --exclude "Videos" \
-  --exclude ".vscode*" \
-  --exclude ".gradle" \
-  --exclude ".nvm" \
-  --exclude ".forgit" \
-  --exclude ".cargo/registry" \
-  --exclude ".cargo/git" \
-  --exclude ".m2" \
-  --exclude ".pyenv" \
-  --exclude "target" \
-  --exclude "dist" \
-  --exclude "build" \
-  --exclude ".config/nvim/undodir" \
+  --exclude Downloads --exclude Games --exclude AI \
+  --exclude Videos --exclude Music --exclude Pictures \
+  --exclude minecraft --exclude "oneplus-8t-backup*" \
+  --exclude oneplus-homelab --exclude wsl-migration \
+  --exclude .local \
   . 2>/dev/null'
 
 export FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'

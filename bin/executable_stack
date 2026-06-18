@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# stack — start/stop the local LLM stack ON DEMAND (when you sit down to work).
+#   llama-swap  :9292  — model swapper (loads/unloads models per-request via TTL)
+#   litellm     :4000  — OpenAI gateway (logical names → local/cloud backends)
+# Not always-on by design: llama-swap already frees VRAM when models go idle, so this
+# only manages the two lightweight server processes. See ~/notes/LLM-STACK.md.
+#
+# Secrets: litellm's cloud routes (summarize-*/oracle-llm → OpenRouter) need
+# OPENROUTER_API_KEY, and virtual keys need LITELLM_MASTER_KEY — both must be in your
+# ENV when you run `stack up` (inject them via agent-vault / your secret manager;
+# systemd units are avoided here precisely because they don't see that scoped env).
+set -euo pipefail
+
+LSWAP_CFG="${LSWAP_CFG:-$HOME/.config/llama-swap/config.yaml}"
+LITELLM_CFG="${LITELLM_CFG:-$HOME/.config/litellm/config.yaml}"
+RUN="${RUN:-$HOME/.cache/llm-stack}"; mkdir -p "$RUN"
+
+# up = got any HTTP code (401 from litellm still means "alive"); 000 = not listening.
+is_up() { local c; c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$1" 2>/dev/null || true); [ -n "$c" ] && [ "$c" != "000" ]; }
+
+start_one() { # name  health-url  command...
+  local name="$1" url="$2"; shift 2
+  if is_up "$url"; then echo "  • $name already up"; return; fi
+  nohup "$@" >"$RUN/$name.log" 2>&1 &
+  echo $! >"$RUN/$name.pid"
+  echo "  ▶ $name started (pid $(cat "$RUN/$name.pid")) → log: $RUN/$name.log"
+}
+
+case "${1:-status}" in
+  up)
+    [ -n "${OPENROUTER_API_KEY:-}" ] || echo "  ⚠ OPENROUTER_API_KEY unset — summarize-*/oracle-llm (cloud) routes will 401" >&2
+    [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — gateway has no admin/virtual keys" >&2
+    start_one llama-swap http://127.0.0.1:9292/health llama-swap --config "$LSWAP_CFG" --listen 127.0.0.1:9292
+    start_one litellm    http://127.0.0.1:4000/health litellm  --config "$LITELLM_CFG" --port 4000
+    echo "  stack up. gateway → http://127.0.0.1:4000  (point apps' LLM_GATEWAY_URL here)"
+    ;;
+  down)
+    for name in litellm llama-swap; do
+      if [ -f "$RUN/$name.pid" ] && kill "$(cat "$RUN/$name.pid")" 2>/dev/null; then echo "  ■ stopped $name"; fi
+      rm -f "$RUN/$name.pid"
+    done
+    ;;
+  restart) "$0" down; sleep 1; "$0" up ;;
+  status)
+    command -v llms >/dev/null && llms || for p in 9292 4000; do
+      printf "  :%s  HTTP %s\n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:$p/health 2>/dev/null || echo down)"
+    done
+    ;;
+  logs) tail -n 40 -F "$RUN"/*.log ;;
+  *) echo "usage: stack {up|down|restart|status|logs}"; exit 1 ;;
+esac

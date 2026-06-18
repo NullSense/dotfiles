@@ -189,12 +189,17 @@ esac
 ARGS=()
 
 # Namespaces — max isolation, keep network for API access.
+# NOTE: --as-pid-1 is deliberately OMITTED. It disables bwrap's built-in PID-1
+# reaper, which made the agent (node) PID 1 in the namespace; orphaned grandchildren
+# from tool calls (mold/sccache/git/wl-copy/dbus-launch) reparent to it and it never
+# wait()s them → zombie pileup (hit 775 zombies / swap-death 2026-06-18). Letting bwrap
+# run its default init-as-pid-1 reaps them automatically; --die-with-parent still handles
+# teardown on parent death. Re-add --as-pid-1 only if a tool genuinely needs to BE pid 1.
 ARGS+=(
     --unshare-all
     --share-net
     --new-session
     --die-with-parent
-    --as-pid-1
     --cap-drop ALL
 )
 

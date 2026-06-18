@@ -1,11 +1,8 @@
-
 [Default Applications]
 x-scheme-handler/claude-cli=claude-code-url-handler.desktop
-# Pin Thunar for directory opens — `~/.local/share/applications/brush.desktop`
-# (Gaussian Splatting Studio installed to ~/.local/bin/brush) registers
-# `MimeType=inode/directory;` and was winning the default, so browser "Show in
-# folder" / file:// URLs invoked brush which crashed with "Permission denied
-# while constructing BrushVfs". Waybar buttons bypass MIME (`thunar $HOME`).
 inode/directory=thunar.desktop
 application/x-directory=thunar.desktop
 x-scheme-handler/webcal=helium.desktop
+
+[Added Associations]
+image/jpeg=satty.desktop;imv.desktop;imv-dir.desktop;

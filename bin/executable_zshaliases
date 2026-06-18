@@ -100,6 +100,13 @@ alias orphans='sudo pacman -Qtdq | sudo pacman -Rns -'
 # python (3.14) during makepkg, which breaks AUR python builds. Needs devtools.
 alias paur='paru --chroot'
 
+# Video downloads. `vdl <url>` = the video fast-path of ~/bin/grab (max-quality
+# yt-dlp). Kept as a short alias for muscle memory; the actual template lives in
+# ONE place (grab's dl_video) so the two can't drift. Extra flags pass through,
+# e.g. `vdl --cookies ~/cookies.txt <url>` for gated/NSFW. `grab -A <url>` for
+# audio-only. (Helium cookies can't be auto-decrypted — Chromium-fork keyring.)
+alias vdl='grab -v'
+
 # NOTE: claude/codex/opencode are NOT aliased here. dot_zshrc defines them
 # as shell functions (after sourcing this file) that route through
 # ~/bin/agent-isolated for OS-level bubblewrap isolation. To get the old

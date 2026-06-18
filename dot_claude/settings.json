@@ -162,5 +162,5 @@
     "~/Programming",
     "~/.cargo"
   ],
-  "model": "claude-fable-5[1m]"
+  "skipWorkflowUsageWarning": true
 }

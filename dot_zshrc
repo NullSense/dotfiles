@@ -85,7 +85,16 @@ zinit wait lucid for \
     zsh-users/zsh-completions \
   OMZP::git \
   OMZP::sudo \
-  OMZP::command-not-found
+  OMZP::command-not-found \
+  wfxr/forgit \
+  junegunn/fzf-git.sh
+# fzf-git.sh: Ctrl-G prefix for git objects — Ctrl-G then Ctrl-F (files),
+# Ctrl-B (branches), Ctrl-T (tags), Ctrl-R (remotes), Ctrl-H (hashes/commits),
+# Ctrl-S (stashes), Ctrl-L (reflogs), Ctrl-W (worktrees), Ctrl-E (each-ref).
+# forgit MUST load after OMZP::git so its interactive aliases (ga/gd/glo/gss/
+# gcb/gco/gbd/grh/gcf/gcp/grb/grl/gbl/gclean…) override OMZ-git's plain ones.
+# These are now INTERACTIVE fzf pickers; use real `git add`/`git diff` for plain.
+# Set FORGIT_NO_ALIASES=1 (before this line) to keep only the forgit::* funcs.
 
 # ─── Completion styling ─────────────────────────────────────────────────────
 zstyle ':completion:*' menu no                       # required by fzf-tab
@@ -116,6 +125,11 @@ if command -v mise &>/dev/null; then
   if [[ ! -s $_mise_comp || $(command -v mise) -nt $_mise_comp ]]; then
     mkdir -p "${_mise_comp:h}" && mise completion zsh >| "$_mise_comp" 2>/dev/null
   fi
+  # compinit is deferred to zinit turbo (fzf-tab must wrap it), but this mise
+  # completion is sourced eagerly and calls `compdef` before it exists → error.
+  # Shim compdef to QUEUE into zinit's replay array; the `zicdreplay` in the
+  # turbo atinit replays these after compinit. Only define if compdef is absent.
+  (( $+functions[compdef] )) || compdef() { ZINIT_COMPDEF_REPLAY+=( "${(j: :)${(q)@}}" ) }
   source "$_mise_comp"
   unset _mise_comp
 fi
@@ -214,3 +228,15 @@ export PATH="$PROTO_HOME/shims:$PROTO_HOME/bin:$PATH";
 # Registers a zle line-finish hook, not chpwd — safe below zoxide.
 [[ -r ~/Programming/hyprwhspr-ai/integration/zsh/hyprwhspr-learn.zsh ]] && \
   source ~/Programming/hyprwhspr-ai/integration/zsh/hyprwhspr-learn.zsh
+
+# pnpm
+# NOTE: this adds $PNPM_HOME/bin — where pnpm/pnpx/vercel actually live. The
+# `path` array near the top adds the parent dir (no /bin), which misses them,
+# so this block is what makes the pnpm global bins work. Captured from the live
+# ~/.zshrc (pnpm installer had appended it out-of-band; never was in source).
+export PNPM_HOME="/home/nullsense/.local/share/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME/bin:"*) ;;
+  *) export PATH="$PNPM_HOME/bin:$PATH" ;;
+esac
+# pnpm end

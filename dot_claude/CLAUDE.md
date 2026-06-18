@@ -56,6 +56,24 @@ chezmoi git -- <gitcmd>     # run git in source repo without cd
 If unsure which side has the right content, **ask the user**. The cost of asking
 is one prompt; the cost of overwriting their work is permanent.
 
+## Keybindings — always check for conflicts BEFORE adding one
+
+Before binding any new shortcut (Hyprland, app config, shell), grep the relevant
+config for the *exact modifier+key combo* and confirm it is free. Silently
+overriding an existing bind breaks muscle memory with no warning.
+
+- Hyprland binds live in `~/.local/share/chezmoi/dot_config/hypr/bindings.conf`
+  (chezmoi source). Check e.g.
+  `grep -niE '^bind[a-z]* *= *(SUPER|\$mod) ALT, *g\b' bindings.conf` — note
+  omarchy also ships binds in its own configs, so also scan `hyprctl binds`
+  (live) when Hyprland is reachable.
+- If the requested combo is taken, do NOT clobber it. Pick a free, mnemonic
+  alternative and tell the user which combo you used and what the original
+  conflict was — let them decide whether to reassign.
+- Known-taken on this machine (non-exhaustive): SUPER+ALT+C = Capture menu,
+  SUPER+ALT+D = Voice dictation, SUPER+ALT+V = Voice menu, SUPER+ALT+R =
+  Screen recording, SUPER+ALT+G = Download media (grab).
+
 ## Testing
 - Fix bugs → immediately write unit tests (TDD preferred)
 - Long-standing bug fixes MUST include regression tests to prevent recurrence

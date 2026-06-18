@@ -12,9 +12,12 @@
 # Infisical via `infisical run` (NOT agent-vault — that's for agent tool-calls).
 set -euo pipefail
 
+LLMSTACK="${LLMSTACK:-$HOME/Programming/llm-stack}"   # central repo: composes, collector, benches
 LSWAP_CFG="${LSWAP_CFG:-$HOME/.config/llama-swap/config.yaml}"
 LITELLM_CFG="${LITELLM_CFG:-$HOME/.config/litellm/config.yaml}"
-OBS_COMPOSE="${OBS_COMPOSE:-$HOME/.config/llm-stack/observability/docker-compose.yml}"
+OBS_COMPOSE="${OBS_COMPOSE:-$LLMSTACK/stack/observability/docker-compose.yml}"
+LANGFUSE_COMPOSE="${LANGFUSE_COMPOSE:-$LLMSTACK/stack/langfuse/docker-compose.yml}"
+COLLECTOR_COMPOSE="${COLLECTOR_COMPOSE:-$LLMSTACK/stack/collector/docker-compose.yml}"
 RUN="${RUN:-$HOME/.cache/llm-stack}"; mkdir -p "$RUN"
 
 # up = got any HTTP code (401 from litellm still means "alive"); 000 = not listening.
@@ -43,13 +46,20 @@ start_one() { # name  health-url  command...
   echo "  ▶ $name started (pid $(cat "$RUN/$name.pid")) → log: $RUN/$name.log"
 }
 
-ensure_obs() {  # local observability backend (grafana/otel-lgtm, one container)
-  if is_up http://127.0.0.1:3000/; then echo "  • observability already up (Grafana :3000)"
-  elif command -v docker >/dev/null 2>&1; then
-    docker compose -f "$OBS_COMPOSE" up -d >/dev/null 2>&1 \
-      && echo "  ▶ stack containers → Grafana :3000 · OTLP :4317/:4318 · litellm-db :5433" \
-      || echo "  ⚠ compose up failed (docker compose -f $OBS_COMPOSE up -d)"
-  else echo "  ⚠ docker not found — skipping observability"; fi
+ensure_obs() {  # observability (Grafana/Tempo) + Langfuse + the collector that fans out to both
+  command -v docker >/dev/null 2>&1 || { echo "  ⚠ docker not found — skipping observability"; return; }
+  docker network inspect llmstack >/dev/null 2>&1 || docker network create llmstack >/dev/null
+  docker compose -f "$OBS_COMPOSE" up -d >/dev/null 2>&1 \
+    && echo "  ▶ observability → Grafana :3000 · Tempo :3200 · Prom :9090 · litellm-db :5433" \
+    || echo "  ⚠ observability compose up failed"
+  if [ -s "$(dirname "$LANGFUSE_COMPOSE")/.env" ]; then
+    ( cd "$(dirname "$LANGFUSE_COMPOSE")" && docker compose --env-file .env up -d >/dev/null 2>&1 ) \
+      && echo "  ▶ langfuse → http://localhost:3002 (LLM traces + eval datasets)" \
+      || echo "  ⚠ langfuse compose up failed"
+  else echo "  ⚠ langfuse .env missing — run: bash $LLMSTACK/stack/langfuse/gen-env.sh"; fi
+  ( cd "$(dirname "$COLLECTOR_COMPOSE")" && docker compose --env-file ../langfuse/.env up -d >/dev/null 2>&1 ) \
+    && echo "  ▶ otel-collector → OTLP :4317/:4318 → fans out to Tempo + Langfuse" \
+    || echo "  ⚠ collector compose up failed"
 }
 
 ensure_dashboards() {
@@ -99,13 +109,15 @@ case "${1:-status}" in
     systemctl --user stop glance 2>/dev/null && echo "  ■ glance" || true
     if command -v docker >/dev/null 2>&1; then
       docker stop uptime-kuma >/dev/null 2>&1 && echo "  ■ uptime-kuma" || true
+      ( cd "$(dirname "$COLLECTOR_COMPOSE")" && docker compose --env-file ../langfuse/.env down >/dev/null 2>&1 ) && echo "  ■ collector" || true
+      ( cd "$(dirname "$LANGFUSE_COMPOSE")" && docker compose --env-file .env down >/dev/null 2>&1 ) && echo "  ■ langfuse" || true
       docker compose -f "$OBS_COMPOSE" down >/dev/null 2>&1 && echo "  ■ observability" || true
     fi
     ;;
   restart) "$0" down; sleep 1; "$0" up ;;
   status)
     command -v llms >/dev/null && llms
-    for n in "glance:8088" "uptime-kuma:3009" "grafana:3000"; do
+    for n in "glance:8088" "uptime-kuma:3009" "grafana:3000" "langfuse:3002" "collector:4318"; do
       printf "  %-12s HTTP %s\n" "${n%%:*}" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${n##*:}/ 2>/dev/null || echo down)"
     done
     ;;

@@ -102,6 +102,49 @@ cmake-build-*/
 # AMD GPU code objects (ROCm)
 *.hsaco
 
+# ───────────────────── databases / data blobs ─────────────────────
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.rdb
+*.mdb
+*.dat
+*.pack
+
+# ───────────────────── archives ─────────────────────
+*.zip
+*.tar
+*.tar.*
+*.tgz
+*.gz
+*.bz2
+*.xz
+*.zst
+*.7z
+*.rar
+
+# ───────────────── executables / installers / packages ─────────────────
+*.exe
+*.dll
+*.bin
+*.msi
+*.appimage
+*.AppImage
+*.dmg
+*.iso
+*.deb
+*.rpm
+*.jar
+*.war
+*.whl
+*.gem
+*.nupkg
+*.vsix
+*.crx
+*.xpi
+
 # ───────────────────────────── .NET ─────────────────────────────
 # (bin/ deliberately NOT ignored — would hide ~/bin scripts)
 obj/

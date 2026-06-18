@@ -81,7 +81,11 @@ fi
 ALLOW_SSH=0
 ALLOW_GPG=0
 ALLOW_RBW=0
-ALLOW_AGENT_VAULT=0
+# Default-on: every agent runs under agent-vault so outbound HTTPS gets
+# credential injection (agent talks to APIs, never sees upstream tokens).
+# Opt out per-invocation with --no-agent-vault; bypass all isolation with
+# AGENT_UNSANDBOX=1 or the *-raw aliases.
+ALLOW_AGENT_VAULT=1
 ALLOW_DOTFILES=0
 # Default-on: plannotator's binds are narrow (3 dirs under $HOME, no
 # secrets), broadly useful (review / annotate flows), and harmless when
@@ -92,12 +96,36 @@ DRY_RUN=0
 SELF_TEST=0
 AGENT=""
 
+# ─────────────────────── Auto-vault (self-acquire) ─────────────────────────
+# agent-vault is default-on, so if we are not already inside a vault session
+# (no ambient HTTPS_PROXY) and not opted out, re-exec the whole shim under
+# `agent-vault vault run` to ACQUIRE a session — then the second pass sees the
+# proxy env and forwards it across bwrap's --clearenv (see the --agent-vault
+# block below). Without this, `claude` alone could only forward an ambient
+# session that a plain shell never has. The AGENT_VAULT_WRAPPED sentinel breaks
+# the loop if vault run can't provide a proxy; --no-agent-vault / AGENT_UNSANDBOX
+# skip it; a missing agent-vault binary falls through (no hard dependency).
+if [[ -z "${AGENT_VAULT_WRAPPED:-}" && -z "${HTTPS_PROXY:-}" && -z "${AGENT_UNSANDBOX:-}" ]]; then
+    _want_vault=1
+    for _a in "$@"; do
+        case "$_a" in
+            --no-agent-vault) _want_vault=0 ;;
+            --) break ;;
+        esac
+    done
+    if (( _want_vault )) && command -v agent-vault >/dev/null 2>&1; then
+        export AGENT_VAULT_WRAPPED=1
+        exec agent-vault vault run --vault "${AGENT_VAULT_VAULT:-default}" -- "$0" "$@"
+    fi
+fi
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --ssh)            ALLOW_SSH=1; shift ;;
         --gpg)            ALLOW_GPG=1; shift ;;
         --rbw)            ALLOW_RBW=1; shift ;;
         --agent-vault)    ALLOW_AGENT_VAULT=1; shift ;;
+        --no-agent-vault) ALLOW_AGENT_VAULT=0; shift ;;
         --dotfiles)       ALLOW_DOTFILES=1; shift ;;
         --plannotator)    ALLOW_PLANNOTATOR=1; shift ;;  # accepted for symmetry
         --no-plannotator) ALLOW_PLANNOTATOR=0; shift ;;

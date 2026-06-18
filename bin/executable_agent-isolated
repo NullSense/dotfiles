@@ -488,19 +488,38 @@ if (( ALLOW_AGENT_VAULT )); then
             --setenv REQUESTS_CA_BUNDLE  "$ca"
         )
     fi
-    if [[ -n "${AGENT_VAULT_ADDR:-}" ]]; then
-        proxy="$AGENT_VAULT_ADDR"
-        case "$proxy" in http*://*) : ;; *) proxy="http://$proxy" ;; esac
+    # Forward the host's REAL proxy env verbatim. agent-vault exports
+    # HTTPS_PROXY pointing at the MITM listener (…:14322) with the session token
+    # embedded in the URL — this is DISTINCT from the control-plane
+    # AGENT_VAULT_ADDR (…:14321). Reconstructing HTTPS_PROXY from AGENT_VAULT_ADDR
+    # (the old behaviour) aimed the sandbox at the control plane and silently
+    # disabled credential injection. Fall back to reconstruction only when the
+    # host did not export HTTPS_PROXY (older agent-vault that exported only ADDR).
+    _proxy="${HTTPS_PROXY:-${HTTP_PROXY:-}}"
+    if [[ -z "$_proxy" && -n "${AGENT_VAULT_ADDR:-}" ]]; then
+        _proxy="$AGENT_VAULT_ADDR"
+        case "$_proxy" in http*://*) : ;; *) _proxy="http://$_proxy" ;; esac
+    fi
+    if [[ -n "$_proxy" ]]; then
         ARGS+=(
-            --setenv HTTPS_PROXY "$proxy"
-            --setenv HTTP_PROXY  "$proxy"
-            --setenv NO_PROXY    "127.0.0.1,localhost,api.anthropic.com"
+            --setenv HTTPS_PROXY "$_proxy"
+            --setenv HTTP_PROXY  "$_proxy"
+            --setenv NO_PROXY    "${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost,api.anthropic.com"
+            --setenv NODE_USE_ENV_PROXY "1"
         )
     fi
-    [[ -n "${AGENT_VAULT_SESSION_TOKEN:-}" ]] && \
-        ARGS+=( --setenv AGENT_VAULT_SESSION_TOKEN "$AGENT_VAULT_SESSION_TOKEN" )
-    [[ -n "${AGENT_VAULT_VAULT:-}" ]] && \
-        ARGS+=( --setenv AGENT_VAULT_VAULT "$AGENT_VAULT_VAULT" )
+    # Control-plane token for /discover + proposals. agent-vault renamed this
+    # (AGENT_VAULT_SESSION_TOKEN → AGENT_VAULT_TOKEN); forward whichever the host
+    # exports, under both names so the in-sandbox client finds it either way.
+    _tok="${AGENT_VAULT_TOKEN:-${AGENT_VAULT_SESSION_TOKEN:-}}"
+    if [[ -n "$_tok" ]]; then
+        ARGS+=(
+            --setenv AGENT_VAULT_TOKEN         "$_tok"
+            --setenv AGENT_VAULT_SESSION_TOKEN "$_tok"
+        )
+    fi
+    [[ -n "${AGENT_VAULT_ADDR:-}" ]]  && ARGS+=( --setenv AGENT_VAULT_ADDR  "$AGENT_VAULT_ADDR" )
+    [[ -n "${AGENT_VAULT_VAULT:-}" ]] && ARGS+=( --setenv AGENT_VAULT_VAULT "$AGENT_VAULT_VAULT" )
 fi
 
 # --plannotator: bind plannotator's three state dirs so the agent can

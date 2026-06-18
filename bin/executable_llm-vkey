@@ -31,10 +31,18 @@ code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$GATEWAY/" 2>/dev/nu
 [ "$code" != "000" ] || { echo "llm-vkey: gateway unreachable at $GATEWAY — run 'stack up'"; exit 1; }
 
 # mint
-key="$(curl -s "$GATEWAY/key/generate" \
+resp="$(curl -s "$GATEWAY/key/generate" \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
-  -d "{\"key_alias\":\"$tag\",\"metadata\":{\"tags\":[\"$tag\"]}}" | jq -r '.key')"
-[ -n "$key" ] && [ "$key" != "null" ] || { echo "llm-vkey: mint failed (is the master key valid?)"; exit 1; }
+  -d "{\"key_alias\":\"$tag\",\"metadata\":{\"tags\":[\"$tag\"]}}")"
+key="$(printf '%s' "$resp" | jq -r '.key // empty' 2>/dev/null)"
+if [ -z "$key" ]; then
+  echo "llm-vkey: mint failed — gateway said:"
+  printf '%s' "$resp" | jq -r '.error.message // .detail // .message // .' 2>/dev/null | head -3 || printf '  %s\n' "$resp"
+  echo "  NOTE: /key/generate requires litellm connected to a Postgres DB (DATABASE_URL)."
+  echo "        No DB yet? Use the MASTER key directly as LLM_API_KEY for local dev — tag"
+  echo "        routing/billing still works; you just lose per-app spend tracking + revoke."
+  exit 1
+fi
 
 # store in the project's Infisical (uses the cwd's .infisical.json project context)
 infisical secrets set "LLM_API_KEY=$key" "LLM_GATEWAY_URL=$GATEWAY/v1" --env "$ENV" --path "$path"

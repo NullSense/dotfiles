@@ -30,21 +30,28 @@ model_list:
   # GPU stays free for GLiNER2 (oracle-owned) + embeddings. Local gemma is still reachable
   # directly via llama-swap :9292 under "summarize-cheap"/"gemma4-e4b"/"gemma4-12b" if wanted.
   # ⚠ Verify the exact OpenRouter slugs at https://openrouter.ai/models if a route 404s.
+  # PER-PROJECT OpenRouter billing via TAG ROUTING: the upstream key is chosen by the
+  # request's tag (apps send `x-litellm-tags: <project>`). Each project's OPENROUTER_KEY_*
+  # lives in THIS gateway's Infisical (/litellm), never in the app folders. To add a project,
+  # duplicate a deployment with its tag + key. `default` = the deployment for untagged requests.
   - model_name: summarize-cheap
     litellm_params:
       model: openrouter/deepseek/deepseek-v4-flash
-      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_key: "os.environ/OPENROUTER_KEY_ORACLE"
+      tags: ["oracle", "default"]   # oracle-domain model
 
   - model_name: summarize-strong
     litellm_params:
       model: openrouter/deepseek/deepseek-v4-pro
-      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_key: "os.environ/OPENROUTER_KEY_ORACLE"
+      tags: ["oracle", "default"]
 
   # ── oracle's general LLM (NER arbitration / span-refine) → cloud, cheap+parallel ──
   - model_name: oracle-llm
     litellm_params:
       model: openrouter/deepseek/deepseek-v4-flash
-      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_key: "os.environ/OPENROUTER_KEY_ORACLE"
+      tags: ["oracle", "default"]
 
   # ── hyprwhspr dictation rewrite (local-only feature) ───────────────────────
   - model_name: rewrite-fast
@@ -69,5 +76,9 @@ litellm_settings:
   # Escalation as a safety net at the gateway too (oracle also gates in-app):
   fallbacks: [{"summarize-cheap": ["summarize-strong"]}]
 
+router_settings:
+  enable_tag_filtering: True    # route by request tag → per-project OpenRouter key (see above)
+
 general_settings:
-  master_key: "os.environ/LITELLM_MASTER_KEY"   # set in env (agent-vault); mint per-app virtual keys from it
+  master_key: "os.environ/LITELLM_MASTER_KEY"   # in Infisical /litellm; mint per-app virtual keys from it
+  database_url: "os.environ/DATABASE_URL"       # litellm-db (:5433) — enables /key/generate + spend tracking

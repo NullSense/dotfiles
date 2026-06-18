@@ -19,6 +19,7 @@ RUN="${RUN:-$HOME/.cache/llm-stack}"; mkdir -p "$RUN"
 
 # up = got any HTTP code (401 from litellm still means "alive"); 000 = not listening.
 is_up() { local c; c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$1" 2>/dev/null || true); [ -n "$c" ] && [ "$c" != "000" ]; }
+wait_tcp() { local h="${1%:*}" p="${1#*:}" i; for i in $(seq 1 "${2:-15}"); do (exec 3<>"/dev/tcp/$h/$p") 2>/dev/null && { exec 3>&- 3<&-; return 0; }; sleep 1; done; return 1; }
 
 start_one() { # name  health-url  command...
   local name="$1" url="$2"; shift 2
@@ -32,8 +33,8 @@ ensure_obs() {  # local observability backend (grafana/otel-lgtm, one container)
   if is_up http://127.0.0.1:3000/; then echo "  • observability already up (Grafana :3000)"
   elif command -v docker >/dev/null 2>&1; then
     docker compose -f "$OBS_COMPOSE" up -d >/dev/null 2>&1 \
-      && echo "  ▶ observability → Grafana :3000 · OTLP :4317/:4318 (otel-lgtm)" \
-      || echo "  ⚠ otel-lgtm failed (docker compose -f $OBS_COMPOSE up -d)"
+      && echo "  ▶ stack containers → Grafana :3000 · OTLP :4317/:4318 · litellm-db :5433" \
+      || echo "  ⚠ compose up failed (docker compose -f $OBS_COMPOSE up -d)"
   else echo "  ⚠ docker not found — skipping observability"; fi
 }
 
@@ -48,11 +49,15 @@ ensure_dashboards() {
 
 case "${1:-status}" in
   up)
-    ensure_obs       # collector first, so litellm has somewhere to send traces
+    ensure_obs       # collector + gateway DB first, so litellm has somewhere to send + store
     start_one llama-swap http://127.0.0.1:9292/health llama-swap --config "$LSWAP_CFG" --listen 127.0.0.1:9292
-    # local LLM-call tracing → otel-lgtm collector. Same OTLP contract as prod; env-only.
-    export LITELLM_OTEL_V2=true OTEL_EXPORTER=otlp_http \
-      OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4318}" \
+    wait_tcp 127.0.0.1:5433 15 && echo "  • gateway DB ready :5433" \
+      || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
+    # local LLM-call tracing → otel-lgtm collector. House standard is gRPC :4317 (matches
+    # sift/oracle); collector accepts 4317/4318 either way. gRPC needs grpcio in litellm's
+    # venv — fall back to OTEL_EXPORTER=otlp_http + :4318 if it's missing.
+    export LITELLM_OTEL_V2=true OTEL_EXPORTER="${OTEL_EXPORTER:-otlp_grpc}" \
+      OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4317}" \
       OTEL_SERVICE_NAME=litellm OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
     LITELLM_CMD=(litellm --config "$LITELLM_CFG" --port 4000)
     if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then

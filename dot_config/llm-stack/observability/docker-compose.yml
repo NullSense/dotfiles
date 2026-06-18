@@ -25,5 +25,20 @@ services:
     volumes:
       - otel-lgtm-data:/data    # persist traces/metrics/logs/dashboards across restarts
 
+  # Gateway DB — enables litellm virtual keys + spend tracking (/key/generate needs a DB).
+  litellm-db:
+    image: postgres:16-alpine
+    container_name: litellm-db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"   # loopback only
+    environment:
+      - POSTGRES_USER=litellm
+      - POSTGRES_DB=litellm
+      - POSTGRES_HOST_AUTH_METHOD=trust   # loopback-only dev DB → no password (no secret in git)
+    volumes:
+      - litellm-db-data:/var/lib/postgresql/data
+
 volumes:
   otel-lgtm-data:
+  litellm-db-data:

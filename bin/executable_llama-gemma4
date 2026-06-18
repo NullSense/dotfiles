@@ -99,7 +99,7 @@ PAR_ARGS=(--parallel "$NP")
 if [[ "$NP" != 1 && "$KVU" == "on" ]]; then
   PAR_ARGS+=(--kv-unified)
 fi
-exec llama-server \
+exec -a "gemma4-12b@${PORT}.llama-server" llama-server \
   --model "$MODEL" \
   --alias "gemma4-opus-distill" \
   --host 127.0.0.1 --port "$PORT" \

@@ -58,7 +58,7 @@ NCPUMOE="${NCPUMOE:-28}"
 #   rewound across an opencode session boundary (idle + new conversation). In live logs
 #   it gave only ~21% of accepted tokens (388/1822) vs MTP's 79% — not worth the
 #   instability. MTP self-spec (draft-mtp) alone carries the bulk of the spec speedup.
-exec llama-server \
+exec -a "qwen3.6-a3b@${PORT}.llama-server" llama-server \
   --model "$MODEL" \
   --alias "qwen3.6-35b-a3b-apex" \
   --chat-template-file "$TEMPLATE" \

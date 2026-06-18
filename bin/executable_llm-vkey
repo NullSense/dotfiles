@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# llm-vkey — mint a litellm virtual key for a project and store it (+ gateway URL) in that
+# project's Infisical folder. Run it from the project's repo dir so its .infisical.json applies.
+#
+#   cd ~/Programming/oracle && llm-vkey oracle          # path defaults to /Oracle
+#   cd ~/Programming/sift   && llm-vkey sift /Sift       # or pass the path explicitly
+#
+# The virtual key gives per-app spend tracking/budgets. ROUTING to the project's upstream
+# OpenRouter key is done by the app sending `x-litellm-tags: <project>` (see ~/notes/LLM-STACK.md).
+# Env overrides: LLM_GATEWAY (default http://127.0.0.1:4000), INFISICAL_ENV (dev),
+#   LITELLM_MASTER_KEY (else fetched from Infisical LITELLM_MASTER_PATH, default /litellm).
+set -euo pipefail
+
+GATEWAY="${LLM_GATEWAY:-http://127.0.0.1:4000}"
+MASTER_PATH="${LITELLM_MASTER_PATH:-/litellm}"
+ENV="${INFISICAL_ENV:-dev}"
+
+[ $# -ge 1 ] || { echo "usage: llm-vkey <project> [infisical-path]   (e.g. llm-vkey oracle /Oracle)"; exit 1; }
+tag="$1"; path="${2:-/${1^}}"   # default path = /Capitalized(project)
+
+command -v jq        >/dev/null || { echo "llm-vkey: needs jq"; exit 1; }
+command -v infisical >/dev/null || { echo "llm-vkey: needs the infisical CLI"; exit 1; }
+
+# master key: prefer env, else fetch from the gateway's Infisical folder
+MASTER="${LITELLM_MASTER_KEY:-}"
+[ -n "$MASTER" ] || MASTER="$(infisical secrets get LITELLM_MASTER_KEY --env "$ENV" --path "$MASTER_PATH" --plain 2>/dev/null || true)"
+[ -n "$MASTER" ] || { echo "llm-vkey: no master key — export LITELLM_MASTER_KEY or put it at Infisical $MASTER_PATH"; exit 1; }
+
+# gateway reachable?
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$GATEWAY/" 2>/dev/null || echo 000)
+[ "$code" != "000" ] || { echo "llm-vkey: gateway unreachable at $GATEWAY — run 'stack up'"; exit 1; }
+
+# mint
+key="$(curl -s "$GATEWAY/key/generate" \
+  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+  -d "{\"key_alias\":\"$tag\",\"metadata\":{\"tags\":[\"$tag\"]}}" | jq -r '.key')"
+[ -n "$key" ] && [ "$key" != "null" ] || { echo "llm-vkey: mint failed (is the master key valid?)"; exit 1; }
+
+# store in the project's Infisical (uses the cwd's .infisical.json project context)
+infisical secrets set "LLM_API_KEY=$key" "LLM_GATEWAY_URL=$GATEWAY/v1" --env "$ENV" --path "$path"
+echo "✓ minted '$tag' virtual key → Infisical $path ($ENV)"
+echo "  app sends header  x-litellm-tags: $tag  → bills OPENROUTER_KEY_${tag^^}"

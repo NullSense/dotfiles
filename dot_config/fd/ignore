@@ -154,6 +154,29 @@ undodir/
 *.swp
 *~
 
+# ──────────────────── backups / snapshots / patch cruft ────────────────────
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.swo
+*.tmp
+*.temp
+# Arch pacman config backups
+*.pacnew
+*.pacsave
+*.pacorig
+# Debian dpkg backups
+*.dpkg-old
+*.dpkg-new
+# filesystem snapshot dirs (snapper/btrfs, NetApp/Synology NAS)
+.snapshots/
+.snapshot/
+# bulky one-off personal backup dir (already per-finder excluded in zshfzfrc;
+# here too so nvim fzf-lua / raw $HOME scans skip it as well)
+oneplus-8t-backup-*/
+
 # ─────────────────────────── OS / misc junk ───────────────────────────
 .DS_Store
 Thumbs.db

@@ -41,6 +41,7 @@ OpenRouter
 Parakeet
 Pieter
 proxy
+Qdrant
 Qwen
 Rugile
 SearXNG

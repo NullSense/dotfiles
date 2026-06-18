@@ -17,8 +17,10 @@ model_list:
   - model_name: embed
     litellm_params:
       model: openai/embed              # openai/ = "this endpoint is OpenAI-compatible"
-      api_base: http://127.0.0.1:9292/v1   # dev: llama-swap → Octen GPU
+      api_base: http://127.0.0.1:9292/v1   # dev: llama-swap → Octen GPU (shared by all projects)
       api_key: "none"
+      tags: ["sift", "oracle", "default"]  # shared local embedder — reachable by every project key
+                                           # (virtual keys carry their project tag; tag_filtering is on)
     # PROD — sift moved prod embeddings to OpenRouter (PR #35 dropped ollama/tei), so
     # match that here (key in the gateway, not in any app):
     #   model: openrouter/<embedding-model>

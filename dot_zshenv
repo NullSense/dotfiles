@@ -34,6 +34,13 @@ case ":$PATH:" in
     *) export PATH="$HOME/bin:$PATH" ;;
 esac
 
+# Model-server wrappers (llama-* driven by llama-swap) live in ~/bin/llm-servers to
+# keep ~/bin uncluttered; kept on PATH so they remain callable by name.
+case ":$PATH:" in
+    *":$HOME/bin/llm-servers:"*) ;;
+    *) export PATH="$HOME/bin/llm-servers:$PATH" ;;
+esac
+
 # LM Studio CLI (lms). Single canonical location — was previously triplicated
 # by the LM Studio installer in zshrc, bashrc, and profile.
 if [ -d "$HOME/.lmstudio/bin" ]; then

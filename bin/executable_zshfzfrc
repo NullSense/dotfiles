@@ -38,22 +38,23 @@ gcbb() {
               git checkout "$(awk '{print $2}' <<<"$target" )"
 }
 
-# open file in vim with preview
+# fe (Ctrl-P): editor-style file palette. Fuzzy-find files under the CURRENT
+# directory (relative paths), preview with bat, open selection(s) in $EDITOR.
+# Type-junk filtered globally via ~/.config/fd/ignore; personal-bulk dirs below.
+# NOTE: keep NO `#` comments inside the $( ) below — zsh runs them as commands
+# (interactive_comments is off), which breaks the widget.
 fe() {
     local files_to_edit
     exec < /dev/tty
 
     IFS=$'\n' files_to_edit=($(
-        # Type-junk (caches, node_modules, build dirs, VM/app data) is excluded
-        # globally via ~/.config/fd/ignore. Here we only drop the bulky personal
-        # dirs you'd never open in an editor, keeping this $HOME-wide opener fast.
         fd --type f --hidden --follow \
             --exclude Downloads --exclude Games --exclude AI \
             --exclude Videos --exclude Music --exclude Pictures \
             --exclude minecraft --exclude 'oneplus-8t-backup*' \
             --exclude oneplus-homelab --exclude wsl-migration \
             --exclude .local \
-            . "$HOME" | \
+            . | \
             fzf --preview 'bat --style=numbers,changes --color=always --line-range :100 --wrap never {} 2>/dev/null || cat {}' \
             --preview-window='right:60%:wrap' \
             --query="$1" \
@@ -70,6 +71,30 @@ fe() {
     }
 zle -N fe
 bindkey "^p" fe
+
+# frg - interactive LIVE ripgrep: fuzzy-search file CONTENTS, open match in
+# $EDITOR at the exact line. ripgrep re-runs on every keystroke (50ms debounce),
+# so fzf is just the UI — full rg regex/smart-case applies. Bound to Alt-g
+# (Ctrl-G is the fzf-git.sh prefix; Alt-g = "grep", was free). Also: `frg foo`.
+frg() {
+    exec < /dev/tty
+    local rg_prefix='rg --column --line-number --no-heading --color=always --smart-case'
+    local result
+    result=$(: | fzf --ansi --disabled --query "${1:-}" \
+        --bind "start:reload:$rg_prefix ${(q)1:-} || true" \
+        --bind "change:reload:sleep 0.05; $rg_prefix {q} || true" \
+        --delimiter : \
+        --preview 'bat --style=numbers --color=always --highlight-line {2} -- {1} 2>/dev/null' \
+        --preview-window 'right,60%,+{2}+3/3,~3' \
+        --height=85% --border --prompt 'rg> ' \
+        --header 'live ripgrep — type to search contents, Enter opens in $EDITOR') || return
+    local file line
+    file=${result%%:*}
+    line=$(printf '%s' "$result" | awk -F: '{print $2}')
+    [[ -n $file ]] && ${EDITOR:-nvim} +"${line:-1}" -- "$file"
+}
+zle -N frg
+bindkey "^[g" frg   # Alt-g (Ctrl-G reserved for fzf-git.sh)
 
 # Type-junk excluded globally via ~/.config/fd/ignore; only personal-bulk here.
 export FZF_DEFAULT_COMMAND='

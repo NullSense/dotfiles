@@ -44,6 +44,7 @@ proxy
 Qwen
 Rugile
 SearXNG
+Sift
 sudo
 Tailscale
 Tensil

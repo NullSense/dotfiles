@@ -78,7 +78,10 @@ def main():
               if c.get("class") == "tev"}
 
     # Launch tev detached so the viewer outlives this wrapper.
-    subprocess.Popen(["tev", "--hide-ui", "--auto-fit", *sys.argv[1:]],
+    # --bg #000000: opaque black behind the image, so any aspect-ratio
+    # letterbox is clean black instead of tev's default transparent checkerboard.
+    subprocess.Popen(["tev", "--hide-ui", "--auto-fit", "--bg", "#000000",
+                      *sys.argv[1:]],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
 
@@ -130,6 +133,14 @@ def main():
         h = max(MIN_H, round(want_h))
         dispatch("resizewindowpixel", f"exact {w} {h},address:{addr}")
         dispatch("centerwindow")  # centers the focused (tev) window
+
+    # tev's --auto-fit fit the image to its INITIAL window; after our resize the
+    # zoom is stale (image small with padding). Re-send tev's "fit to window"
+    # key (F -> fitImageToScreen) so the image fills the final window. Small
+    # delay lets GLFW process the resize first so the fit uses the new size.
+    time.sleep(0.25)
+    dispatch("focuswindow", f"address:{addr}")
+    dispatch("sendshortcut", f",f,address:{addr}")
     return 0
 
 

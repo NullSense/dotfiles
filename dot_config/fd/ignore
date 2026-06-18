@@ -1,52 +1,142 @@
-# Global fd ignore — gitignore syntax.
+# ~/.config/fd/ignore — global fd ignore (gitignore syntax).
+#
 # Respected automatically by EVERY fd invocation: fe/Ctrl-P, FZF_DEFAULT_COMMAND
-# /Ctrl-T, and nvim fzf-lua (all use fd). Override per-call with `fd -I`.
-# This is the single source of truth for "junk I never want in a file finder".
+# (Ctrl-T), and nvim fzf-lua (all shell out to fd). Single source of truth for
+# "development crap I never want in a file finder": caches, build output, and
+# installed dependencies. Bulky *personal* dirs (Downloads/Games/AI/media) are
+# handled per-finder in ~/bin/zshfzfrc, not here, so raw `fd` stays usable there.
+#
+# Override anytime:  fd -I <pat>   /   fd --no-ignore <pat>
+# Patterns without a slash match at any depth (gitignore semantics).
 
-# --- VCS internals ---
+# ─────────────────────────── VCS internals ───────────────────────────
 .git/
 .hg/
 .svn/
 .jj/
+.bzr/
+_darcs/
+CVS/
 
-# --- caches ---
+# ─────────────── catch-all: anything with "cache" in the name ───────────────
+# Nukes .cache, __pycache__, .pytest_cache, .mypy_cache, .ruff_cache,
+# .gradle caches, huggingface cache dirs, etc. in one line.
 *[Cc]ache*/
-.thumbnails/
 
-# --- language / package stores ---
+# ─────────────────── JS / TS / web (your #1 offender) ───────────────────
 node_modules/
+bower_components/
 .npm/
 .yarn/
 .pnpm-store/
-__pycache__/
-.venv/
-venv/
-.tox/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.cargo/registry/
-.cargo/git/
-.rustup/
-.m2/
-.gradle/
-.nvm/
-.pyenv/
-.conda/
-go/pkg/
-
-# --- build output ---
-target/
-dist/
-build/
-out/
 .next/
 .nuxt/
 .svelte-kit/
+.astro/
+.vite/
 .turbo/
 .parcel-cache/
+.docusaurus/
+.angular/
+.vercel/
+.netlify/
+.wrangler/
+.eslintcache
+*.tsbuildinfo
 
-# --- apps / VMs / games runtimes ---
+# ───────────────────────────── Python ─────────────────────────────
+__pycache__/
+.venv/
+venv/
+env/
+.tox/
+.nox/
+.eggs/
+*.egg-info/
+__pypackages__/
+.ipynb_checkpoints/
+.pdm-build/
+site-packages/
+.Python
+
+# ───────────────────────────── Rust ─────────────────────────────
+target/
+.cargo/registry/
+.cargo/git/
+.rustup/
+
+# ───────────────────────────── Go ─────────────────────────────
+go/pkg/
+
+# ───────────────────── JVM (Java/Kotlin/Scala) ─────────────────────
+.gradle/
+.m2/
+.mvn/
+build/
+classes/
+.bloop/
+.metals/
+.ammonite/
+
+# ───────────────────────── C / C++ / native ─────────────────────────
+CMakeFiles/
+cmake-build-*/
+.ccache/
+
+# ───────────────────────────── .NET ─────────────────────────────
+# (bin/ deliberately NOT ignored — would hide ~/bin scripts)
+obj/
+.nuget/
+
+# ───────────────────────── Elixir / Erlang ─────────────────────────
+_build/
+deps/
+.elixir_ls/
+
+# ───────────────────────────── Haskell ─────────────────────────────
+.stack-work/
+dist-newstyle/
+.cabal-sandbox/
+
+# ───────────────────────── Dart / Flutter ─────────────────────────
+.dart_tool/
+.pub-cache/
+
+# ───────────────────────── Swift / Xcode ─────────────────────────
+DerivedData/
+.swiftpm/
+Pods/
+
+# ───────────────────────── Ruby / PHP ─────────────────────────
+.bundle/
+vendor/
+
+# ───────────────────────── IaC / cloud ─────────────────────────
+.terraform/
+
+# ─────────────────────── generic build output ───────────────────────
+dist/
+out/
+.output/
+
+# ───────────────────── test / coverage artifacts ─────────────────────
+coverage/
+.nyc_output/
+htmlcov/
+.coverage
+
+# ───────────────────── ML experiment tracking ─────────────────────
+wandb/
+mlruns/
+
+# ─────────────── other toolchain / runtime caches in $HOME ───────────────
+.nvm/
+.pyenv/
+.conda/
+.deno/
+.bun/
+
+# ───────────────────── apps / VMs / games runtimes ─────────────────────
 .wine/
 .steam/
 Steam/
@@ -56,7 +146,18 @@ Steam/
 .vscode*/
 .lmstudio/
 
-# --- editor scratch ---
+# ─────────────────────────── editors / IDE ───────────────────────────
+.idea/
+.history/
 .config/nvim/undodir/
 undodir/
 *.swp
+*~
+
+# ─────────────────────────── OS / misc junk ───────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+logs/
+.Trash-*/

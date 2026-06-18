@@ -67,6 +67,12 @@ trust_level = "trusted"
 [projects."/home/nullsense/Programming/infra"]
 trust_level = "trusted"
 
+[projects."/home/nullsense/Programming/hyprwhspr-ai"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/harpe"]
+trust_level = "trusted"
+
 [notice]
 hide_full_access_warning = true
 hide_gpt5_1_migration_prompt = true

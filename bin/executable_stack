@@ -73,8 +73,13 @@ case "${1:-status}" in
     echo "  stack up. gateway → :4000 · dash → :8088 · grafana → :3000 (anon)"
     ;;
   down)  # stops the LLM serving stack only — leaves observability + dashboards monitoring
-    for name in litellm llama-swap; do
-      if [ -f "$RUN/$name.pid" ] && kill "$(cat "$RUN/$name.pid")" 2>/dev/null; then echo "  ■ stopped $name"; fi
+    for entry in litellm:4000 llama-swap:9292; do
+      name="${entry%%:*}"; port="${entry##*:}"
+      [ -f "$RUN/$name.pid" ] && kill "$(cat "$RUN/$name.pid")" 2>/dev/null || true
+      # robust: kill whatever still holds the port (infisical-run spawns litellm as a child,
+      # so the tracked pid != the listener). fuser by port catches the real process + orphans.
+      if command -v fuser >/dev/null 2>&1; then fuser -k "${port}/tcp" >/dev/null 2>&1 && echo "  ■ stopped $name (:$port)" || true
+      else pkill -f -- "--port $port" 2>/dev/null && echo "  ■ stopped $name (:$port)" || true; fi
       rm -f "$RUN/$name.pid"
     done
     echo "  (observability + dashboards left running — 'stack mon-down' to stop those too)"

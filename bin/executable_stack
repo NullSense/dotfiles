@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# stack — start/stop the local LLM stack ON DEMAND (when you sit down to work).
-#   llama-swap  :9292  — model swapper (loads/unloads models per-request via TTL)
-#   litellm     :4000  — OpenAI gateway (logical names → local/cloud backends)
-# Not always-on by design: llama-swap already frees VRAM when models go idle, so this
-# only manages the two lightweight server processes. See ~/notes/LLM-STACK.md.
+# stack — bring up the whole local dev stack with one command.
+#   observability :3000 — grafana/otel-lgtm (OTel collector + Tempo/Loki/Prometheus/Grafana)
+#   llama-swap    :9292 — model swapper (loads/unloads models per-request via TTL)
+#   litellm       :4000 — OpenAI gateway (logical names → local/cloud; traces → :4318 collector)
+#   glance        :8088 — dashboard (systemd --user unit)
+#   uptime-kuma   :3009 — uptime/SLA (docker container)
+# llama-swap frees VRAM on idle, so the LLM half is on-demand. Observability + dashboards are
+# monitoring — `up` ensures them, `down` LEAVES them. See ~/notes/LLM-STACK.md.
 #
-# Secrets: litellm's cloud routes (summarize-*/oracle-llm → OpenRouter) need
-# OPENROUTER_API_KEY, and virtual keys need LITELLM_MASTER_KEY — both must be in your
-# ENV when you run `stack up` (inject them via agent-vault / your secret manager;
-# systemd units are avoided here precisely because they don't see that scoped env).
+# Secrets: litellm's cloud routes need OPENROUTER_API_KEY + LITELLM_MASTER_KEY, injected from
+# Infisical via `infisical run` (NOT agent-vault — that's for agent tool-calls).
 set -euo pipefail
 
 LSWAP_CFG="${LSWAP_CFG:-$HOME/.config/llama-swap/config.yaml}"
 LITELLM_CFG="${LITELLM_CFG:-$HOME/.config/litellm/config.yaml}"
+OBS_COMPOSE="${OBS_COMPOSE:-$HOME/.config/llm-stack/observability/docker-compose.yml}"
 RUN="${RUN:-$HOME/.cache/llm-stack}"; mkdir -p "$RUN"
 
 # up = got any HTTP code (401 from litellm still means "alive"); 000 = not listening.
@@ -26,26 +28,66 @@ start_one() { # name  health-url  command...
   echo "  ▶ $name started (pid $(cat "$RUN/$name.pid")) → log: $RUN/$name.log"
 }
 
+ensure_obs() {  # local observability backend (grafana/otel-lgtm, one container)
+  if is_up http://127.0.0.1:3000/; then echo "  • observability already up (Grafana :3000)"
+  elif command -v docker >/dev/null 2>&1; then
+    docker compose -f "$OBS_COMPOSE" up -d >/dev/null 2>&1 \
+      && echo "  ▶ observability → Grafana :3000 · OTLP :4317/:4318 (otel-lgtm)" \
+      || echo "  ⚠ otel-lgtm failed (docker compose -f $OBS_COMPOSE up -d)"
+  else echo "  ⚠ docker not found — skipping observability"; fi
+}
+
+ensure_dashboards() {
+  if is_up http://127.0.0.1:8088/; then echo "  • glance already up"
+  elif systemctl --user start glance 2>/dev/null; then echo "  ▶ glance → :8088 (systemd)"
+  else start_one glance http://127.0.0.1:8088/ "$HOME/.local/bin/glance" --config "$HOME/.config/glance/glance.yml"; fi
+  if is_up http://127.0.0.1:3009/; then echo "  • uptime-kuma already up"
+  elif command -v docker >/dev/null 2>&1 && docker start uptime-kuma >/dev/null 2>&1; then echo "  ▶ uptime-kuma → :3009 (docker)"
+  else echo "  ⚠ uptime-kuma not running (one-time: docker run -d --restart=unless-stopped -p 3009:3001 -v uptime-kuma:/app/data --name uptime-kuma louislam/uptime-kuma:1)"; fi
+}
+
 case "${1:-status}" in
   up)
-    [ -n "${OPENROUTER_API_KEY:-}" ] || echo "  ⚠ OPENROUTER_API_KEY unset — summarize-*/oracle-llm (cloud) routes will 401" >&2
-    [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — gateway has no admin/virtual keys" >&2
+    ensure_obs       # collector first, so litellm has somewhere to send traces
     start_one llama-swap http://127.0.0.1:9292/health llama-swap --config "$LSWAP_CFG" --listen 127.0.0.1:9292
-    start_one litellm    http://127.0.0.1:4000/health litellm  --config "$LITELLM_CFG" --port 4000
-    echo "  stack up. gateway → http://127.0.0.1:4000  (point apps' LLM_GATEWAY_URL here)"
+    # local LLM-call tracing → otel-lgtm collector. Same OTLP contract as prod; env-only.
+    export LITELLM_OTEL_V2=true OTEL_EXPORTER=otlp_http \
+      OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4318}" \
+      OTEL_SERVICE_NAME=litellm OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
+    LITELLM_CMD=(litellm --config "$LITELLM_CFG" --port 4000)
+    if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
+      echo "  • litellm secrets ← Infisical (${INFISICAL_ENV:-dev}:${INFISICAL_PATH:-/litellm})"
+      start_one litellm http://127.0.0.1:4000/health \
+        infisical run --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "${LITELLM_CMD[@]}"
+    else
+      [ -n "${OPENROUTER_API_KEY:-}" ] || echo "  ⚠ OPENROUTER_API_KEY unset — cloud routes will 401" >&2
+      [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2
+      start_one litellm http://127.0.0.1:4000/health "${LITELLM_CMD[@]}"
+    fi
+    ensure_dashboards
+    echo "  stack up. gateway → :4000 · dash → :8088 · grafana → :3000 (anon)"
     ;;
-  down)
+  down)  # stops the LLM serving stack only — leaves observability + dashboards monitoring
     for name in litellm llama-swap; do
       if [ -f "$RUN/$name.pid" ] && kill "$(cat "$RUN/$name.pid")" 2>/dev/null; then echo "  ■ stopped $name"; fi
       rm -f "$RUN/$name.pid"
     done
+    echo "  (observability + dashboards left running — 'stack mon-down' to stop those too)"
+    ;;
+  mon-down)
+    systemctl --user stop glance 2>/dev/null && echo "  ■ glance" || true
+    if command -v docker >/dev/null 2>&1; then
+      docker stop uptime-kuma >/dev/null 2>&1 && echo "  ■ uptime-kuma" || true
+      docker compose -f "$OBS_COMPOSE" down >/dev/null 2>&1 && echo "  ■ observability" || true
+    fi
     ;;
   restart) "$0" down; sleep 1; "$0" up ;;
   status)
-    command -v llms >/dev/null && llms || for p in 9292 4000; do
-      printf "  :%s  HTTP %s\n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:$p/health 2>/dev/null || echo down)"
+    command -v llms >/dev/null && llms
+    for n in "glance:8088" "uptime-kuma:3009" "grafana:3000"; do
+      printf "  %-12s HTTP %s\n" "${n%%:*}" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${n##*:}/ 2>/dev/null || echo down)"
     done
     ;;
   logs) tail -n 40 -F "$RUN"/*.log ;;
-  *) echo "usage: stack {up|down|restart|status|logs}"; exit 1 ;;
+  *) echo "usage: stack {up|down|mon-down|restart|status|logs}"; exit 1 ;;
 esac

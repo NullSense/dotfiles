@@ -38,12 +38,17 @@
 
 ## which search mode to use
 ## possible values: prefix, fulltext, fuzzy, skim
-# search_mode = "fuzzy"
+## fulltext = every space-separated term must appear (substring, order-free).
+## Far less noisy than "fuzzy", which matches scattered chars anywhere.
+search_mode = "fulltext"
 
 ## which filter mode to use by default
 ## possible values: "global", "host", "session", "directory", "workspace"
 ## consider using search.filters to customize the enablement and order of filter modes
-# filter_mode = "global"
+## Default Ctrl-R scope = THIS machine's history (all dirs/sessions on this host).
+## Drops cross-machine synced entries you'd never search. Cycle wider in the TUI
+## with Ctrl-R (global > host > session > directory per [search].filters below).
+filter_mode = "host"
 
 ## With workspace filtering enabled, Atuin will filter for commands executed
 ## in any directory within a git repository tree (default: false).
@@ -104,8 +109,15 @@
 ## For details on the supported regular expression syntax, see
 ## https://docs.rs/regex/latest/regex/#syntax
 history_filter = [
-  "^secret-cmd",
-  "^innocuous-cmd .*--secret=.+",
+    # --- junk / syntax fragments (heredoc & multiline paste leftovers) ---
+    "^\\s*$",                 # blank / whitespace-only lines
+    "^\\s*EOF\\s*$",          # heredoc terminators captured as standalone commands
+    "^\\s*['\"})(]+\\s*$",    # lines that are only quotes / parens
+    "^\\s*\\\\+\\s*$",        # lines that are only backslashes
+    # --- one-shot pastes you'd never re-run from Ctrl-R ---
+    "<<-?\\s*['\"]?(EOF|SH|PY|TOML|JSON|TXT)\\b",  # heredoc blobs
+    # "(\\n[^\\n]*){3,}",     # OPT-IN: drop any command of 4+ lines (broader)
+    # --- secret redaction (keep) ---
     "(?i)^(export|set)\\s+.*(TOKEN|SECRET|KEY|PASSWORD|API_KEY|PASSWD|AUTH)=",
     "sk-ant-[A-Za-z0-9_-]{32,}",
     "sk-proj-[A-Za-z0-9_-]{32,}",

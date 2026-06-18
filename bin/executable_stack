@@ -32,7 +32,12 @@ kill_port() {  # kill whatever LISTENS on a TCP port — reliable, no fuser/patt
 
 start_one() { # name  health-url  command...
   local name="$1" url="$2"; shift 2
-  if is_up "$url"; then echo "  • $name already up"; return; fi
+  if is_up "$url"; then
+    if [ -f "$RUN/$name.pid" ]; then echo "  • $name already up"
+    else echo "  ⚠ $name's port is held by a process stack didn't start (likely a stray docker"
+         echo "    container). Free it:  docker ps --filter publish=<port> -q | xargs -r docker stop"; fi
+    return
+  fi
   nohup "$@" >"$RUN/$name.log" 2>&1 &
   echo $! >"$RUN/$name.pid"
   echo "  ▶ $name started (pid $(cat "$RUN/$name.pid")) → log: $RUN/$name.log"

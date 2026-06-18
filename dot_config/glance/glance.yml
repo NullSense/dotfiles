@@ -16,6 +16,7 @@ theme:
   contrast-multiplier: 1.15
 
 pages:
+  - $include: cortiq.yml
   # ════════════════════════ HOME — overview ════════════════════════
   - name: Home
     width: wide

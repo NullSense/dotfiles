@@ -109,6 +109,17 @@ case "${1:-status}" in
       printf "  %-12s HTTP %s\n" "${n%%:*}" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${n##*:}/ 2>/dev/null || echo down)"
     done
     ;;
+  db-init)  # one-time per machine (or after a litellm upgrade): prisma client + LiteLLM_* tables.
+            # litellm virtual keys (/key/generate, llm-vkey) need these. Install prep:
+            #   uv tool install 'litellm[proxy]' --with prisma
+    TB="$HOME/.local/share/uv/tools/litellm/bin"
+    SCHEMA=$(find "$HOME/.local/share/uv/tools/litellm" -path '*proxy_extras*schema.prisma' 2>/dev/null | head -1)
+    [ -n "$SCHEMA" ] || { echo "  ⚠ litellm prisma schema not found — run: uv tool install 'litellm[proxy]' --with prisma"; exit 1; }
+    PATH="$TB:$PATH" "$TB/prisma" generate --schema "$SCHEMA" 2>&1 | tail -2 || true
+    DATABASE_URL="${DATABASE_URL:-postgresql://litellm@127.0.0.1:5433/litellm}" \
+      PATH="$TB:$PATH" "$TB/prisma" db push --schema "$SCHEMA" --skip-generate --accept-data-loss 2>&1 | tail -2
+    echo "  ✓ prisma generated + LiteLLM_* tables ready — 'stack restart' then llm-vkey works"
+    ;;
   logs) tail -n 40 -F "$RUN"/*.log ;;
-  *) echo "usage: stack {up|down|mon-down|restart|status|logs}"; exit 1 ;;
+  *) echo "usage: stack {up|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;
 esac

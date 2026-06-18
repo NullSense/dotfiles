@@ -1,0 +1,159 @@
+# Glance — local workstation dashboard. ~/.local/bin/glance, hot-reloads on save.
+# http://localhost:8088 .  Two pages: Home (status-first overview) + Status (uptime detail).
+# Design: status above the fold, grouped by function, critical things top-left (Z-pattern).
+server:
+  host: 127.0.0.1
+  port: 8088
+
+branding:
+  custom-footer: <p>nullsense · local stack</p>
+
+theme:
+  background-color: 222 13 11
+  primary-color: 217 92 70
+  positive-color: 135 44 55     # green = up
+  negative-color: 0 70 60       # red = down
+  contrast-multiplier: 1.15
+
+pages:
+  # ════════════════════════ HOME — overview ════════════════════════
+  - name: Home
+    width: wide
+    columns:
+      # LEFT — machine health + the port you forget (critical, top-left)
+      - size: small
+        widgets:
+          - type: server-stats
+            servers:
+              - type: local
+                name: workstation
+                hide-mountpoints-by-default: true   # collapse the btrfs subvolume noise
+                mountpoints:
+                  "/":
+                    hide: false
+                    name: btrfs pool
+                  "/mnt/media-2tb": { hide: false, name: Media 2TB }
+                  "/mnt/media-3tb": { hide: false, name: Media 3TB }
+                  "/mnt/windows":   { hide: false, name: Windows }
+          - type: bookmarks
+            title: 🔐 agent-vault
+            groups:
+              - links:
+                  - title: HTTP proxy → :14321
+                    url: http://127.0.0.1:14321/
+                  - title: control → :14322
+                    url: http://127.0.0.1:14322/
+          - type: clock
+            hour-format: 24h
+
+      # CENTER — live service health (status-first) + docker
+      - size: full
+        widgets:
+          - type: monitor
+            title: LLM stack
+            cache: 30s
+            sites:
+              - title: LiteLLM gateway
+                url: http://localhost:4000/
+                icon: si:openai
+              - title: llama-swap
+                url: http://localhost:9292/v1/models
+                icon: si:nvidia
+          - type: monitor
+            title: Local services
+            cache: 30s
+            sites:
+              - title: Qdrant
+                url: http://localhost:6333/
+                icon: di:qdrant
+              - title: sift-api
+                url: http://localhost:8788/
+                alt-status-codes: [404]
+              - title: Formbricks
+                url: http://localhost:3100/
+              - title: nitter
+                url: http://localhost:8085/
+              - title: wakezilla (WoL)
+                url: http://localhost:3001/
+              - title: Vite dev
+                url: http://localhost:5173/
+          - type: docker-containers
+            title: Docker containers
+            running-only: true            # hide stopped/exited noise
+            format-container-names: true  # foo-bar-1 → "Foo Bar 1"
+
+      # RIGHT — prioritized links (apps first), then observability, homelab, releases
+      - size: small
+        widgets:
+          - type: bookmarks
+            title: Cortiq (prod · tailnet)
+            groups:
+              - title: Apps
+                links:
+                  - title: Sift (search)
+                    url: https://sift.cortiq-lab.sh
+                  - title: Oracle (reader)
+                    url: https://oracle.cortiq-lab.sh
+              - title: Observability — real SLAs here
+                links:
+                  - title: Grafana
+                    url: https://grafana.cortiq-lab.sh
+                    icon: di:grafana
+                  - title: Dokploy
+                    url: https://dokploy.cortiq-lab.sh
+                    icon: di:dokploy
+                  - title: Infisical
+                    url: https://infisical.cortiq-lab.sh
+                    icon: di:infisical
+                  - title: Zitadel (auth)
+                    url: https://zitadel.cortiq-lab.sh
+          - type: bookmarks
+            title: Homelab (OnePlus)
+            groups:
+              - links:
+                  - title: AdGuard Home
+                    url: http://adguard.home
+                    icon: di:adguard-home
+                  - title: Home Assistant
+                    url: http://ha.home
+                    icon: di:home-assistant
+          - type: bookmarks
+            title: Local observability
+            groups:
+              - links:
+                  - title: Grafana (local · :3000)
+                    url: http://localhost:3000
+                    icon: di:grafana
+                  - title: uptime-kuma (:3009)
+                    url: http://localhost:3009
+          - type: releases
+            title: Tooling updates
+            cache: 6h
+            repositories:
+              - glanceapp/glance
+              - BerriAI/litellm
+              - mostlygeek/llama-swap
+              - ggml-org/llama.cpp
+
+  # ════════════════════════ STATUS — uptime detail ════════════════════════
+  - name: Status
+    columns:
+      - size: full
+        widgets:
+          - type: monitor
+            title: All services (live)
+            cache: 20s
+            sites:
+              - { title: LiteLLM, url: "http://localhost:4000/", icon: si:openai }
+              - { title: llama-swap, url: "http://localhost:9292/v1/models", icon: si:nvidia }
+              - { title: Qdrant, url: "http://localhost:6333/", icon: di:qdrant }
+              - { title: sift-api, url: "http://localhost:8788/", alt-status-codes: [404] }
+              - { title: Formbricks, url: "http://localhost:3100/" }
+              - { title: nitter, url: "http://localhost:8085/" }
+              - { title: wakezilla, url: "http://localhost:3001/" }
+              - { title: Grafana (prod), url: "https://grafana.cortiq-lab.sh", allow-insecure: true }
+          # Uptime Kuma status page — real uptime% + history. Set up Kuma (see chat),
+          # create a public status page, then point this at /status/<your-slug>.
+          - type: iframe
+            source: http://localhost:3009/status/local
+            height: 550

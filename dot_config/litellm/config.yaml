@@ -1,0 +1,73 @@
+# litellm gateway — the ONE OpenAI endpoint every app/session talks to.
+# Maps LOGICAL model names → physical backends. This file is the only place that knows
+# about ports, providers, GPU/CPU, and (via env) keys. Apps know only the logical names.
+# See ~/notes/LLM-STACK.md.
+#
+# Run (dev):  litellm --config ~/.config/litellm/config.yaml --port 4000
+# Install:    uv tool install 'litellm[proxy]'   (or pipx install 'litellm[proxy]')
+# Test:       curl http://localhost:4000/v1/models -H "Authorization: Bearer $LLM_API_KEY"
+#
+# Apps set:   OPENAI_BASE_URL/LLM_GATEWAY_URL=http://localhost:4000 , LLM_API_KEY=<virtual key>
+#
+# DEV backends point at llama-swap (:9292). Swapping to PROD = replace api_base/model with
+# Voyage/OpenRouter/Modal (commented below) — logical names, and therefore app code, unchanged.
+
+model_list:
+  # ── embeddings (sift, oracle) ──────────────────────────────────────────────
+  - model_name: embed
+    litellm_params:
+      model: openai/embed              # openai/ = "this endpoint is OpenAI-compatible"
+      api_base: http://127.0.0.1:9292/v1   # dev: llama-swap → Octen GPU
+      api_key: "none"
+    # PROD — sift moved prod embeddings to OpenRouter (PR #35 dropped ollama/tei), so
+    # match that here (key in the gateway, not in any app):
+    #   model: openrouter/<embedding-model>
+    #   api_key: "os.environ/OPENROUTER_API_KEY"
+    # (Voyage remains a valid alt: model: voyage/voyage-3-large + VOYAGE_API_KEY.)
+
+  # ── summarization: cheap-first + escalation (oracle) → CLOUD (frees local VRAM) ──
+  # Per oracle's split 2026-06-18: summaries + NER-arbitration run hosted so the 12 GB
+  # GPU stays free for GLiNER2 (oracle-owned) + embeddings. Local gemma is still reachable
+  # directly via llama-swap :9292 under "summarize-cheap"/"gemma4-e4b"/"gemma4-12b" if wanted.
+  # ⚠ Verify the exact OpenRouter slugs at https://openrouter.ai/models if a route 404s.
+  - model_name: summarize-cheap
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v4-flash
+      api_key: "os.environ/OPENROUTER_API_KEY"
+
+  - model_name: summarize-strong
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v4-pro
+      api_key: "os.environ/OPENROUTER_API_KEY"
+
+  # ── oracle's general LLM (NER arbitration / span-refine) → cloud, cheap+parallel ──
+  - model_name: oracle-llm
+    litellm_params:
+      model: openrouter/deepseek/deepseek-v4-flash
+      api_key: "os.environ/OPENROUTER_API_KEY"
+
+  # ── hyprwhspr dictation rewrite (local-only feature) ───────────────────────
+  - model_name: rewrite-fast
+    litellm_params:
+      model: openai/summarize-cheap        # reuse the E4B; or point at gemma4-12b
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+
+  # ── too big for 12 GB → cloud even in dev ──────────────────────────────────
+  - model_name: code-big
+    litellm_params:
+      model: openrouter/anthropic/claude-3.5-sonnet
+      api_key: "os.environ/OPENROUTER_API_KEY"
+
+litellm_settings:
+  callbacks: ["otel"]           # emit OTLP traces of every LLM call → the OTEL_ENDPOINT
+                                # collector (local: otel-lgtm :4318; prod: infra collector).
+                                # Env set by `stack`: LITELLM_OTEL_V2/OTEL_EXPORTER/OTEL_ENDPOINT.
+  num_retries: 2
+  request_timeout: 600          # local models + cold-swap loads can be slow
+  drop_params: true             # tolerate clients sending params a backend doesn't support
+  # Escalation as a safety net at the gateway too (oracle also gates in-app):
+  fallbacks: [{"summarize-cheap": ["summarize-strong"]}]
+
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"   # set in env (agent-vault); mint per-app virtual keys from it

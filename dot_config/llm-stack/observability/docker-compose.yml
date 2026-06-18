@@ -1,0 +1,29 @@
+# Local observability — grafana/otel-lgtm: one container = OTel Collector + Tempo (traces) +
+# Loki (logs) + Prometheus (metrics) + Grafana, pre-wired. Same LGTM architecture as Cortiq
+# prod (infra/platform/compose/observability), right-sized for a dev workstation. Apps send
+# OTLP here in dev; in prod they send to the infra collector — identical app code, env-only.
+#
+# Run via `stack up` (it brings this up), or directly: docker compose -f this up -d
+# Grafana http://localhost:3000 (anonymous Admin — no login, since it's loopback-only).
+services:
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: otel-lgtm
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"   # Grafana UI
+      - "127.0.0.1:4317:4317"   # OTLP gRPC  (sift traces)
+      - "127.0.0.1:4318:4318"   # OTLP HTTP  (oracle/litellm)
+      - "127.0.0.1:3200:3200"   # Tempo query
+      - "127.0.0.1:9090:9090"   # Prometheus
+    environment:
+      # Loopback-only → no auth needed (your call: "shouldn't even need auth")
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_BASIC_ENABLED=false
+      - ENABLE_LOGS_ALL=false   # keep the container quiet
+    volumes:
+      - otel-lgtm-data:/data    # persist traces/metrics/logs/dashboards across restarts
+
+volumes:
+  otel-lgtm-data:

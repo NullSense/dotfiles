@@ -1,0 +1,11 @@
+[Unit]
+Description=Glance dashboard (local service catalog)
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/glance --config %h/.config/glance/glance.yml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

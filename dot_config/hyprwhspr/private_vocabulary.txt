@@ -38,6 +38,7 @@ Nous
 OCR
 omarchy
 OpenRouter
+Open WebUI
 Parakeet
 Pieter
 proxy

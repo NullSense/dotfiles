@@ -22,7 +22,11 @@ DEST="$HOME/.lmstudio/models/$REPO"
 
 command -v hf >/dev/null || { echo "hf (huggingface CLI) not found — pacman -S python-huggingface-hub or pipx install huggingface_hub" >&2; exit 1; }
 
-echo "→ $REPO  ($GLOB)  →  ~/.lmstudio/models/$REPO"
+# Fast path: hf_xet is the default backend since huggingface_hub v1.0 (hf_transfer is
+# removed/dead). HF_XET_HIGH_PERFORMANCE saturates bandwidth + all cores.
+export HF_XET_HIGH_PERFORMANCE=1
+
+echo "→ $REPO  ($GLOB)  →  ~/.lmstudio/models/$REPO   (hf_xet high-perf)"
 hf download "$REPO" --include "$GLOB" --local-dir "$DEST"
 echo
 echo "✓ downloaded to $DEST"

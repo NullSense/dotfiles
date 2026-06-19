@@ -83,6 +83,11 @@ case "${1:-status}" in
     export LITELLM_OTEL_V2=true OTEL_EXPORTER="${OTEL_EXPORTER:-otlp_grpc}" \
       OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4317}" \
       OTEL_SERVICE_NAME=litellm OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
+    # THE SWITCH: which deployment each switchable name (summarize-cheap/strong, oracle-llm)
+    # resolves to. development=LOCAL (llama-swap, default), production=CLOUD (OpenRouter).
+    # Flip the whole gateway to cloud:  LITELLM_ENVIRONMENT=production stack restart
+    export LITELLM_ENVIRONMENT="${LITELLM_ENVIRONMENT:-development}"
+    echo "  • litellm environment: $LITELLM_ENVIRONMENT ($([ "$LITELLM_ENVIRONMENT" = production ] && echo 'CLOUD/OpenRouter' || echo 'LOCAL/llama-swap'))"
     LITELLM_CMD=(litellm --config "$LITELLM_CFG" --port 4000)
     if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
       echo "  • litellm secrets ← Infisical (${INFISICAL_ENV:-dev}:${INFISICAL_PATH:-/litellm})"
@@ -122,11 +127,15 @@ case "${1:-status}" in
     done
     ;;
   db-init)  # one-time per machine (or after a litellm upgrade): prisma client + LiteLLM_* tables.
-            # litellm virtual keys (/key/generate, llm-vkey) need these. Install prep:
-            #   uv tool install 'litellm[proxy]' --with prisma
+            # litellm virtual keys (/key/generate, llm-vkey) need these. Install prep — ALL extras
+            # the gateway needs (prisma=DB/keys, diskcache=exact response cache, opentelemetry=otel
+            # tracing). Use the FULL line on every (re)install; `--force` drops anything omitted:
+            #   uv tool install 'litellm[proxy]' --with prisma --with diskcache \
+            #     --with opentelemetry-api --with opentelemetry-sdk --with opentelemetry-exporter-otlp --force
+            #   stack db-init   # re-run after any --force reinstall (it wipes the generated prisma client)
     TB="$HOME/.local/share/uv/tools/litellm/bin"
     SCHEMA=$(find "$HOME/.local/share/uv/tools/litellm" -path '*proxy_extras*schema.prisma' 2>/dev/null | head -1)
-    [ -n "$SCHEMA" ] || { echo "  ⚠ litellm prisma schema not found — run: uv tool install 'litellm[proxy]' --with prisma"; exit 1; }
+    [ -n "$SCHEMA" ] || { echo "  ⚠ litellm prisma schema not found — run: uv tool install 'litellm[proxy]' --with prisma --with diskcache --with opentelemetry-api --with opentelemetry-sdk --with opentelemetry-exporter-otlp --force"; exit 1; }
     PATH="$TB:$PATH" "$TB/prisma" generate --schema "$SCHEMA" 2>&1 | tail -2 || true
     DATABASE_URL="${DATABASE_URL:-postgresql://litellm@127.0.0.1:5433/litellm}" \
       PATH="$TB:$PATH" "$TB/prisma" db push --schema "$SCHEMA" --skip-generate --accept-data-loss 2>&1 | tail -2

@@ -1,7 +1,7 @@
 # litellm gateway — the ONE OpenAI endpoint every app/session talks to.
 # Maps LOGICAL model names → physical backends. This file is the only place that knows
 # about ports, providers, GPU/CPU, and (via env) keys. Apps know only the logical names.
-# See ~/notes/LLM-STACK.md.
+# See ~/notes/LLM-STACK.md and ~/Programming/llm-stack/docs/litellm-cleanup-plan.md.
 #
 # Run (dev):  litellm --config ~/.config/litellm/config.yaml --port 4000
 # Install:    uv tool install 'litellm[proxy]'   (or pipx install 'litellm[proxy]')
@@ -9,78 +9,379 @@
 #
 # Apps set:   OPENAI_BASE_URL/LLM_GATEWAY_URL=http://localhost:4000 , LLM_API_KEY=<virtual key>
 #
-# DEV backends point at llama-swap (:9292). Swapping to PROD = replace api_base/model with
-# Voyage/OpenRouter/Modal (commented below) — logical names, and therefore app code, unchanged.
+# ── THE SWITCH (local ⇄ cloud), one knob ───────────────────────────────────────────
+# `summarize-cheap`, `summarize-strong`, `oracle-llm` each have TWO deployments under the
+# same logical name, distinguished by `model_info.supported_environments`:
+#   • development → LOCAL (llama-swap :9292, free, eats VRAM)
+#   • production  → CLOUD (OpenRouter DeepSeek, frees VRAM, costs money)
+# The proxy loads only the deployment whose environment matches $LITELLM_ENVIRONMENT.
+# `stack` sets LITELLM_ENVIRONMENT=development by default → LOCAL. Flip the whole gateway
+# to cloud with:   LITELLM_ENVIRONMENT=production stack restart
+# Deployments WITHOUT a supported_environments key (embed, gemma-e4b/12b, lfm2-*, code-big,
+# rewrite-fast) are available in BOTH environments.
+#
+# ── METADATA (model_info) ──────────────────────────────────────────────────────────
+# Every deployment carries rich model_info so the Model Hub + /v1/model/info show real
+# numbers: mode, input/output cost-per-token (0 for local), context limits, and a nested
+# `metadata` block (backend, vram, quant, tok/s, quality from OUR faithfulness bench, tags).
+# Costs are USD per TOKEN (OpenRouter $/1M ÷ 1e6). Quality = overall/5 on the oracle v5
+# summariser set, judged by a consistent Claude rubric (see docs/leaderboard.md); tok/s are
+# measured on the RX 6750 XT (gfx1031, llama.cpp Vulkan) and approximate (≈).
 
 model_list:
-  # ── embeddings (sift, oracle) ──────────────────────────────────────────────
+  # ── embeddings (sift, oracle) — local always ──────────────────────────────────
   - model_name: embed
     litellm_params:
       model: openai/embed              # openai/ = "this endpoint is OpenAI-compatible"
-      api_base: http://127.0.0.1:9292/v1   # dev: llama-swap → Octen GPU (shared by all projects)
+      api_base: http://127.0.0.1:9292/v1   # llama-swap → Octen-Embedding-4B (shared GPU)
       api_key: "none"
-      tags: ["sift", "oracle", "default"]  # shared local embedder — reachable by every project key
-                                           # (virtual keys carry their project tag; tag_filtering is on)
-    # PROD — sift moved prod embeddings to OpenRouter (PR #35 dropped ollama/tei), so
-    # match that here (key in the gateway, not in any app):
-    #   model: openrouter/<embedding-model>
-    #   api_key: "os.environ/OPENROUTER_API_KEY"
-    # (Voyage remains a valid alt: model: voyage/voyage-3-large + VOYAGE_API_KEY.)
+    model_info:
+      mode: embedding
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 8192
+      metadata:
+        display_name: "Embed · Octen-Embedding-4B (local)"
+        backend: "llama.cpp Vulkan (RX 6750 XT) · Octen-Embedding-4B (Qwen3-Embedding-4B finetune), 2560-dim"
+        vram: "~4.4 GB"
+        quant: "Q?_K_M"
+        role: "shared embedder for sift + oracle"
+        tags: ["embedding", "local", "shared", "qwen3-embedding"]
 
-  # ── summarization: cheap-first + escalation (oracle) → CLOUD (frees local VRAM) ──
-  # Per oracle's split 2026-06-18: summaries + NER-arbitration run hosted so the 12 GB
-  # GPU stays free for GLiNER2 (oracle-owned) + embeddings. Local gemma is still reachable
-  # directly via llama-swap :9292 under "summarize-cheap"/"gemma4-e4b"/"gemma4-12b" if wanted.
-  # ⚠ Verify the exact OpenRouter slugs at https://openrouter.ai/models if a route 404s.
-  # PER-PROJECT OpenRouter billing via TAG ROUTING: the upstream key is chosen by the
-  # request's tag (apps send `x-litellm-tags: <project>`). Each project's OPENROUTER_KEY_*
-  # lives in THIS gateway's Infisical (/litellm), never in the app folders. To add a project,
-  # duplicate a deployment with its tag + key. `default` = the deployment for untagged requests.
+  # ── summarize-cheap: bulk summaries (oracle cheap-first) ───────────────────────
   - model_name: summarize-cheap
-    litellm_params:
-      model: openrouter/deepseek/deepseek-v4-flash
-      api_key: "os.environ/OPENROUTER_KEY_ORACLE"
-      tags: ["oracle", "default"]   # oracle-domain model
-
-  - model_name: summarize-strong
-    litellm_params:
-      model: openrouter/deepseek/deepseek-v4-pro
-      api_key: "os.environ/OPENROUTER_KEY_ORACLE"
-      tags: ["oracle", "default"]
-
-  # ── oracle's general LLM (NER arbitration / span-refine) → cloud, cheap+parallel ──
-  - model_name: oracle-llm
-    litellm_params:
-      model: openrouter/deepseek/deepseek-v4-flash
-      api_key: "os.environ/OPENROUTER_KEY_ORACLE"
-      tags: ["oracle", "default"]
-
-  # ── hyprwhspr dictation rewrite (local-only feature) ───────────────────────
-  - model_name: rewrite-fast
-    litellm_params:
-      model: openai/summarize-cheap        # reuse the E4B; or point at gemma4-12b
+    litellm_params:                    # DEV → local Gemma-4 E4B (5.1 GB) via llama-swap
+      model: openai/summarize-cheap
       api_base: http://127.0.0.1:9292/v1
       api_key: "none"
+    model_info:
+      supported_environments: ["development"]
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Summarize-cheap · Gemma-4 E4B (local, dev)"
+        backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-E4B-it"
+        quant: "Q5_K_M"
+        vram: "5.1 GB"
+        tokens_per_second: "≈49 single / ≈171 aggregate (NP=4)"
+        quality_overall: 4.36
+        faithfulness: 4.96
+        fabrication_pct: 0
+        tags: ["summarization", "local", "gemma", "faithful", "cheap"]
+  - model_name: summarize-cheap
+    litellm_params:                    # PROD → cloud DeepSeek-v4-flash (frees VRAM)
+      model: openrouter/deepseek/deepseek-v4-flash
+      api_key: "os.environ/OPENROUTER_API_KEY"
+    model_info:
+      supported_environments: ["production"]
+      mode: chat
+      input_cost_per_token: 0.00000009   # $0.09 / 1M in
+      output_cost_per_token: 0.00000018  # $0.18 / 1M out
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Summarize-cheap · DeepSeek-v4-flash (cloud, prod)"
+        backend: "OpenRouter · deepseek/deepseek-v4-flash"
+        vram: "0 (hosted)"
+        quality_overall: 4.43
+        tags: ["summarization", "cloud", "deepseek", "cheap"]
 
-  # ── too big for 12 GB → cloud even in dev ──────────────────────────────────
+  # ── summarize-strong: escalation target (oracle) ──────────────────────────────
+  - model_name: summarize-strong
+    litellm_params:                    # DEV → local Gemma-4 12B Opus-distill (7.4 GB)
+      model: openai/summarize-strong
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      supported_environments: ["development"]
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Summarize-strong · Gemma-4 12B Opus-distill (local, dev)"
+        backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-12B-it Claude-4.6/4.8-Opus-distill + MTP draft"
+        quant: "Q4_K_M"
+        vram: "7.4 GB"
+        tokens_per_second: "≈66 (MTP, 68% accept)"
+        quality_overall: 3.96
+        faithfulness: 4.43
+        leak_pct: 7
+        note: "Opus-distilled → richer analysis but less extractive (leaks outside knowledge); E4B beats it on strict faithfulness"
+        tags: ["summarization", "local", "gemma", "analytical", "strong"]
+  - model_name: summarize-strong
+    litellm_params:                    # PROD → cloud DeepSeek-v4-pro
+      model: openrouter/deepseek/deepseek-v4-pro
+      api_key: "os.environ/OPENROUTER_API_KEY"
+    model_info:
+      supported_environments: ["production"]
+      mode: chat
+      input_cost_per_token: 0.00000043   # $0.43 / 1M in
+      output_cost_per_token: 0.00000087  # $0.87 / 1M out
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Summarize-strong · DeepSeek-v4-pro (cloud, prod)"
+        backend: "OpenRouter · deepseek/deepseek-v4-pro"
+        vram: "0 (hosted)"
+        tags: ["summarization", "cloud", "deepseek", "strong"]
+
+  # ── oracle-llm: NER arbitration / span-refine / local reasoning ───────────────
+  - model_name: oracle-llm
+    litellm_params:                    # DEV → local Qwen3.6 35B-A3B (MoE) + MTP
+      model: openai/oracle-llm
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      supported_environments: ["development"]
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Oracle-LLM · Qwen3.6 35B-A3B MoE (local, dev)"
+        backend: "llama.cpp Vulkan (RX 6750 XT) · Qwen3.6 35B-A3B (MoE, ~3B active) + MTP"
+        role: "NER arbitration / span-refine / local reasoning"
+        tags: ["reasoning", "local", "qwen", "moe"]
+  - model_name: oracle-llm
+    litellm_params:                    # PROD → cloud DeepSeek-v4-flash (cheap + parallel)
+      model: openrouter/deepseek/deepseek-v4-flash
+      api_key: "os.environ/OPENROUTER_API_KEY"
+    model_info:
+      supported_environments: ["production"]
+      mode: chat
+      input_cost_per_token: 0.00000009
+      output_cost_per_token: 0.00000018
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Oracle-LLM · DeepSeek-v4-flash (cloud, prod)"
+        backend: "OpenRouter · deepseek/deepseek-v4-flash"
+        vram: "0 (hosted)"
+        tags: ["reasoning", "cloud", "deepseek"]
+
+  # ── EXPLICIT local gemma — always available (env-independent) so bench results are
+  #    never confused with the switchable summarize-cheap/strong above ─────────────
+  - model_name: gemma-e4b
+    litellm_params:
+      model: openai/summarize-cheap        # llama-swap alias → local Gemma-4 E4B (5.1 GB)
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Gemma-4 E4B (local, bench-stable)"
+        backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-E4B-it"
+        quant: "Q5_K_M"
+        vram: "5.1 GB"
+        tokens_per_second: "≈49 single / ≈171 aggregate (NP=4)"
+        quality_overall: 4.36
+        faithfulness: 4.96
+        fabrication_pct: 0
+        leak_pct: 0
+        role: "explicit always-local name (unambiguous vs the switchable summarize-cheap)"
+        tags: ["summarization", "local", "gemma", "faithful", "bench"]
+  - model_name: gemma-12b
+    litellm_params:
+      model: openai/summarize-strong       # llama-swap alias → local Gemma-4 12B Opus-distill (7.4 GB)
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 131072
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Gemma-4 12B Opus-distill (local, bench-stable)"
+        backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-12B-it Claude-Opus-distill + MTP"
+        quant: "Q4_K_M"
+        vram: "7.4 GB"
+        tokens_per_second: "≈66 (MTP, 68% accept)"
+        quality_overall: 3.96
+        faithfulness: 4.43
+        leak_pct: 7
+        tags: ["summarization", "local", "gemma", "analytical", "bench"]
+
+  # ── E4B quant ladder + Phi-4 — benchmarked alternates (load on demand, ttl 120s).
+  #    Findings in docs/leaderboard.md: E4B faithfulness is quant-robust (Q4≈Q5≈Q8,
+  #    all 0% fab/leak) so Q4 is the max-VRAM-savings safe pick. ─────────────────────
+  - model_name: e4b-q4
+    litellm_params:
+      model: openai/e4b-q4
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 131072
+      metadata:
+        display_name: "Gemma-4 E4B Q4_K_M (smallest, max VRAM savings)"
+        backend: "llama.cpp Vulkan · gemma-4-E4B-it"
+        quant: "Q4_K_M"
+        vram: "~4.5 GB"
+        quality_overall: 4.14
+        faithfulness: 4.82
+        fabrication_pct: 0
+        leak_pct: 0
+        tags: ["summarization", "local", "gemma", "faithful", "tiny-vram"]
+  - model_name: e4b-q8
+    litellm_params:
+      model: openai/e4b-q8
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 131072
+      metadata:
+        display_name: "Gemma-4 E4B Q8_0 (highest quant)"
+        backend: "llama.cpp Vulkan · gemma-4-E4B-it"
+        quant: "Q8_0"
+        vram: "~8 GB"
+        quality_overall: 4.21
+        faithfulness: 4.89
+        fabrication_pct: 0
+        leak_pct: 0
+        tags: ["summarization", "local", "gemma", "faithful"]
+  - model_name: phi4
+    litellm_params:
+      model: openai/phi4
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 16384
+      metadata:
+        display_name: "Phi-4 14B (Microsoft) — summarizer alternate"
+        backend: "llama.cpp Vulkan · microsoft/phi-4"
+        quant: "Q4_K_M"
+        vram: "8.5 GB"
+        quality_overall: 3.89
+        faithfulness: 4.64
+        why_it_matters: 3.32
+        leak_pct: 4
+        note: "strong EXTERNAL hallucination numbers (≈3.7% Vectara) but underperforms on OUR rubric (weak why-it-matters)"
+        tags: ["summarization", "local", "phi"]
+
+  # ── LFM2 summarizer candidates (local) — summary_bench A/B vs gemma ────────────
+  - model_name: lfm2-2.6b
+    litellm_params:
+      model: openai/lfm2-2.6b
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 16384
+      metadata:
+        display_name: "LiquidAI LFM2-2.6B (local, tiny)"
+        backend: "llama.cpp Vulkan · LiquidAI/LFM2-2.6B"
+        quant: "Q4_K_M"
+        vram: "1.7 GB"
+        quality_overall: 4.14
+        fabrication_pct: 18
+        leak_pct: 11
+        note: "tiny + decent quality but high fabrication — not safe for faithful summaries"
+        tags: ["summarization", "local", "lfm2", "tiny"]
+  - model_name: lfm2-1.2b-extract
+    litellm_params:
+      model: openai/lfm2-1.2b-extract
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 16384
+      metadata:
+        display_name: "LiquidAI LFM2-1.2B-Extract (local, tiny)"
+        backend: "llama.cpp Vulkan · LiquidAI/LFM2-1.2B-Extract"
+        quant: "Q4_K_M"
+        vram: "0.8 GB"
+        quality_overall: 1.44
+        note: "purpose-built extraction; weak as a general summariser"
+        tags: ["extraction", "local", "lfm2", "tiny"]
+
+  # ── hyprwhspr dictation rewrite (local-only feature) ───────────────────────────
+  - model_name: rewrite-fast
+    litellm_params:
+      model: openai/summarize-cheap        # reuse the local E4B
+      api_base: http://127.0.0.1:9292/v1
+      api_key: "none"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+      max_input_tokens: 131072
+      max_output_tokens: 2048
+      metadata:
+        display_name: "Rewrite-fast · Gemma-4 E4B (local, dictation)"
+        backend: "llama.cpp Vulkan · gemma-4-E4B-it Q5_K_M"
+        vram: "5.1 GB"
+        tokens_per_second: "≈49 single / ≈171 aggregate (NP=4)"
+        role: "hyprwhspr-ai context-aware voice-dictation rewrite"
+        tags: ["dictation", "rewrite", "local", "gemma"]
+
+  # ── too big for 12 GB → cloud in both environments ─────────────────────────────
   - model_name: code-big
     litellm_params:
       model: openrouter/anthropic/claude-3.5-sonnet
       api_key: "os.environ/OPENROUTER_API_KEY"
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.000003     # $3 / 1M in
+      output_cost_per_token: 0.000015    # $15 / 1M out
+      max_input_tokens: 200000
+      max_output_tokens: 8192
+      metadata:
+        display_name: "Code-big · Claude 3.5 Sonnet (cloud)"
+        backend: "OpenRouter · anthropic/claude-3.5-sonnet"
+        vram: "0 (hosted)"
+        role: "too big for 12 GB → cloud in both dev and prod"
+        tags: ["code", "cloud", "anthropic", "strong"]
 
 litellm_settings:
   callbacks: ["otel"]           # emit OTLP traces of every LLM call → the OTEL_ENDPOINT
-                                # collector (local: otel-lgtm :4318; prod: infra collector).
+                                # collector (local: otel-lgtm :4318 / langfuse via fan-out).
                                 # Env set by `stack`: LITELLM_OTEL_V2/OTEL_EXPORTER/OTEL_ENDPOINT.
   num_retries: 2
   request_timeout: 600          # local models + cold-swap loads can be slow
   drop_params: true             # tolerate clients sending params a backend doesn't support
-  # Escalation as a safety net at the gateway too (oracle also gates in-app):
+  # Escalation safety net at the gateway too (oracle also gates in-app):
   fallbacks: [{"summarize-cheap": ["summarize-strong"]}]
 
-router_settings:
-  enable_tag_filtering: True    # route by request tag → per-project OpenRouter key (see above)
+  # ── EXACT response cache (safe: byte-identical request → identical answer). NOT
+  #    semantic — semantic carries a 3-8% wrong-answer false-hit rate, unacceptable for
+  #    unique-article summaries. disk backend = zero new service. mode default_off =
+  #    opt-in: a request caches only when it sends `cache: {"no-cache": false}`. ──────
+  cache: true
+  cache_params:
+    type: disk
+    disk_cache_dir: "/home/nullsense/.cache/llm-stack/litellm-cache"  # FIXED path — default is CWD-relative (./.litellm_cache), which leaks into whatever dir launched the proxy
+    mode: default_off
+
+  # ── Model Hub (/ui/model_hub_table) — advertise these logical groups publicly ──
+  #    (bench-only names e4b-q4/e4b-q8/phi4 intentionally omitted) ──────────────────
+  public_model_groups:
+    ["embed", "summarize-cheap", "summarize-strong", "oracle-llm",
+     "gemma-e4b", "gemma-12b", "lfm2-2.6b", "lfm2-1.2b-extract", "rewrite-fast", "code-big"]
 
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"   # in Infisical /litellm; mint per-app virtual keys from it
-  database_url: "os.environ/DATABASE_URL"       # litellm-db (:5433) — enables /key/generate + spend tracking
+  database_url: "os.environ/DATABASE_URL"       # litellm-db (:5433) — /key/generate + spend tracking
+  store_model_in_db: true                       # persist model groups → Model Hub can list them

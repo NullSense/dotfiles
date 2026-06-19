@@ -41,12 +41,47 @@ models:
     aliases: [gemma4-12b, gemma4-opus-distill]
     description: Gemma-4 12B Opus-distill + MTP — escalation only (oracle summarize-strong)
 
+  # ── E4B quant ladder (2026-06-19 bench): same model as summarize-cheap (Q5_K_M)
+  #    at Q4_K_M / Q8_0. Finding: faithfulness is quant-robust (Q4≈Q5≈Q8, 0% fab/leak)
+  #    so Q4 = max VRAM savings with no faithfulness cost. Kept as on-demand alternates
+  #    (ttl 120s = evict fast). See ~/Programming/llm-stack/docs/leaderboard.md. ──
+  e4b-q4:
+    cmd: env PORT=${PORT} MODE=sum MODEL=/home/nullsense/.lmstudio/models/bartowski/google_gemma-4-E4B-it-GGUF/google_gemma-4-E4B-it-Q4_K_M.gguf /home/nullsense/bin/llm-servers/llama-gemma4b
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 120
+    description: Gemma-4 E4B Q4_K_M — quant-ablation vs summarize-cheap (Q5_K_M)
+  e4b-q8:
+    cmd: env PORT=${PORT} MODE=sum MODEL=/home/nullsense/.lmstudio/models/bartowski/google_gemma-4-E4B-it-GGUF/google_gemma-4-E4B-it-Q8_0.gguf /home/nullsense/bin/llm-servers/llama-gemma4b
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 120
+    description: Gemma-4 E4B Q8_0 — quant-ablation vs summarize-cheap (Q5_K_M)
+
   # ── candidate cheap summarizer being benchmarked vs the 12B ──
   vibethinker-3b:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-vibethinker
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
     description: VibeThinker-3B (Qwen2.5-Coder reasoning) — summarization/dictation A/B
+
+  # ── LiquidAI LFM2 — tiny VRAM-cheap summarizer candidates (vs gemma E4B/12B) ──
+  lfm2-2.6b:
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-2.6B-GGUF/LFM2-2.6B-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.3 --top-p 0.95 --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    description: LFM2-2.6B (LiquidAI) — ~1.7GB, beats Gemma-3-4B, summarizer A/B vs E4B
+  lfm2-1.2b-extract:
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.1 --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    description: LFM2-1.2B-Extract (LiquidAI Nanos) — ~0.8GB, purpose-built extraction/structured summary
+
+  # ── Phi-4 (14B) summarizer candidate — strong external hallucination numbers,
+  #    benchmarked vs gemma E4B on our faithfulness set (2026-06-19) ──
+  phi4:
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/bartowski/phi-4-GGUF/phi-4-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.3 --top-p 0.95 --cache-type-k q8_0 --cache-type-v q8_0 --no-mmap --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 120
+    description: Phi-4 14B Q4_K_M (Microsoft) — faithfulness summarizer A/B vs gemma E4B
 
   # ── general reasoning / coding (oracle-llm, big local chat) ──
   oracle-llm:

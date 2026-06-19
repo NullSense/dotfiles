@@ -55,11 +55,24 @@ pages:
             cache: 30s
             sites:
               - title: LiteLLM gateway
-                url: http://localhost:4000/
+                url: http://localhost:4000/health/liveliness
                 icon: si:openai
               - title: llama-swap
                 url: http://localhost:9292/v1/models
                 icon: si:nvidia
+              - title: Open WebUI
+                url: http://localhost:8090/
+                icon: si:openwebgui
+              - title: Langfuse (traces)
+                url: http://localhost:3002/
+                icon: di:langfuse
+              - title: Grafana (local)
+                url: http://localhost:3000/
+                icon: di:grafana
+              - title: Tempo
+                url: http://localhost:3200/ready
+              - title: dictation E4B (:8083)
+                url: http://localhost:8083/health
           - type: monitor
             title: Local services
             cache: 30s
@@ -119,9 +132,14 @@ pages:
                     url: http://ha.home
                     icon: di:home-assistant
           - type: bookmarks
-            title: Local observability
+            title: Local LLM stack
             groups:
               - links:
+                  - title: Open WebUI (chat)
+                    url: http://localhost:8090
+                    icon: si:openwebgui
+                  - title: Langfuse (LLM traces)
+                    url: http://localhost:3002
                   - title: Grafana (local · :3000)
                     url: http://localhost:3000
                     icon: di:grafana

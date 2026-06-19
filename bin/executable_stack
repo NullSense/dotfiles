@@ -18,6 +18,7 @@ LITELLM_CFG="${LITELLM_CFG:-$HOME/.config/litellm/config.yaml}"
 OBS_COMPOSE="${OBS_COMPOSE:-$LLMSTACK/stack/observability/docker-compose.yml}"
 LANGFUSE_COMPOSE="${LANGFUSE_COMPOSE:-$LLMSTACK/stack/langfuse/docker-compose.yml}"
 COLLECTOR_COMPOSE="${COLLECTOR_COMPOSE:-$LLMSTACK/stack/collector/docker-compose.yml}"
+OWUI_COMPOSE="${OWUI_COMPOSE:-$LLMSTACK/stack/open-webui/docker-compose.yml}"
 RUN="${RUN:-$HOME/.cache/llm-stack}"; mkdir -p "$RUN"
 
 # up = got any HTTP code (401 from litellm still means "alive"); 000 = not listening.
@@ -69,6 +70,13 @@ ensure_dashboards() {
   if is_up http://127.0.0.1:3009/; then echo "  • uptime-kuma already up"
   elif command -v docker >/dev/null 2>&1 && docker start uptime-kuma >/dev/null 2>&1; then echo "  ▶ uptime-kuma → :3009 (docker)"
   else echo "  ⚠ uptime-kuma not running (one-time: docker run -d --restart=unless-stopped -p 3009:3001 -v uptime-kuma:/app/data --name uptime-kuma louislam/uptime-kuma:1)"; fi
+  # Open WebUI (chat front-end for the gateway; reachable on the tailnet for Conduit).
+  if is_up http://127.0.0.1:8090/; then echo "  • open-webui already up"
+  elif [ -s "$(dirname "$OWUI_COMPOSE")/.env" ] && command -v docker >/dev/null 2>&1; then
+    ( cd "$(dirname "$OWUI_COMPOSE")" && docker compose --env-file .env up -d >/dev/null 2>&1 ) \
+      && echo "  ▶ open-webui → :8090 (docker · tailnet http://100.121.121.37:8090)" \
+      || echo "  ⚠ open-webui failed to start (docker compose)"
+  else echo "  ⚠ open-webui not started (missing stack/open-webui/.env or docker)"; fi
 }
 
 case "${1:-status}" in
@@ -124,6 +132,7 @@ case "${1:-status}" in
     if command -v docker >/dev/null 2>&1; then
       docker stop uptime-kuma >/dev/null 2>&1 && echo "  ■ uptime-kuma" || true
       ( cd "$(dirname "$COLLECTOR_COMPOSE")" && docker compose --env-file ../langfuse/.env down >/dev/null 2>&1 ) && echo "  ■ collector" || true
+      ( cd "$(dirname "$OWUI_COMPOSE")" && docker compose --env-file .env down >/dev/null 2>&1 ) && echo "  ■ open-webui" || true
       ( cd "$(dirname "$LANGFUSE_COMPOSE")" && docker compose --env-file .env down >/dev/null 2>&1 ) && echo "  ■ langfuse" || true
       docker compose -f "$OBS_COMPOSE" down >/dev/null 2>&1 && echo "  ■ observability" || true
     fi
@@ -131,7 +140,7 @@ case "${1:-status}" in
   restart) "$0" down; sleep 1; "$0" up ;;
   status)
     command -v llms >/dev/null && llms
-    for n in "glance:8088" "uptime-kuma:3009" "grafana:3000" "langfuse:3002" "collector:4318"; do
+    for n in "glance:8088" "uptime-kuma:3009" "grafana:3000" "langfuse:3002" "collector:4318" "open-webui:8090"; do
       printf "  %-12s HTTP %s\n" "${n%%:*}" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${n##*:}/ 2>/dev/null || echo down)"
     done
     printf "  %-12s HTTP %s\n" "rewriter" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:8083/health 2>/dev/null || echo down)"

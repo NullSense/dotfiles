@@ -83,6 +83,17 @@ models:
     ttl: 120
     description: Phi-4 14B Q4_K_M (Microsoft) — faithfulness summarizer A/B vs gemma E4B
 
+  # ── abliterated/uncensored chat — Qwen3.6-35B-A3B Uncensored (Harmony) ──
+  #    Same 35B-A3B MoE arch as oracle-llm; MXFP4_MOE quant, MoE experts offloaded to
+  #    CPU (--n-cpu-moe 28) to fit 12 GB, built-in Harmony template (--jinja, no MTP).
+  #    Tested 2026-06-19: loads in ~19s, coherent. Slow (partial offload) — for the
+  #    occasional unaligned/uncensored request, not bulk work. ──
+  qwen-uncensored:
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF/Qwen3.6-35B-A3B-Uncensored-Harmony-MXFP4_MOE.gguf --alias qwen-uncensored --host 127.0.0.1 --port ${PORT} --device Vulkan0 --fit off --n-gpu-layers 99 --n-cpu-moe 28 --ctx-size 16384 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --threads 8 --threads-batch 8 --no-mmap --jinja --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    description: Qwen3.6-35B-A3B Uncensored/Harmony (abliterated) MXFP4_MOE — MoE CPU-offload
+
   # ── general reasoning / coding (oracle-llm, big local chat) ──
   oracle-llm:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-qwen36

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# model-pull — download a GGUF into the ONE canonical local model store.
+#
+# Canonical store = ~/.lmstudio/models/<org>/<repo>/  (LM Studio's dir; every
+# wrapper in ~/bin/llm-servers + llama-swap reads from here). LM Studio is being
+# deprecated as a RUNTIME — the runtime is always llama.cpp — but its model dir
+# stays the single download destination so nothing is ever scattered.
+#
+# Usage:
+#   model-pull <hf-repo> [include-glob]
+#   model-pull bartowski/phi-4-GGUF '*Q4_K_M*.gguf'
+#   model-pull LiquidAI/LFM2-2.6B-GGUF            # whole repo
+#
+# After downloading, register it in:
+#   ~/.config/llama-swap/config.yaml   (a model: entry → a wrapper or inline cmd)
+#   ~/.config/litellm/config.yaml      (a model_name → llamafile/<name> + metadata)
+set -euo pipefail
+
+REPO="${1:?usage: model-pull <hf-repo> [include-glob]}"
+GLOB="${2:-*.gguf}"
+DEST="$HOME/.lmstudio/models/$REPO"
+
+command -v hf >/dev/null || { echo "hf (huggingface CLI) not found — pacman -S python-huggingface-hub or pipx install huggingface_hub" >&2; exit 1; }
+
+echo "→ $REPO  ($GLOB)  →  ~/.lmstudio/models/$REPO"
+hf download "$REPO" --include "$GLOB" --local-dir "$DEST"
+echo
+echo "✓ downloaded to $DEST"
+echo "  next: add a model: entry to ~/.config/llama-swap/config.yaml and a"
+echo "        model_name (llamafile/<name> + metadata.source_url) to ~/.config/litellm/config.yaml,"
+echo "        then: stack restart"

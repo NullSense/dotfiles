@@ -409,6 +409,26 @@ model_list:
       tags: ["code", "cloud", "anthropic", "strong"]
       source_url: https://openrouter.ai/anthropic/claude-3.5-sonnet
 
+# ── abliterated/uncensored local chat — Qwen3.6-35B-A3B Uncensored (Harmony) ──
+- model_name: qwen-uncensored
+  litellm_params:
+    model: llamafile/qwen-uncensored
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+  model_info:
+    mode: chat
+    max_input_tokens: 16384
+    metadata:
+      display_name: "Qwen3.6-35B-A3B Uncensored (abliterated, local)"
+      backend: "llama.cpp Vulkan (RX 6750 XT) · LuffyTheFox Qwen3.6-35B-A3B-Uncensored-Harmony MXFP4_MOE (MoE experts on CPU, n-cpu-moe 28)"
+      vram: "partial — ~6-8 GB GPU + experts in RAM; slow (offload)"
+      quant: "MXFP4_MOE"
+      role: "uncensored/unaligned chat + reasoning"
+      source_url: https://huggingface.co/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF
+      tags: ["chat", "local", "qwen", "uncensored", "abliterated", "moe"]
+
 litellm_settings:
   callbacks: ["otel"]           # emit OTLP traces of every LLM call → the OTEL_ENDPOINT
                                 # collector (local: otel-lgtm :4318 / langfuse via fan-out).
@@ -431,7 +451,7 @@ litellm_settings:
 
   # ── Model Hub (/ui/model_hub_table) — advertise these logical groups publicly ──
   #    (bench-only names e4b-q4/e4b-q8/phi4 intentionally omitted) ──────────────────
-  public_model_groups: ["embed", "summarize-cheap", "summarize-strong", "oracle-llm", "gemma-e4b", "gemma-12b", "lfm2-2.6b", "lfm2-1.2b-extract", "rewrite-fast", "code-big"]
+  public_model_groups: ["embed", "summarize-cheap", "summarize-strong", "oracle-llm", "gemma-e4b", "gemma-12b", "lfm2-2.6b", "lfm2-1.2b-extract", "rewrite-fast", "code-big", qwen-uncensored]
 
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"   # in Infisical /litellm; mint per-app virtual keys from it

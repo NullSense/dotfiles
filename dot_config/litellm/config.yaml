@@ -10,14 +10,14 @@
 # Apps set:   OPENAI_BASE_URL/LLM_GATEWAY_URL=http://localhost:4000 , LLM_API_KEY=<virtual key>
 #
 # ── THE SWITCH (local ⇄ cloud), one knob ───────────────────────────────────────────
-# `summarize-cheap`, `summarize-strong`, `oracle-llm` each have TWO deployments under the
-# same logical name, distinguished by `model_info.supported_environments`:
+# `summarize-cheap`, `summarize-strong`, `oracle-llm` are INTENT ROUTES (see docs/CAPABILITIES.md):
+# each has TWO deployments under the same logical name, distinguished by `model_info.supported_environments`:
 #   • development → LOCAL (llama-swap :9292, free, eats VRAM)
 #   • production  → CLOUD (OpenRouter DeepSeek, frees VRAM, costs money)
 # The proxy loads only the deployment whose environment matches $LITELLM_ENVIRONMENT.
 # `stack` sets LITELLM_ENVIRONMENT=development by default → LOCAL. Flip the whole gateway
 # to cloud with:   LITELLM_ENVIRONMENT=production stack restart
-# Deployments WITHOUT a supported_environments key (embed, gemma-e4b/12b, lfm2-*, code-big,
+# Deployments WITHOUT a supported_environments key (embed, HF-identity single-backend models,
 # rewrite-fast) are available in BOTH environments.
 #
 # ── METADATA (model_info) ──────────────────────────────────────────────────────────
@@ -37,6 +37,11 @@ model_list:
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "embedding"
+    - "local"
+    - "shared"
+    - "qwen3-embedding"
   model_info:
     mode: embedding
     input_cost_per_token: 0
@@ -51,6 +56,11 @@ model_list:
       tags: ["embedding", "local", "shared", "qwen3-embedding"]
       source_url: https://huggingface.co/Qwen/Qwen3-Embedding-4B
 
+  # ── INTENT ROUTES: summarize-cheap / summarize-strong / oracle-llm ─────────────
+  # These are load-bearing contract names for oracle (apps/ingest/summarize.py) + sift.
+  # DO NOT rename or merge their dual deployments — prod is DeepSeek, not the local model.
+  # See docs/CAPABILITIES.md for the intent-routing taxonomy.
+
   # ── summarize-cheap: bulk summaries (oracle cheap-first) ───────────────────────
 - model_name: summarize-cheap
   litellm_params:                      # DEV → local Gemma-4 E4B (5.1 GB) via llama-swap
@@ -59,6 +69,12 @@ model_list:
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "gemma"
+    - "faithful"
+    - "cheap"
   model_info:
     supported_environments: ["development"]
     mode: chat
@@ -83,6 +99,11 @@ model_list:
     api_key: "os.environ/OPENROUTER_API_KEY"
     input_cost_per_token: 9e-08
     output_cost_per_token: 1.8e-07
+    tags:
+    - "summarization"
+    - "cloud"
+    - "deepseek"
+    - "cheap"
   model_info:
     supported_environments: ["production"]
     mode: chat
@@ -106,6 +127,12 @@ model_list:
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "gemma"
+    - "analytical"
+    - "strong"
   model_info:
     supported_environments: ["development"]
     mode: chat
@@ -131,6 +158,11 @@ model_list:
     api_key: "os.environ/OPENROUTER_API_KEY"
     input_cost_per_token: 4.3e-07
     output_cost_per_token: 8.7e-07
+    tags:
+    - "summarization"
+    - "cloud"
+    - "deepseek"
+    - "strong"
   model_info:
     supported_environments: ["production"]
     mode: chat
@@ -153,6 +185,11 @@ model_list:
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "reasoning"
+    - "local"
+    - "qwen"
+    - "moe"
   model_info:
     supported_environments: ["development"]
     mode: chat
@@ -172,6 +209,10 @@ model_list:
     api_key: "os.environ/OPENROUTER_API_KEY"
     input_cost_per_token: 9e-08
     output_cost_per_token: 1.8e-07
+    tags:
+    - "reasoning"
+    - "cloud"
+    - "deepseek"
   model_info:
     supported_environments: ["production"]
     mode: chat
@@ -186,15 +227,25 @@ model_list:
       tags: ["reasoning", "cloud", "deepseek"]
       source_url: https://openrouter.ai/deepseek/deepseek-v4-flash
 
-  # ── EXPLICIT local gemma — always available (env-independent) so bench results are
-  #    never confused with the switchable summarize-cheap/strong above ─────────────
-- model_name: gemma-e4b
+  # ── HF-identity single-backend models (always available, both environments) ───
+  # These are pure-local single-backend entries named by HF identity.
+  # Legacy short names (gemma-e4b, gemma-12b, phi4, etc.) are kept as hidden
+  # router_settings.model_group_alias entries so existing callers keep working.
+
+  # google/gemma-4-E4B-it — always-local explicit identity (env-independent bench + direct use)
+- model_name: google/gemma-4-E4B-it
   litellm_params:
-    model: llamafile/summarize-cheap          # llama-swap alias → local Gemma-4 E4B (5.1 GB)
+    model: llamafile/gemma-4-e4b              # llama-swap new identity name (old alias: summarize-cheap still works)
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "gemma"
+    - "faithful"
+    - "bench"
   model_info:
     mode: chat
     input_cost_per_token: 0
@@ -202,7 +253,7 @@ model_list:
     max_input_tokens: 131072
     max_output_tokens: 8192
     metadata:
-      display_name: "Gemma-4 E4B (local, bench-stable)"
+      display_name: "Gemma-4 E4B · google/gemma-4-E4B-it (local, Q5_K_M)"
       backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-E4B-it"
       quant: "Q5_K_M"
       vram: "5.1 GB"
@@ -211,16 +262,24 @@ model_list:
       faithfulness: 4.96
       fabrication_pct: 0
       leak_pct: 0
-      role: "explicit always-local name (unambiguous vs the switchable summarize-cheap)"
+      role: "explicit always-local identity (unambiguous vs the switchable summarize-cheap intent route)"
       tags: ["summarization", "local", "gemma", "faithful", "bench"]
       source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
-- model_name: gemma-12b
+
+  # google/gemma-4-12B-it-Opus-distill — always-local explicit identity
+- model_name: google/gemma-4-12B-it-Opus-distill
   litellm_params:
-    model: llamafile/summarize-strong         # llama-swap alias → local Gemma-4 12B Opus-distill (7.4 GB)
+    model: llamafile/gemma-4-12b-opus         # llama-swap new identity name (old alias: summarize-strong still works)
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "gemma"
+    - "analytical"
+    - "bench"
   model_info:
     mode: chat
     input_cost_per_token: 0
@@ -228,7 +287,7 @@ model_list:
     max_input_tokens: 131072
     max_output_tokens: 8192
     metadata:
-      display_name: "Gemma-4 12B Opus-distill (local, bench-stable)"
+      display_name: "Gemma-4 12B Opus-distill · google/gemma-4-12B-it-Opus-distill (local, Q4_K_M)"
       backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-12B-it Claude-Opus-distill + MTP"
       quant: "Q4_K_M"
       vram: "7.4 GB"
@@ -239,69 +298,26 @@ model_list:
       tags: ["summarization", "local", "gemma", "analytical", "bench"]
       source_url: https://huggingface.co/yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF
 
-  # ── E4B quant ladder + Phi-4 — benchmarked alternates (load on demand, ttl 120s).
-  #    Findings in docs/leaderboard.md: E4B faithfulness is quant-robust (Q4≈Q5≈Q8,
-  #    all 0% fab/leak) so Q4 is the max-VRAM-savings safe pick. ─────────────────────
-- model_name: e4b-q4
+  # microsoft/phi-4 — instruct / summarizer alternate
+- model_name: microsoft/phi-4
   litellm_params:
-    model: llamafile/e4b-q4
+    model: llamafile/phi-4
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
-  model_info:
-    mode: chat
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-    max_input_tokens: 131072
-    metadata:
-      display_name: "Gemma-4 E4B Q4_K_M (smallest, max VRAM savings)"
-      backend: "llama.cpp Vulkan · gemma-4-E4B-it"
-      quant: "Q4_K_M"
-      vram: "~4.5 GB"
-      quality_overall: 4.14
-      faithfulness: 4.82
-      fabrication_pct: 0
-      leak_pct: 0
-      tags: ["summarization", "local", "gemma", "faithful", "tiny-vram"]
-      source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
-- model_name: e4b-q8
-  litellm_params:
-    model: llamafile/e4b-q8
-    api_base: http://127.0.0.1:9292/v1
-    api_key: "none"
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-  model_info:
-    mode: chat
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-    max_input_tokens: 131072
-    metadata:
-      display_name: "Gemma-4 E4B Q8_0 (highest quant)"
-      backend: "llama.cpp Vulkan · gemma-4-E4B-it"
-      quant: "Q8_0"
-      vram: "~8 GB"
-      quality_overall: 4.21
-      faithfulness: 4.89
-      fabrication_pct: 0
-      leak_pct: 0
-      tags: ["summarization", "local", "gemma", "faithful"]
-      source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
-- model_name: phi4
-  litellm_params:
-    model: llamafile/phi4
-    api_base: http://127.0.0.1:9292/v1
-    api_key: "none"
-    input_cost_per_token: 0
-    output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "phi"
+    - "instruct"
   model_info:
     mode: chat
     input_cost_per_token: 0
     output_cost_per_token: 0
     max_input_tokens: 16384
     metadata:
-      display_name: "Phi-4 14B (Microsoft) — summarizer alternate"
+      display_name: "Phi-4 14B · microsoft/phi-4 (local, Q4_K_M)"
       backend: "llama.cpp Vulkan · microsoft/phi-4"
       quant: "Q4_K_M"
       vram: "8.5 GB"
@@ -310,24 +326,29 @@ model_list:
       why_it_matters: 3.32
       leak_pct: 4
       note: "strong EXTERNAL hallucination numbers (≈3.7% Vectara) but underperforms on OUR rubric (weak why-it-matters)"
-      tags: ["summarization", "local", "phi"]
+      tags: ["summarization", "local", "phi", "instruct"]
       source_url: https://huggingface.co/bartowski/phi-4-GGUF
 
-  # ── LFM2 summarizer candidates (local) — summary_bench A/B vs gemma ────────────
-- model_name: lfm2-2.6b
+  # LiquidAI/LFM2-2.6B — tiny summarizer candidate
+- model_name: LiquidAI/LFM2-2.6B
   litellm_params:
     model: llamafile/lfm2-2.6b
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "lfm2"
+    - "tiny"
   model_info:
     mode: chat
     input_cost_per_token: 0
     output_cost_per_token: 0
     max_input_tokens: 16384
     metadata:
-      display_name: "LiquidAI LFM2-2.6B (local, tiny)"
+      display_name: "LFM2-2.6B · LiquidAI/LFM2-2.6B (local, tiny)"
       backend: "llama.cpp Vulkan · LiquidAI/LFM2-2.6B"
       quant: "Q4_K_M"
       vram: "1.7 GB"
@@ -337,20 +358,27 @@ model_list:
       note: "tiny + decent quality but high fabrication — not safe for faithful summaries"
       tags: ["summarization", "local", "lfm2", "tiny"]
       source_url: https://huggingface.co/LiquidAI/LFM2-2.6B-GGUF
-- model_name: lfm2-1.2b-extract
+
+  # LiquidAI/LFM2-1.2B-Extract — purpose-built extraction
+- model_name: LiquidAI/LFM2-1.2B-Extract
   litellm_params:
     model: llamafile/lfm2-1.2b-extract
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "extraction"
+    - "local"
+    - "lfm2"
+    - "tiny"
   model_info:
     mode: chat
     input_cost_per_token: 0
     output_cost_per_token: 0
     max_input_tokens: 16384
     metadata:
-      display_name: "LiquidAI LFM2-1.2B-Extract (local, tiny)"
+      display_name: "LFM2-1.2B-Extract · LiquidAI/LFM2-1.2B-Extract (local, tiny)"
       backend: "llama.cpp Vulkan · LiquidAI/LFM2-1.2B-Extract"
       quant: "Q4_K_M"
       vram: "0.8 GB"
@@ -359,69 +387,26 @@ model_list:
       tags: ["extraction", "local", "lfm2", "tiny"]
       source_url: https://huggingface.co/LiquidAI/LFM2-1.2B-Extract-GGUF
 
-  # ── hyprwhspr dictation rewrite — the DEDICATED :8083 server (E4B + MTP) ────────
-  #    Mirrors the real dictation backend (hyprwhspr-rewrite-e4b.service, NP=1 + MTP)
-  #    so the catalog is accurate. ⚠ hyprwhspr itself calls :8083 DIRECTLY, NOT through
-  #    this gateway — going via litellm would drop the `chat_template_kwargs`
-  #    (enable_thinking=false) that keeps dictation 6× faster (drop_params eats it) and
-  #    add a hop to a latency-critical path. This entry is for discoverability/the hub.
-- model_name: rewrite-fast
+  # LuffyTheFox/Qwen3.6-35B-A3B-Uncensored — abliterated local chat
+- model_name: LuffyTheFox/Qwen3.6-35B-A3B-Uncensored
   litellm_params:
-    model: llamafile/gemma4-e4b               # alias served by the :8083 dictation server
-    api_base: http://127.0.0.1:8083/v1
-    api_key: "none"
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-  model_info:
-    mode: chat
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-    max_input_tokens: 131072
-    max_output_tokens: 2048
-    metadata:
-      display_name: "Rewrite-fast · Gemma-4 E4B + MTP (dictation, :8083)"
-      backend: "llama.cpp Vulkan · gemma-4-E4B-it Q5_K_M + MTP draft (hyprwhspr-rewrite-e4b.service, NP=1)"
-      vram: "5.1 GB"
-      tokens_per_second: "MTP ≈40% faster than plain (rewrite-bench p50 136ms vs 227ms)"
-      mtp_draft_acceptance: "~80% (E4B-it assistant draft head)"
-      role: "hyprwhspr-ai dictation rewrite — hyprwhspr calls :8083 DIRECTLY (this mirrors it for the catalog)"
-      tags: ["dictation", "rewrite", "local", "gemma", "mtp"]
-      source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
-
-  # ── too big for 12 GB → cloud in both environments ─────────────────────────────
-- model_name: code-big
-  litellm_params:
-    model: openrouter/anthropic/claude-3.5-sonnet
-    api_key: "os.environ/OPENROUTER_API_KEY"
-    input_cost_per_token: 3e-06
-    output_cost_per_token: 1.5e-05
-  model_info:
-    mode: chat
-    input_cost_per_token: 0.000003       # $3 / 1M in
-    output_cost_per_token: 0.000015      # $15 / 1M out
-    max_input_tokens: 200000
-    max_output_tokens: 8192
-    metadata:
-      display_name: "Code-big · Claude 3.5 Sonnet (cloud)"
-      backend: "OpenRouter · anthropic/claude-3.5-sonnet"
-      vram: "0 (hosted)"
-      role: "too big for 12 GB → cloud in both dev and prod"
-      tags: ["code", "cloud", "anthropic", "strong"]
-      source_url: https://openrouter.ai/anthropic/claude-3.5-sonnet
-
-# ── abliterated/uncensored local chat — Qwen3.6-35B-A3B Uncensored (Harmony) ──
-- model_name: qwen-uncensored
-  litellm_params:
-    model: llamafile/qwen-uncensored
+    model: llamafile/qwen3.6-35b-uncensored
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    tags:
+    - "chat"
+    - "local"
+    - "qwen"
+    - "uncensored"
+    - "abliterated"
+    - "moe"
   model_info:
     mode: chat
     max_input_tokens: 16384
     metadata:
-      display_name: "Qwen3.6-35B-A3B Uncensored (abliterated, local)"
+      display_name: "Qwen3.6-35B Uncensored · LuffyTheFox/Qwen3.6-35B-A3B-Uncensored (local)"
       backend: "llama.cpp Vulkan (RX 6750 XT) · LuffyTheFox Qwen3.6-35B-A3B-Uncensored-Harmony MXFP4_MOE (MoE experts on CPU, n-cpu-moe 28)"
       vram: "partial — ~6-8 GB GPU + experts in RAM; slow (offload)"
       quant: "MXFP4_MOE"
@@ -429,7 +414,401 @@ model_list:
       source_url: https://huggingface.co/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF
       tags: ["chat", "local", "qwen", "uncensored", "abliterated", "moe"]
 
+  # ibm-granite/granite-vision-3.3-2b — vision/OCR (on-demand, evicts <1s)
+  # openai/ provider (not llamafile/) for clean multimodal image_url passthrough.
+- model_name: ibm-granite/granite-vision-3.3-2b
+  litellm_params:
+    model: openai/granite-vision
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "vision"
+    - "ocr"
+    - "local"
+    - "granite"
+    - "multimodal"
+  model_info:
+    mode: chat
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 16384
+    supports_vision: true
+    metadata:
+      display_name: "Granite-Vision 3.3-2b · ibm-granite/granite-vision-3.3-2b (local, VLM/OCR)"
+      backend: "llama.cpp Vulkan (RX 6750 XT) · granite-vision-3.3-2b Q4_K_M + f16 mmproj (SigLIP2)"
+      quant: "Q4_K_M (LLM) + F16 (mmproj)"
+      vram: "~2.36 GB"
+      role: "image understanding / OCR — callable by oracle, Docling, hyprwhspr, scripts"
+      tags: ["vision", "ocr", "local", "granite", "multimodal"]
+      source_url: https://huggingface.co/ibm-granite/granite-vision-3.3-2b-GGUF
+
+  # prithivMLmods/chandra-ocr-2 — sharper fine-grained OCR (Phase B). on-demand.
+- model_name: prithivMLmods/chandra-ocr-2
+  litellm_params:
+    model: openai/chandra-ocr-2
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "vision"
+    - "ocr"
+    - "local"
+    - "chandra"
+    - "multimodal"
+  model_info:
+    mode: chat
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 16384
+    supports_vision: true
+    metadata:
+      display_name: "Chandra-OCR-2 · prithivMLmods/chandra-ocr-2 (local, fine-grained OCR)"
+      backend: "llama.cpp Vulkan (RX 6750 XT) · chandra-ocr-2 Q5_K_M + f16 mmproj"
+      quant: "Q5_K_M (LLM) + F16 (mmproj)"
+      vram: "~3.9 GB"
+      role: "high-fidelity OCR (tables, forms, small digits) — sharper than granite"
+      tags: ["vision", "ocr", "local", "chandra", "multimodal"]
+      source_url: https://huggingface.co/prithivMLmods/chandra-ocr-2-GGUF
+
+  # ── E4B quant ladder — bench-only (hidden from hub, available for ablations) ──
+  #    Findings in docs/leaderboard.md: E4B faithfulness is quant-robust (Q4≈Q5≈Q8,
+  #    all 0% fab/leak) so Q4 is the max-VRAM-savings safe pick. ─────────────────────
+
+  # google/gemma-4-E4B-it:Q4_K_M — smallest, max VRAM savings
+- model_name: "google/gemma-4-E4B-it:Q4_K_M"
+  litellm_params:
+    model: llamafile/e4b-q4
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "gemma"
+    - "faithful"
+    - "tiny-vram"
+  model_info:
+    mode: chat
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 131072
+    metadata:
+      display_name: "Gemma-4 E4B Q4_K_M · google/gemma-4-E4B-it:Q4_K_M (smallest, max VRAM savings)"
+      backend: "llama.cpp Vulkan · gemma-4-E4B-it"
+      quant: "Q4_K_M"
+      vram: "~4.5 GB"
+      quality_overall: 4.14
+      faithfulness: 4.82
+      fabrication_pct: 0
+      leak_pct: 0
+      tags: ["summarization", "local", "gemma", "faithful", "tiny-vram"]
+      source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
+
+  # google/gemma-4-E4B-it:Q8_0 — highest quant
+- model_name: "google/gemma-4-E4B-it:Q8_0"
+  litellm_params:
+    model: llamafile/e4b-q8
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "gemma"
+    - "faithful"
+  model_info:
+    mode: chat
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 131072
+    metadata:
+      display_name: "Gemma-4 E4B Q8_0 · google/gemma-4-E4B-it:Q8_0 (highest quant)"
+      backend: "llama.cpp Vulkan · gemma-4-E4B-it"
+      quant: "Q8_0"
+      vram: "~8 GB"
+      quality_overall: 4.21
+      faithfulness: 4.89
+      fabrication_pct: 0
+      leak_pct: 0
+      tags: ["summarization", "local", "gemma", "faithful"]
+      source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
+
+  # ── hyprwhspr dictation rewrite → DEDICATED MTP llama-swap `rewrite` (on-demand) ──
+  #    Dictation routes through the gateway to llama-swap's dedicated `rewrite` model
+  #    (Gemma-4 E4B + MTP draft, NP=1 SPEC=on — the optimized single-stream dictation config).
+  #    llama-swap loads it ON DEMAND and TTL-evicts (900s) → no always-on :8083 server.
+  #    It's SEPARATE from gemma-4-e4b (summarize, NP=4 SPEC=off) because MTP wins for dictation
+  #    but fights NP=4 batch summarize; llama-swap swaps between them on demand (alternating
+  #    dictation↔summarize reloads ~10 s). Thinking-off per-request via extra_body kwargs.
+  #    Revert to the old always-on path: re-enable hyprwhspr-rewrite-e4b.service + `hyprwhspr-ai backend e4b`.
+- model_name: rewrite-fast
+  litellm_params:
+    model: llamafile/rewrite                  # → dedicated MTP-optimized llama-swap `rewrite` (on-demand)
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "dictation"
+    - "rewrite"
+    - "local"
+    - "gemma"
+    - "mtp"
+  model_info:
+    mode: chat
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 131072
+    max_output_tokens: 2048
+    metadata:
+      display_name: "Rewrite-fast · Gemma-4 E4B + MTP (dictation, on-demand via llama-swap)"
+      backend: "llama.cpp Vulkan · gemma-4-E4B-it Q5_K_M + MTP draft (llama-swap `rewrite`, NP=1 SPEC=on, on-demand)"
+      vram: "5.1 GB (on-demand; evicts on 900s TTL)"
+      tokens_per_second: "MTP ≈40% faster than plain (p50 ≈136 vs 227 ms; ~80% draft accept)"
+      role: "hyprwhspr-ai dictation rewrite — gateway → dedicated MTP llama-swap model"
+      tags: ["dictation", "rewrite", "local", "gemma", "mtp"]
+      source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
+
+  # ── too big for 12 GB → cloud in both environments ─────────────────────────────
+- model_name: anthropic/claude-3.5-sonnet
+  litellm_params:
+    model: openrouter/anthropic/claude-3.5-sonnet
+    api_key: "os.environ/OPENROUTER_API_KEY"
+    input_cost_per_token: 3e-06
+    output_cost_per_token: 1.5e-05
+    tags:
+    - "code"
+    - "cloud"
+    - "anthropic"
+    - "strong"
+  model_info:
+    mode: chat
+    input_cost_per_token: 0.000003       # $3 / 1M in
+    output_cost_per_token: 0.000015      # $15 / 1M out
+    max_input_tokens: 200000
+    max_output_tokens: 8192
+    metadata:
+      display_name: "Claude 3.5 Sonnet · anthropic/claude-3.5-sonnet (cloud, code)"
+      backend: "OpenRouter · anthropic/claude-3.5-sonnet"
+      vram: "0 (hosted)"
+      role: "too big for 12 GB → cloud in both dev and prod"
+      tags: ["code", "cloud", "anthropic", "strong"]
+      source_url: https://openrouter.ai/anthropic/claude-3.5-sonnet
+
+# ── Router aliases: legacy short names → new HF-identity model_names ─────────────
+# hidden: true = excluded from /v1/models, /v1/model/info, /v1/model_group/info.
+# Callers using the old names still route correctly; the hub shows only HF-identity names.
+# (Confirmed syntax: litellm docs/proxy/load_balancing "Hide Alias Models")
+router_settings:
+  model_group_alias:
+    # pure-local single-backend renames
+    "gemma-e4b":
+      model: "google/gemma-4-E4B-it"
+      hidden: true
+    "gemma-12b":
+      model: "google/gemma-4-12B-it-Opus-distill"
+      hidden: true
+    "phi4":
+      model: "microsoft/phi-4"
+      hidden: true
+    "qwen-uncensored":
+      model: "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored"
+      hidden: true
+    "granite-vision":
+      model: "ibm-granite/granite-vision-3.3-2b"
+      hidden: true
+    "e4b-q4":
+      model: "google/gemma-4-E4B-it:Q4_K_M"
+      hidden: true
+    "e4b-q8":
+      model: "google/gemma-4-E4B-it:Q8_0"
+      hidden: true
+    "code-big":
+      model: "anthropic/claude-3.5-sonnet"
+      hidden: true
+    # embed alias (optional identity name for discoverability; sift contract stays "embed")
+    "Octen/Octen-Embedding-4B":
+      model: "embed"
+      hidden: true
+    # capability shortcuts (hidden; convenience names → best model for that capability).
+    # NOTE: these are MODEL shortcuts. TASK names (summarize/rewrite/extract) are dotprompt
+    # prompt_ids (use `prompt_id:`), NOT model aliases — kept distinct on purpose.
+    "reason":
+      model: "oracle-llm"          # Qwen3.6-35B-A3B local (dev) / deepseek (prod) — the reasoning route
+      hidden: true
+    "chat":
+      model: "oracle-llm"
+      hidden: true
+    "ocr":
+      model: "ibm-granite/granite-vision-3.3-2b"
+      hidden: true
+    "instruct":
+      model: "microsoft/phi-4"
+      hidden: true
+    # friendly capability/task model shortcuts (hidden). `summarize`/`rewrite`/`extract`
+    # double as dotprompt prompt_ids — calling model=summarize + prompt_id=summarize composes
+    # "the summarize model with the summarize prompt". `math` is llama-swap-only (vibethinker-3b).
+    "summarize":
+      model: "google/gemma-4-E4B-it"
+      hidden: true
+    "summarize-pro":
+      model: "google/gemma-4-12B-it-Opus-distill"
+      hidden: true
+    "rewrite":
+      model: "rewrite-fast"
+      hidden: true
+    "extract":
+      model: "LiquidAI/LFM2-1.2B-Extract"
+      hidden: true
+
+# ── Prompt management (litellm dotprompt, OSS) ────────────────────────────────────
+# Task prompts for summarize / rewrite / extract — files live in the llm-stack repo.
+# See docs/CAPABILITIES.md for class→prompt ownership table.
+# Activate via POST /v1/prompts/{prompt_id} or reference from model_list dotprompt entries.
+# ── Task prompts (dotprompt) — registered so `prompt_id` resolves at request time ──
+# Two parts are BOTH required (verified 2026-06-19):
+#   1. litellm_settings.global_prompt_directory (set below) → the dir the loader reads.
+#   2. these `prompts:` entries → register each prompt_id with the manager.
+# DO NOT add per-prompt `prompt_directory` (crashes boot: "Cannot set prompt_directory when
+# working with prompt_initializer"). Files = config/prompts/<id>.prompt. litellm's dotprompt
+# renderer is SIMPLE {{var}} substitution only — NO Handlebars {{#if}}/{{/if}} (the .prompt
+# files were de-conditionalised for this). Invoke: {"model": <any>, "prompt_id": "summarize",
+# "prompt_variables": {"text": "..."}}. summarize/extract/rewrite verified returning correctly.
+prompts:
+  - prompt_id: summarize
+    litellm_params:
+      prompt_id: summarize
+      prompt_integration: dotprompt
+  - prompt_id: rewrite
+    litellm_params:
+      prompt_id: rewrite
+      prompt_integration: dotprompt
+  - prompt_id: extract
+    litellm_params:
+      prompt_id: extract
+      prompt_integration: dotprompt
+
+# ── MCP servers (COMMENTED OUT — not yet active) ──────────────────────────────────
+# Uncomment after adding GitHub/HF vault creds + the stack AV_HTTPS_PROXY export
+# (see docs/SECRETS-AND-MCP.md for full activation order + rollback instructions).
+# /mcp endpoint auto-enables when mcp_servers: is present (litellm ≥1.80.18, OSS).
+#
+mcp_servers:
+  exa:
+    allow_all_keys: true          # any litellm key may use it (single-user homelab) — required so the team-less open-webui key can list/call tools
+    transport: stdio
+    command: npx
+    args: ["-y", "exa-mcp-server"]
+    env:
+      EXA_API_KEY: "injected-by-agent-vault"          # placeholder — vault overrides
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
+      NODE_USE_ENV_PROXY: "1"
+  context7:
+    # stdio + agent-vault (same shielded pattern as exa/github — key never an env var).
+    # The npx authenticates with `Authorization: Bearer <key>` against context7.com/api
+    # (CONTEXT7_API_BASE_URL), per the package's encryption.js. So the vault rule is
+    # host=context7.com, auth-type=bearer, token-key=CONTEXT7_API_KEY (NOT the
+    # mcp.context7.com / CONTEXT7_API_KEY-header form — that's only the hosted remote).
+    allow_all_keys: true
+    transport: stdio
+    command: npx
+    args: ["-y", "@upstash/context7-mcp"]
+    env:
+      CONTEXT7_API_KEY: "injected-by-agent-vault"     # placeholder; vault overrides the Bearer header
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
+      NODE_USE_ENV_PROXY: "1"
+  github:
+    allow_all_keys: true
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]   # npx (not docker) so it inherits the proxy env
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "injected-by-agent-vault"
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
+      NODE_USE_ENV_PROXY: "1"
+  huggingface:
+    # Official HF MCP (stdio). Calls huggingface.co / api.huggingface.co / *.hf.space with
+    # `Authorization: Bearer <HF_TOKEN>`. Node fetch + NODE_USE_ENV_PROXY=1 → vault-proxied.
+    # GOTCHA: it ALSO starts a management web UI; default WEB_APP_PORT=3000 collides with
+    # Grafana → EADDRINUSE → crash. Pin it to a free port. TRANSPORT=stdio forced explicitly.
+    allow_all_keys: true
+    transport: stdio
+    command: npx
+    args: ["-y", "@llmindset/hf-mcp-server"]
+    env:
+      TRANSPORT: "stdio"
+      WEB_APP_PORT: "3055"
+      HF_TOKEN: "injected-by-agent-vault"
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
+      NODE_USE_ENV_PROXY: "1"
+  wikipedia:
+    # Public MediaWiki API (en.wikipedia.org/w/api.php) — NO auth, so NOT proxied (nothing
+    # to shield) and no vault rule needed. uvx fetches the package on first run.
+    allow_all_keys: true
+    transport: stdio
+    command: uvx
+    args: ["wikipedia-mcp"]
+  vercel:
+    # Community stdio package (pulsemcp) — the OFFICIAL Vercel MCP is OAuth-only/hosted and
+    # can't take a PAT. Calls api.vercel.com with `Authorization: Bearer <VERCEL_TOKEN>`.
+    # Node fetch + NODE_USE_ENV_PROXY=1 → vault-proxied. NOTE: third-party code runs with
+    # your Vercel PAT — review before trusting; scope the token to read-only if possible.
+    allow_all_keys: true
+    transport: stdio
+    command: npx
+    args: ["-y", "vercel-platform-mcp-server"]
+    env:
+      VERCEL_TOKEN: "injected-by-agent-vault"
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
+      NODE_USE_ENV_PROXY: "1"
+  wikidata:
+    # Official WMDE Wikidata MCP — HOSTED, HTTP, fully public (no auth → nothing to shield),
+    # so litellm connects directly. Backs onto query.wikidata.org SPARQL + wikidata API +
+    # WMDE vector search (all server-side). Self-host later via github.com/wmde/WikidataMCP.
+    url: "https://wd-mcp.wmcloud.org/mcp/"
+    transport: "http"
+    allow_all_keys: true
+  homeassistant:
+    # HA built-in MCP Server (Streamable HTTP at <ha>/api/mcp) bridged to stdio by mcp-proxy
+    # so the HASS long-lived token stays vault-shielded: mcp-proxy sends Authorization:
+    # Bearer <API_ACCESS_TOKEN placeholder>; agent-vault overrides it with HASS_TOKEN for the
+    # ha.tailb921b9.ts.net host. Requires the HA "Model Context Protocol Server" integration.
+    allow_all_keys: true
+    transport: stdio
+    command: uvx
+    args: ["mcp-proxy", "--transport=streamablehttp", "--stateless", "https://ha.tailb921b9.ts.net/api/mcp"]
+    env:
+      API_ACCESS_TOKEN: "injected-by-agent-vault"
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      SSL_CERT_FILE: "os.environ/AV_CA"
+      REQUESTS_CA_BUNDLE: "os.environ/AV_CA"
+  mdn:
+    # MDN (Mozilla) MCP — HOSTED, HTTP, public (no auth → nothing to shield). Up-to-date
+    # web-platform docs + browser-compat/baseline data. litellm connects directly. Experimental.
+    url: "https://mcp.mdn.mozilla.net/"
+    transport: "http"
+    allow_all_keys: true
+
 litellm_settings:
+  # Task prompts (dotprompt): summarize/rewrite/extract → config/prompts/<id>.prompt.
+  # Global dir form (NOT per-prompt prompt_directory, which crashes boot). Reference via prompt_id.
+  global_prompt_directory: "/home/nullsense/Programming/llm-stack/config/prompts"
   callbacks: ["otel"]           # emit OTLP traces of every LLM call → the OTEL_ENDPOINT
                                 # collector (local: otel-lgtm :4318 / langfuse via fan-out).
                                 # Env set by `stack`: LITELLM_OTEL_V2/OTEL_EXPORTER/OTEL_ENDPOINT.
@@ -449,9 +828,10 @@ litellm_settings:
     disk_cache_dir: "/home/nullsense/.cache/llm-stack/litellm-cache"  # FIXED path — default is CWD-relative (./.litellm_cache), which leaks into whatever dir launched the proxy
     mode: default_off
 
-  # ── Model Hub (/ui/model_hub_table) — advertise these logical groups publicly ──
-  #    (bench-only names e4b-q4/e4b-q8/phi4 intentionally omitted) ──────────────────
-  public_model_groups: ["embed", "summarize-cheap", "summarize-strong", "oracle-llm", "gemma-e4b", "gemma-12b", "lfm2-2.6b", "lfm2-1.2b-extract", "rewrite-fast", "code-big", qwen-uncensored]
+  # ── Model Hub (/ui/model_hub_table) — advertise HF-identity names publicly ──────
+  #    Intent routes (summarize-cheap/strong, oracle-llm) kept for backwards compat.
+  #    Bench-only quant variants (e4b-q4/q8) intentionally omitted.
+  public_model_groups: ["embed", "summarize-cheap", "summarize-strong", "oracle-llm", "google/gemma-4-E4B-it", "google/gemma-4-12B-it-Opus-distill", "microsoft/phi-4", "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-2.6B", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored", "ibm-granite/granite-vision-3.3-2b", "prithivMLmods/chandra-ocr-2", "anthropic/claude-3.5-sonnet", "rewrite-fast"]
 
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"   # in Infisical /litellm; mint per-app virtual keys from it

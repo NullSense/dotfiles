@@ -206,13 +206,14 @@ agent-vault vault service add \
     --host "*.github.com" --description "GitHub API" \
     --auth-type bearer --token-key GITHUB_TOKEN --vault default
 
-# Context7 (Upstash) hosted MCP — header CONTEXT7_API_KEY
-# Optional: works on free tier without auth (rate-limited).
-# Get a key from https://context7.com/dashboard for higher limits.
-agent-vault vault credential set CONTEXT7_API_KEY=XXX --vault default
+# Context7 (Upstash) — the stdio npx `@upstash/context7-mcp` calls context7.com/api with
+# `Authorization: Bearer <key>` (verified in the package's dist/lib/encryption.js), NOT the
+# mcp.context7.com / CONTEXT7_API_KEY-header form — that is ONLY the hosted remote MCP.
+# So vault it like github: host context7.com, bearer. Key from https://context7.com/dashboard.
+agent-vault vault credential set CONTEXT7_API_KEY=ctx7sk-XXX --vault default
 agent-vault vault service add \
-    --host mcp.context7.com --description "Context7 MCP" \
-    --auth-type api-key --api-key-key CONTEXT7_API_KEY --api-key-header CONTEXT7_API_KEY \
+    --host context7.com --description "Context7 MCP (stdio npx -> context7.com/api)" \
+    --auth-type bearer --token-key CONTEXT7_API_KEY \
     --vault default
 ```
 

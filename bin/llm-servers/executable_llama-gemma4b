@@ -52,6 +52,25 @@ if [[ "${MMPROJ:-off}" == "on" ]]; then
   MMPROJ_ARGS=(--mmproj "$MODEL_DIR/mmproj-google_gemma-4-E4B-it-f16.gguf")
 fi
 
+# MTP speculative decoding (optional, default OFF). The llama-swap summarization
+# instances (summarize-cheap, e4b-q*) leave this off — at NP=4 batch, spec-decode
+# fights batching. The DEDICATED DICTATION server runs SPEC=on NP=1: short, predictable
+# rewrites give high MTP acceptance, and dictation is single-stream + latency-bound.
+# Draft = the E4B-it assistant MTP head (95 MB), the E4B analog of the 12B's MTP draft.
+#   SPEC=on enable | SPECN n-max draft depth | SPEC=off for A/B vs plain decode.
+SPEC="${SPEC:-off}"
+SPECN="${SPECN:-2}"
+DRAFT="${DRAFT:-$HOME/.lmstudio/models/amaranus/Gemma-4-E4B-it-MTP/gemma-4-E4B-it-qat-assistant-MTP-Q8_0.gguf}"
+SPEC_ARGS=()
+if [[ "$SPEC" == "on" ]]; then
+  SPEC_ARGS=(
+    --model-draft "$DRAFT"
+    --spec-type draft-mtp
+    --spec-draft-n-max "$SPECN"
+    --n-gpu-layers-draft 99
+  )
+fi
+
 # --cache-ram 2048: cap host-RAM prompt cache (default 8192) — bookkeeping cost
 # grows with size, measured ~430ms/request at ~2GiB on the 12B.
 exec -a "gemma4-e4b@${PORT}.llama-server" llama-server \
@@ -81,4 +100,5 @@ exec -a "gemma4-e4b@${PORT}.llama-server" llama-server \
   --reasoning "$REASON" \
   --cache-ram 2048 \
   "${MMPROJ_ARGS[@]}" \
+  "${SPEC_ARGS[@]}" \
   --metrics

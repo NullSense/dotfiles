@@ -98,8 +98,17 @@ case "${1:-status}" in
       [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2
       start_one litellm http://127.0.0.1:4000/health "${LITELLM_CMD[@]}"
     fi
+    # Dictation rewrite backend (Gemma-4 E4B + MTP, :8083) — its OWN systemd service
+    # (always-on daily driver, enabled at boot). Ensure it's up here too. hyprwhspr talks
+    # to it DIRECTLY (not via the gateway) to preserve chat_template_kwargs/enable_thinking;
+    # the gateway `rewrite-fast` model just mirrors it for the catalog.
+    if systemctl --user start hyprwhspr-rewrite-e4b.service 2>/dev/null; then
+      echo "  • dictation rewriter → :8083 (E4B + MTP, systemd)"
+    else
+      echo "  • dictation rewriter service not present (skip)"
+    fi
     ensure_dashboards
-    echo "  stack up. gateway → :4000 · dash → :8088 · grafana → :3000 (anon)"
+    echo "  stack up. gateway → :4000 · dict → :8083 · dash → :8088 · grafana → :3000 (anon)"
     ;;
   down)  # stops the LLM serving stack only — leaves observability + dashboards monitoring
     for entry in litellm:4000 llama-swap:9292; do
@@ -125,6 +134,7 @@ case "${1:-status}" in
     for n in "glance:8088" "uptime-kuma:3009" "grafana:3000" "langfuse:3002" "collector:4318"; do
       printf "  %-12s HTTP %s\n" "${n%%:*}" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${n##*:}/ 2>/dev/null || echo down)"
     done
+    printf "  %-12s HTTP %s\n" "rewriter" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:8083/health 2>/dev/null || echo down)"
     ;;
   db-init)  # one-time per machine (or after a litellm upgrade): prisma client + LiteLLM_* tables.
             # litellm virtual keys (/key/generate, llm-vkey) need these. Install prep — ALL extras

@@ -317,11 +317,16 @@ model_list:
         note: "purpose-built extraction; weak as a general summariser"
         tags: ["extraction", "local", "lfm2", "tiny"]
 
-  # ── hyprwhspr dictation rewrite (local-only feature) ───────────────────────────
+  # ── hyprwhspr dictation rewrite — the DEDICATED :8083 server (E4B + MTP) ────────
+  #    Mirrors the real dictation backend (hyprwhspr-rewrite-e4b.service, NP=1 + MTP)
+  #    so the catalog is accurate. ⚠ hyprwhspr itself calls :8083 DIRECTLY, NOT through
+  #    this gateway — going via litellm would drop the `chat_template_kwargs`
+  #    (enable_thinking=false) that keeps dictation 6× faster (drop_params eats it) and
+  #    add a hop to a latency-critical path. This entry is for discoverability/the hub.
   - model_name: rewrite-fast
     litellm_params:
-      model: openai/summarize-cheap        # reuse the local E4B
-      api_base: http://127.0.0.1:9292/v1
+      model: openai/gemma4-e4b             # alias served by the :8083 dictation server
+      api_base: http://127.0.0.1:8083/v1
       api_key: "none"
     model_info:
       mode: chat
@@ -330,12 +335,13 @@ model_list:
       max_input_tokens: 131072
       max_output_tokens: 2048
       metadata:
-        display_name: "Rewrite-fast · Gemma-4 E4B (local, dictation)"
-        backend: "llama.cpp Vulkan · gemma-4-E4B-it Q5_K_M"
+        display_name: "Rewrite-fast · Gemma-4 E4B + MTP (dictation, :8083)"
+        backend: "llama.cpp Vulkan · gemma-4-E4B-it Q5_K_M + MTP draft (hyprwhspr-rewrite-e4b.service, NP=1)"
         vram: "5.1 GB"
-        tokens_per_second: "≈49 single / ≈171 aggregate (NP=4)"
-        role: "hyprwhspr-ai context-aware voice-dictation rewrite"
-        tags: ["dictation", "rewrite", "local", "gemma"]
+        tokens_per_second: "MTP ≈40% faster than plain (rewrite-bench p50 136ms vs 227ms)"
+        mtp_draft_acceptance: "~80% (E4B-it assistant draft head)"
+        role: "hyprwhspr-ai dictation rewrite — hyprwhspr calls :8083 DIRECTLY (this mirrors it for the catalog)"
+        tags: ["dictation", "rewrite", "local", "gemma", "mtp"]
 
   # ── too big for 12 GB → cloud in both environments ─────────────────────────────
   - model_name: code-big

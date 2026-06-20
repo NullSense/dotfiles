@@ -1,103 +1,41 @@
 # Claude Instructions (Global)
 
-## ⚠️ Dotfiles are managed by chezmoi — DO NOT edit `~/.config/...` directly
+## Dotfiles = chezmoi · source: `~/.local/share/chezmoi/` · public repo NullSense/dotfiles
+Files under `~/.config/`, `~/.zshrc`, `~/.gitconfig` are TARGETS. Editing a target without
+mirroring to source = silent data loss (next `chezmoi apply`/`update` overwrites it).
 
-This machine uses **chezmoi**. Source-of-truth is `~/.local/share/chezmoi/`
-(itself a git repo, remote `github.com:NullSense/dotfiles`). Live config files
-under `~/.config/...`, `~/.zshrc`, `~/.gitconfig`, etc. are TARGETS that chezmoi
-writes to; they are not authoritative.
+- **Never edit a target without mirroring to source in the same response** — either edit the
+  source then `chezmoi apply <target>` (preferred), or edit the target then `chezmoi re-add <target>`.
+- Path map: `dot_<n>`→`~/.<n>` · `dot_config/<x>`→`~/.config/<x>` · `private_<n>`→0600 ·
+  `executable_<n>`→+x · `*.tmpl`→Go-template · `symlink_<n>`→symlink.
+- `chezmoi apply` auto-commits AND pushes to the **public** repo — treat applied changes as
+  immediately public; never say "local/not pushed". It also bundles unrelated drift.
+- Check `chezmoi status` before apply; `MM` = source+target both diverged (blind apply destroys
+  target edits). Surface drift you didn't create instead of resolving it. If unsure which side is
+  right, ask.
+- Never restore files marked `D` (intentionally migrated). Untracked source = unbacked work.
+- Commands: `chezmoi status|diff|apply [p]|re-add [p]|edit [p]|cd|git -- <cmd>`.
 
-**The silent-data-loss trap**: if you edit `~/.config/foo/bar` directly without
-telling chezmoi, the next `chezmoi apply` (run by you, the user, another agent,
-or `chezmoi update` on a different machine) will overwrite your edit with the
-stale source version. The work disappears with no warning.
+## Git
+Commit finished, verified work without being asked; for chezmoi source, commit + push (autopush
+expected). Pause first ONLY if it would bundle unrelated drift, include secrets, rewrite pushed
+history, or land on a protected branch with no feature branch.
 
-### Rules — non-negotiable
-
-1. **Never edit a target file directly without immediately mirroring to source.**
-   When you edit `~/.config/hypr/foo.conf`, in the same response either:
-   - Edit the chezmoi source file `~/.local/share/chezmoi/dot_config/hypr/foo.conf`
-     and run `chezmoi apply ~/.config/hypr/foo.conf` to push to target. ← preferred
-   - Or, after editing the target, run `chezmoi re-add ~/.config/hypr/foo.conf`
-     to capture the live edit back into source.
-
-2. **Path mapping** (chezmoi source → target):
-   - `dot_<name>` → `~/.<name>` (e.g. `dot_zshrc` → `~/.zshrc`)
-   - `dot_config/<x>` → `~/.config/<x>`
-   - `private_<name>` → `~/.<name>` with `0600` perms
-   - `executable_<name>` → file with `+x`
-   - `*.tmpl` → rendered through chezmoi's template engine (Go templates)
-   - `symlink_<name>` → symlink whose target is the file's contents
-
-3. **Before committing, always check `chezmoi status`**. Lines like `MM` mean
-   both source AND target diverged from the last apply — running `chezmoi apply`
-   blindly there destroys the target's edits. If you see drift you didn't
-   create, surface it to the user before resolving.
-
-4. **The chezmoi source repo is itself a git repo.** After source edits, commit
-   in `~/.local/share/chezmoi/` (or via `chezmoi git -- commit`). Untracked
-   files in source = unbacked work, ask before ending session.
-
-5. **Never bring back files chezmoi has marked deleted** (`D` in status). They
-   were intentionally migrated away.
-
-### Quick reference
-
-```
-chezmoi status              # see drift (must be clean before apply)
-chezmoi diff                # what apply WOULD overwrite (read first!)
-chezmoi apply [path]        # source → target
-chezmoi re-add [path]       # target → source (capture live edit)
-chezmoi edit [path]         # edit source, auto-applies on save
-chezmoi cd                  # cd into source repo for git ops
-chezmoi git -- <gitcmd>     # run git in source repo without cd
-```
-
-If unsure which side has the right content, **ask the user**. The cost of asking
-is one prompt; the cost of overwriting their work is permanent.
-
-## Keybindings — always check for conflicts BEFORE adding one
-
-Before binding any new shortcut (Hyprland, app config, shell), grep the relevant
-config for the *exact modifier+key combo* and confirm it is free. Silently
-overriding an existing bind breaks muscle memory with no warning.
-
-- Hyprland binds live in `~/.local/share/chezmoi/dot_config/hypr/bindings.conf`
-  (chezmoi source). Check e.g.
-  `grep -niE '^bind[a-z]* *= *(SUPER|\$mod) ALT, *g\b' bindings.conf` — note
-  omarchy also ships binds in its own configs, so also scan `hyprctl binds`
-  (live) when Hyprland is reachable.
-- If the requested combo is taken, do NOT clobber it. Pick a free, mnemonic
-  alternative and tell the user which combo you used and what the original
-  conflict was — let them decide whether to reassign.
-- Known-taken on this machine (non-exhaustive): SUPER+ALT+C = Capture menu,
-  SUPER+ALT+D = Voice dictation, SUPER+ALT+V = Voice menu, SUPER+ALT+R =
-  Screen recording, SUPER+ALT+G = Download media (grab).
+## Keybindings
+Before binding any shortcut (Hyprland/app/shell), grep the config for the exact modifier+key and
+confirm it's free; also scan `hyprctl binds` live. If taken, don't clobber — pick a free mnemonic
+and tell the user. Hyprland binds: `dot_config/hypr/bindings.conf`.
+Taken (non-exhaustive): SUPER+ALT+ C=Capture · D=Dictation · V=Voice menu · R=Recording · G=Grab.
 
 ## Testing
-- Fix bugs → immediately write unit tests (TDD preferred)
-- Long-standing bug fixes MUST include regression tests to prevent recurrence
+Fix a bug → write a regression test immediately (TDD preferred).
 
-## Documentation
-- Always use Context7 for library docs (not web search)
-- Prefer narrow topics: "persist middleware" not "state management"
-- Use 1000-2000 tokens for focused queries, 5000+ for comprehensive overviews
+## Library docs → Context7 (never web search)
+Resolve the ID first, then fetch a narrow topic (1–2k tokens; 5k+ for overviews). Reuse resolved
+IDs in-session. Check the version against project deps.
 
-## Context7 Strategy
-- Resolve library ID first with `resolve-library-id`
-- Then fetch docs with narrow, specific topic
-- Reuse resolved library IDs within same session
-- Always check version compatibility with project dependencies
-
-## Structured memory directory
-
-Cross-project knowledge lives in `~/.claude/memory/`:
-- `general.md` — cross-project conventions (style, defaults, workflow preferences)
-- `tools/*.md` — per-tool learnings (git.md, docker.md, cargo.md, pnpm.md, etc.)
-- `domain/*.md` — per-domain patterns (rust.md, typescript.md, search.md, etc.)
-
-When you learn a cross-project convention, write it to the appropriate file here
-instead of expanding this CLAUDE.md. Keep this file focused on top-level
-preferences only — concise indexes age better than sprawling ones.
+## Structured memory → `~/.claude/memory/`
+`general.md` (cross-project conventions) · `tools/*.md` · `domain/*.md`. Write new cross-project
+conventions there, not into this file. Keep this file to top-level preferences only.
 
 @RTK.md

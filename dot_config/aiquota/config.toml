@@ -1,12 +1,12 @@
 # aiquota config — providers + credential policy.
 #
 # Credentials are env-var only (strict default). Recommended:
-#   infisical run --path=/aiquota -- aiquota waybar
+#   infisical run -- aiquota waybar    (secrets resolve from the root path)
 # Or set the per-provider env vars manually. See README for the
 # canonical env-var name per provider.
 
 [general]
-cache_ttl_secs = 120
+cache_ttl_secs = 45
 warn_pct       = 70.0
 crit_pct       = 90.0
 refresh_secs   = 60
@@ -23,8 +23,12 @@ enabled = true
 [providers.codex]
 enabled = true
 
+# OpenCode usage needs the `opencodebar` CLI, which is macOS-only
+# (opgginc/opencode-bar) — not available on Linux. Your real OpenCode
+# usage is tracked by [providers.opencode-go] below. Disabled so it
+# doesn't render an "unavailable" pill.
 [providers.opencode]
-enabled = true
+enabled = false
 
 # Off by default — Gemini's "quota" is a file-count proxy, often
 # inaccurate. Flip if you actually want it.
@@ -38,9 +42,13 @@ enabled = false
 enabled = true
 
 # OpenRouter — credit / spend monitor.
-# Needs OPENROUTER_API_KEY in env.
+# mode: key | aggregate | auto (default auto).
+#   key       = current OPENROUTER_API_KEY only.
+#   aggregate = account-wide via AIQUOTA_OPENROUTER_MANAGEMENT_KEY (/credits + /keys).
+#   auto      = aggregate when a management key is present, else key.
 [providers.openrouter]
 enabled = true
+mode    = "auto"
 
 # GitHub Copilot — requires the special "usage" token from a second
 # OAuth device-flow during `opencode auth login`. Off until you have

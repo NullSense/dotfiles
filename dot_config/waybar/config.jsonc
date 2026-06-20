@@ -148,8 +148,10 @@
         "tooltip": true,
         "escape": false,
         "markup": "pango",
-        "on-click": "$HOME/Programming/aiquota/target/release/aiquota cycle",
-        "on-click-right": "xdg-terminal-exec $HOME/Programming/aiquota/target/release/aiquota tui"
+        // Clicks go through the wrapper too, so the binary path lives in ONE
+        // place (aiquota-wrap.sh) — this config never names it directly.
+        "on-click": "$HOME/.config/waybar/aiquota-wrap.sh cycle",
+        "on-click-right": "xdg-terminal-exec $HOME/.config/waybar/aiquota-wrap.sh tui"
     },
     "custom/agents": {
         "exec": "$HOME/.config/waybar/agent-attention.sh",

@@ -1,16 +1,28 @@
 #!/usr/bin/env bash
-# Waybar wrapper for aiquota — guarantees a valid JSON object every poll, so
-# transient failures (binary missing, timeout, panic, malformed output) render
-# as a "⚠ aiquota" pill with the error in the tooltip instead of waybar
-# silently dropping the module.
+# Waybar wrapper + single entry point for aiquota. The binary path lives ONLY
+# here (the BIN line) — the waybar config references this script, never the
+# binary directly, so there is ONE place to update.
 #
-# All failure paths exit 0 with a synthetic JSON payload. Real success passes
-# the binary's stdout through untouched.
+# Two modes:
+#   - no args  → run `aiquota waybar`, guaranteeing a valid JSON object every
+#                poll. Transient failures (binary missing, timeout, panic,
+#                malformed output) render as a "⚠ aiquota" pill with the error
+#                in the tooltip instead of waybar dropping the module. All
+#                failure paths exit 0 with a synthetic JSON payload.
+#   - with args → forward straight to the binary (e.g. `cycle`, `tui` from the
+#                on-click handlers). No JSON wrapping.
 
 set -u
 
-BIN="${AIQUOTA_BIN:-$HOME/Programming/aiquota/target/release/aiquota}"
+# SINGLE SOURCE OF TRUTH for the binary location. Prefers `aiquota` on PATH
+# (the ~/bin shim) and falls back to the dev build. Override with AIQUOTA_BIN.
+BIN="${AIQUOTA_BIN:-$(command -v aiquota 2>/dev/null || printf '%s' "$HOME/Programming/aiquota/target/release/aiquota")}"
 TIMEOUT="${AIQUOTA_TIMEOUT:-10}"
+
+# Subcommand passthrough for waybar on-click handlers (cycle / tui / …).
+if [ "$#" -gt 0 ]; then
+  exec "$BIN" "$@"
+fi
 
 emit_error() {
   # $1 = short reason header, $2 = full detail (stderr / output blob)

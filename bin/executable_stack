@@ -47,7 +47,17 @@ start_one() { # name  health-url  command...
   echo "  ▶ $name started (pid $(cat "$RUN/$name.pid")) → log: $RUN/$name.log"
 }
 
-ensure_obs() {  # observability (Grafana/Tempo) + Langfuse + the collector that fans out to both
+ensure_gateway_db() {  # ONLY litellm-db — the always-on bit the gateway needs. The rest of
+  # observability (otel-lgtm + Langfuse + collector) is ~6 GB of RAM only needed while you're
+  # actually inspecting traces, so it's off by default. Bring it up on demand with `stack obs`.
+  command -v docker >/dev/null 2>&1 || { echo "  ⚠ docker not found — skipping gateway DB"; return; }
+  docker network inspect llmstack >/dev/null 2>&1 || docker network create llmstack >/dev/null
+  docker compose -f "$OBS_COMPOSE" up -d litellm-db >/dev/null 2>&1 \
+    && echo "  ▶ gateway DB → litellm-db :5433  (obs off — run 'stack obs' for Grafana/Langfuse)" \
+    || echo "  ⚠ litellm-db compose up failed"
+}
+
+ensure_obs() {  # FULL observability (Grafana/Tempo) + Langfuse + the collector that fans out to both
   command -v docker >/dev/null 2>&1 || { echo "  ⚠ docker not found — skipping observability"; return; }
   docker network inspect llmstack >/dev/null 2>&1 || docker network create llmstack >/dev/null
   docker compose -f "$OBS_COMPOSE" up -d >/dev/null 2>&1 \
@@ -81,7 +91,9 @@ ensure_dashboards() {
 
 case "${1:-status}" in
   up)
-    ensure_obs       # collector + gateway DB first, so litellm has somewhere to send + store
+    # obs is ~6 GB and only needed to VIEW traces → off by default. `stack obs` (or STACK_OBS=1
+    # stack up) brings up otel-lgtm + Langfuse + collector; otherwise just the gateway DB.
+    if [ "${STACK_OBS:-0}" = 1 ]; then ensure_obs; else ensure_gateway_db; fi
     start_one llama-swap http://127.0.0.1:9292/health llama-swap --config "$LSWAP_CFG" --listen 127.0.0.1:9292
     wait_tcp 127.0.0.1:5433 15 && echo "  • gateway DB ready :5433" \
       || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
@@ -97,6 +109,13 @@ case "${1:-status}" in
     export LITELLM_ENVIRONMENT="${LITELLM_ENVIRONMENT:-development}"
     echo "  • litellm environment: $LITELLM_ENVIRONMENT ($([ "$LITELLM_ENVIRONMENT" = production ] && echo 'CLOUD/OpenRouter' || echo 'LOCAL/llama-swap'))"
     LITELLM_CMD=(litellm --config "$LITELLM_CFG" --port 4000)
+    # agent-vault proxy for the MCP subprocesses litellm spawns (NOT litellm core egress).
+    # Surgical: only the stdio MCP env blocks reference AV_HTTPS_PROXY (see docs/SECRETS-AND-MCP.md).
+    if command -v agent-vault >/dev/null 2>&1 && _AVT="$(agent-vault vault token --vault default 2>/dev/null)" && [ -n "$_AVT" ]; then
+      export AV_HTTPS_PROXY="https://${_AVT}:default@127.0.0.1:14322"
+      export AV_CA="$HOME/.agent-vault/mitm-ca.pem"
+      unset _AVT
+    fi
     if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
       echo "  • litellm secrets ← Infisical (${INFISICAL_ENV:-dev}:${INFISICAL_PATH:-/litellm})"
       start_one litellm http://127.0.0.1:4000/health \
@@ -116,7 +135,7 @@ case "${1:-status}" in
       echo "  • dictation rewriter service not present (skip)"
     fi
     ensure_dashboards
-    echo "  stack up. gateway → :4000 · dict → :8083 · dash → :8088 · grafana → :3000 (anon)"
+    echo "  stack up. gateway → :4000 · dict → :8083 · dash → :8088  (obs off — 'stack obs' for grafana/langfuse)"
     ;;
   down)  # stops the LLM serving stack only — leaves observability + dashboards monitoring
     for entry in litellm:4000 llama-swap:9292; do
@@ -136,6 +155,10 @@ case "${1:-status}" in
       ( cd "$(dirname "$LANGFUSE_COMPOSE")" && docker compose --env-file .env down >/dev/null 2>&1 ) && echo "  ■ langfuse" || true
       docker compose -f "$OBS_COMPOSE" down >/dev/null 2>&1 && echo "  ■ observability" || true
     fi
+    ;;
+  obs)   # bring up the heavy observability stack (otel-lgtm + Langfuse + collector) on demand
+    ensure_obs
+    echo "  observability up · Grafana → :3000 · Langfuse → :3002  (stop with: stack mon-down)"
     ;;
   restart) "$0" down; sleep 1; "$0" up ;;
   status)
@@ -161,5 +184,5 @@ case "${1:-status}" in
     echo "  ✓ prisma generated + LiteLLM_* tables ready — 'stack restart' then llm-vkey works"
     ;;
   logs) tail -n 40 -F "$RUN"/*.log ;;
-  *) echo "usage: stack {up|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;
+  *) echo "usage: stack {up|obs|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;
 esac

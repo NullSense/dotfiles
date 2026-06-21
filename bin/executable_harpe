@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# harpe — the single entry point for the Harpe media/art downloader.
+# All logic lives in the Python project at ~/Programming/harpe; this is a thin shim.
+#
+# Back-compat names are SYMLINKS to this file and dispatch on the invoked name:
+#   harpe, grab, sadak  → straight passthrough (grab & sadak are legacy names)
+#   artgrab             → 'harpe -s' (federated museum art search); prompts if no query
+#
+# Backends: yt-dlp, gallery-dl, dezoomify-rs. Core is keyless; optional keys
+# (FIRECRAWL_API_KEY, HARVARD/SMITHSONIAN/EUROPEANA_API_KEY) are read from the
+# environment — grab-menu injects them via `infisical run`, or for direct CLI use:
+#   infisical run -- harpe -s "<query>"
+#
+# Usage: harpe --help     (old bash version: ~/bin/.grab-bash-backup/)
+case "${0##*/}" in
+  artgrab)
+    # artgrab "the feast of belshazzar rembrandt"  |  artgrab  (prompts for a query)
+    if [ $# -eq 0 ]; then
+      printf 'Search artwork: ' >&2
+      read -r q
+      [ -n "$q" ] || { echo "artgrab: no query" >&2; exit 1; }
+      set -- "$q"
+    fi
+    set -- -s "$@"
+    ;;
+esac
+exec uv run --quiet --project "$HOME/Programming/harpe" harpe "$@"

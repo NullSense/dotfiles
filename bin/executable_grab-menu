@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# grab-menu — Walker (elephant) front-end for the grab / artgrab downloaders.
+# Bound to SUPER+ALT+G. Grabs a URL from the clipboard (or asks), shows a menu of
+# what to download, then runs the chosen tool in a ghostty window so you see
+# progress (and so artgrab's interactive picker has a terminal).
+#
+#   grab          → auto-detect video / images / zoomable art
+#   artgrab       → find & compare high-res artwork scans across museums
+#
+# Companion CLIs: vdl <url> (quick video), grab <url>, artgrab "<query>".
+
+set -uo pipefail
+export PATH="$HOME/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+
+WALK="$HOME/bin/launch-walker"
+
+is_url() { case "$1" in http://*|https://*) return 0 ;; *) return 1 ;; esac; }
+
+# Auto-grab the URL of the currently-focused browser tab — no manual copy.
+# Must run while the browser is still focused (before Walker opens). Chromium
+# family (incl. Helium) AND Firefox: Ctrl+L selects the address bar, Ctrl+C
+# copies the full URL, Esc restores page focus. Only fires for browser windows;
+# otherwise we leave the clipboard alone.
+focused_browser_url() {
+  command -v hyprctl >/dev/null || return 1
+  local class
+  class=$(hyprctl activewindow -j 2>/dev/null | jq -r '.class // empty')
+  case "${class,,}" in
+    *helium*|*imput*|*chrom*|*chrome*|*firefox*|*zen*|*brave*|*vivaldi*|*edge*|*mozilla*|navigator) ;;
+    *) return 1 ;;
+  esac
+  sleep 0.06                                            # let the keybind mods release
+  hyprctl dispatch sendshortcut "CTRL,L,activewindow" >/dev/null 2>&1
+  sleep 0.12
+  hyprctl dispatch sendshortcut "CTRL,C,activewindow" >/dev/null 2>&1
+  sleep 0.18
+  hyprctl dispatch sendshortcut ",escape,activewindow" >/dev/null 2>&1
+  local got; got=$(wl-paste 2>/dev/null | head -1 | tr -d '\r\n')
+  is_url "$got" && { printf '%s' "$got"; return 0; }
+  return 1
+}
+
+# Prefer the focused browser tab; fall back to whatever's on the clipboard.
+url=$(focused_browser_url) || url=$(wl-paste 2>/dev/null | head -1 | tr -d '\r\n')
+if is_url "$url"; then clip="${url:0:46}"; else url=""; clip="(none — will ask)"; fi
+
+choice=$(printf '%s\n' \
+  "  Grab           auto — does the right thing (video · gallery · art)" \
+  "  Page images    pick which images to grab from this page (multi-select)" \
+  "  Reverse image  find source + highest-resolution copy" \
+  "  Artwork scans  museums (auto from page; asks for a name only if no URL)" \
+  | "$WALK" --dmenu -p "⬇ $clip") || exit 0
+
+# Map the menu choice to the inner command run inside the terminal.
+case "$choice" in
+  *Grab*)    inner='grab "$U"'    ; needs_url=1 ;;
+  *Page*)    inner='grab -p "$U"' ; needs_url=1 ;;
+  *Reverse*) inner='grab -r "$U"' ; needs_url=1 ;;
+  # Artwork: if a URL is focused, derive the name from the page; else prompt.
+  *Artwork*) inner='if [ -n "$U" ]; then grab -s "$U"; else artgrab; fi' ; needs_url=0 ;;
+  *) exit 0 ;;
+esac
+
+# Run in ghostty as a floating popup (Hyprland floats class com.mitchellh.ghostty-grab
+# — see windows.conf). URL passed via env (U) to avoid quoting/injection issues.
+# Window stays open after completion until you press enter.
+U="$url" NEEDS_URL="$needs_url" INNER="$inner" setsid ghostty --class=com.mitchellh.ghostty-grab -e bash -lc '
+  export PATH="$HOME/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+  cd "$HOME"
+  U="$U"
+  if [ "$NEEDS_URL" = 1 ] && [ -z "$U" ]; then
+    read -rp "Paste URL: " U
+  fi
+  export U
+  # 12-factor secret injection: the tools only READ env vars; we inject them here
+  # via `infisical run` when Infisical is available AND authed, else run bare so
+  # the (entirely keyless) core still works for anyone without Infisical. The
+  # probe (`infisical run -- true`) distinguishes auth-failure from a normal
+  # nonzero exit, so we never double-run the command.
+  if command -v infisical >/dev/null 2>&1 && infisical run --silent -- true >/dev/null 2>&1; then
+    export GRAB_SECRETS=1   # mark injected so nested artgrab skips re-wrapping
+    infisical run --silent -- bash -c "$INNER"
+  else
+    eval "$INNER"
+  fi
+  status=$?
+  echo
+  # Auto-close on success (the desktop notification already confirms the grab);
+  # only pause on error so the message is readable.
+  if [ $status -eq 0 ]; then
+    echo "✓ done"; sleep 1.0
+  else
+    echo "✗ exited with status $status."; read -rp "Press enter to close… " _
+  fi
+' >/dev/null 2>&1 &

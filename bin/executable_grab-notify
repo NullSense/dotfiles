@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# grab-notify <image-file> [caption] [body]
+#
+# Desktop notification with a thumbnail preview, AND:
+#   • CLIPBOARD   ← the image as PNG (downscaled ≤3000px so a giant TIFF never
+#                   lands on the clipboard) → Ctrl+V pastes the picture
+#   • PRIMARY sel ← the caption + body text → middle-click pastes the caption
+#
+# Shared by artgrab and `grab` (image path). All best-effort: silently no-ops if
+# a tool or the Wayland display is missing. wl-copy daemonizes, so the clipboard
+# survives the launching window closing.
+f="${1:-}"; caption="${2:-Saved}"; body="${3:-}"
+[ -n "$f" ] && [ -f "$f" ] || exit 0
+
+if command -v wl-copy >/dev/null 2>&1; then
+  if command -v magick >/dev/null 2>&1; then
+    magick "$f" -resize '3000x3000>' png:- 2>/dev/null | wl-copy --type image/png 2>/dev/null
+  else
+    wl-copy --type "$(file -b --mime-type "$f" 2>/dev/null || echo image/jpeg)" < "$f" 2>/dev/null
+  fi
+  [ -n "$caption$body" ] && printf '%s\n\n%s' "$caption" "$body" | wl-copy --primary 2>/dev/null
+fi
+
+if command -v notify-send >/dev/null 2>&1; then
+  icon="$f"
+  if command -v magick >/dev/null 2>&1; then
+    ic="$HOME/.cache/grab-notif.png"
+    magick "$f" -resize '400x400>' "$ic" 2>/dev/null && icon="$ic"
+  fi
+  notify-send -a grab -i "$icon" "🖼 $caption" "${body}"$'\n'"📋 on clipboard · 📁 ${f##*/}"
+fi

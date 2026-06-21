@@ -1,9 +1,6 @@
 {{- if ne .chezmoi.hostname "orbiter" -}}
-.config/i3
-.config/i3blocks
 .xinitrc
 .Xresources
-bin/resize.py
 {{- end -}}
 
 # Repo-only contents — tracked in git, NOT deployed to home by chezmoi.

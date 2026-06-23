@@ -34,6 +34,23 @@ kill_port() {  # kill whatever LISTENS on a TCP port — reliable, no fuser/patt
   return 0
 }
 
+sweep_swap_children() {  # llama-swap spawns llama-server backends as its OWN children; `down`
+  # kills only the :9292 listener (llama-swap itself), orphaning those children — they reparent
+  # to systemd, keep pinning VRAM, and the next llama-swap can't see them (/running lies). Kill
+  # the subtree FIRST, while llama-swap is alive so we can find them. Does NOT touch the dictation
+  # rewriter (hyprwhspr-rewrite-e4b.service) — that llama-server's parent is systemd, not llama-swap.
+  local swap_pids p kids
+  swap_pids=$(ss -tlnpH "sport = :9292" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u)
+  [ -n "$swap_pids" ] || swap_pids=$(pgrep -x llama-swap 2>/dev/null || true)
+  for p in $swap_pids; do
+    kids=$(pgrep -P "$p" 2>/dev/null || true)
+    [ -n "$kids" ] || continue
+    kill $kids 2>/dev/null || true; sleep 1
+    kids=$(pgrep -P "$p" 2>/dev/null || true)
+    [ -n "$kids" ] && kill -9 $kids 2>/dev/null || true
+  done
+}
+
 start_one() { # name  health-url  command...
   local name="$1" url="$2"; shift 2
   if is_up "$url"; then
@@ -87,6 +104,12 @@ ensure_dashboards() {
       && echo "  ▶ open-webui → :8090 (docker · tailnet http://100.121.121.37:8090)" \
       || echo "  ⚠ open-webui failed to start (docker compose)"
   else echo "  ⚠ open-webui not started (missing stack/open-webui/.env or docker)"; fi
+  # Refresh Glance's auto-discovered service cards (DRY: same ~/bin/discover-services the
+  # Super+S picker uses). Glance hot-reloads on file change. Non-fatal.
+  if [ -f "$HOME/Programming/llm-stack/stack/gen-glance-services.py" ]; then
+    python3 "$HOME/Programming/llm-stack/stack/gen-glance-services.py" >/dev/null 2>&1 \
+      && echo "  • glance service cards refreshed (auto-discovered)" || true
+  fi
 }
 
 case "${1:-status}" in
@@ -138,6 +161,7 @@ case "${1:-status}" in
     echo "  stack up. gateway → :4000 · dict → :8083 · dash → :8088  (obs off — 'stack obs' for grafana/langfuse)"
     ;;
   down)  # stops the LLM serving stack only — leaves observability + dashboards monitoring
+    sweep_swap_children   # reap llama-server backends BEFORE killing llama-swap (else they orphan + pin VRAM)
     for entry in litellm:4000 llama-swap:9292; do
       name="${entry%%:*}"; port="${entry##*:}"
       # kill the actual port listener via ss (the infisical-run litellm child IS the listener).

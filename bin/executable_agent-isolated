@@ -2,7 +2,7 @@
 # agent-isolated — bubblewrap sandbox for AI coding agents (claude, codex, opencode).
 #
 # Usage:
-#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--agent-vault] [--dotfiles] [--dry-run] [-- <agent args>]
+#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--agent-vault] [--dotfiles] [--no-gpu] [--dry-run] [-- <agent args>]
 #   agent-isolated sh                            # interactive shell inside the sandbox
 #   agent-isolated --self-test                   # run negative + positive verifications
 #   AGENT_UNSANDBOX=1 agent-isolated <agent> …   # bypass the sandbox entirely (escape hatch)
@@ -45,6 +45,13 @@
 #                   printed URL manually in your existing browser. Opt out
 #                   with --no-plannotator if you want zero plannotator
 #                   surface in this invocation.
+#   gpu             Bind /dev/kfd + /dev/dri so the agent can run GPU
+#                   compute (ROCm/HIP: local LLM inference, embedding/
+#                   rerank, PyTorch). Without it `--dev /dev` builds a
+#                   minimal devtmpfs that omits the GPU nodes →
+#                   "No HIP GPUs are available". The nodes are 0666 and
+#                   credential-free, so exposing them adds no secret
+#                   surface. Opt out with --no-gpu.
 #
 # Architecture and rationale documented in:
 #   ~/.claude/projects/-home-nullsense/memory/reference_agent_isolation.md
@@ -92,6 +99,10 @@ ALLOW_DOTFILES=0
 # the binary isn't installed. Flip with --no-plannotator for the rare
 # case where you want a completely surface-minimized run.
 ALLOW_PLANNOTATOR=1
+# Default-on: GPU device nodes (/dev/kfd, /dev/dri) are world-accessible
+# (0666) and credential-free, so exposing them is harmless and broadly
+# useful for local LLM / ROCm inference work. Opt out with --no-gpu.
+ALLOW_GPU=1
 DRY_RUN=0
 SELF_TEST=0
 AGENT=""
@@ -129,6 +140,8 @@ while [[ $# -gt 0 ]]; do
         --dotfiles)       ALLOW_DOTFILES=1; shift ;;
         --plannotator)    ALLOW_PLANNOTATOR=1; shift ;;  # accepted for symmetry
         --no-plannotator) ALLOW_PLANNOTATOR=0; shift ;;
+        --gpu)            ALLOW_GPU=1; shift ;;  # accepted for symmetry
+        --no-gpu)         ALLOW_GPU=0; shift ;;
         --dry-run)        DRY_RUN=1; shift ;;
         --self-test)      SELF_TEST=1; AGENT="sh"; shift; break ;;
         -h|--help)
@@ -577,6 +590,23 @@ if (( ALLOW_PLANNOTATOR )); then
     ARGS+=( --setenv BROWSER "/usr/bin/echo" )
 fi
 
+# Default-on: GPU passthrough. Bind the AMD compute device nodes so ROCm/HIP
+# (rocminfo, PyTorch, llama.cpp HIP/Vulkan) can see the GPU from inside the
+# sandbox. The earlier `--dev /dev` builds a minimal devtmpfs that OMITS
+# /dev/kfd and the /dev/dri render nodes, which is why a sandboxed agent saw
+# "No HIP GPUs are available" even with sandboxing off-by-flag. Binding onto
+# the already-mounted /dev devtmpfs is the standard ROCm-in-container pattern
+# (mirrors Docker's `--device=/dev/kfd --device=/dev/dri`). The nodes are 0666
+# and credential-free, so this adds no secret surface; --dev-bind-try is a
+# no-op on hosts without the GPU, so the wrapper stays portable. --no-gpu opts
+# out for a run that wants zero device access.
+if (( ALLOW_GPU )); then
+    ARGS+=(
+        --dev-bind-try /dev/kfd /dev/kfd
+        --dev-bind-try /dev/dri /dev/dri
+    )
+fi
+
 # chdir
 ARGS+=( --chdir "$WORKSPACE" )
 
@@ -658,6 +688,12 @@ if (( SELF_TEST )); then
     run pos "agent state dir writable"         "touch $HOME/.claude/.sandbox-test && rm $HOME/.claude/.sandbox-test && echo ok"
     run pos "chezmoi source writable"          "touch $CHEZMOI_ROOT/.sandbox-test && rm $CHEZMOI_ROOT/.sandbox-test && echo ok"
     run pos "~/.local/bin writable"            "touch $HOME/.local/bin/.sandbox-test && rm $HOME/.local/bin/.sandbox-test && echo ok"
+    # GPU passthrough — only assert on hosts that actually have the device,
+    # so the self-test stays green on GPU-less machines.
+    [[ -e /dev/kfd ]] && \
+      run pos "GPU /dev/kfd exposed (ROCm)"    'test -e /dev/kfd && echo present'
+    [[ -e /dev/dri/renderD128 ]] && \
+      run pos "GPU render node exposed"        'test -e /dev/dri/renderD128 && echo present'
 
     echo
     printf "── %d passed, %d failed ──\n" "$pass" "$fail"

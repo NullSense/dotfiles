@@ -10,7 +10,7 @@
 # system-level enforcement regardless of how the agent is invoked.
 #
 # The shim lifts known wrapper flags (--ssh / --gpg / --rbw / --agent-vault
-# / --dotfiles) from "$@" so `claude --ssh` reaches agent-isolated correctly — its arg
+# / --dotfiles / --gpu / --no-gpu) from "$@" so `claude --ssh` reaches agent-isolated correctly — its arg
 # parser breaks out of flag parsing the moment it sees the agent name.
 #
 # Bypasses (intentional, for emergency use):
@@ -35,7 +35,7 @@ for arg in "$@"; do
     fi
     case "$arg" in
         --) saw_terminator=1; passthrough+=("$arg") ;;
-        --ssh|--gpg|--rbw|--agent-vault|--dotfiles)
+        --ssh|--gpg|--rbw|--agent-vault|--dotfiles|--gpu|--no-gpu)
             wrapper_flags+=("$arg") ;;
         *) passthrough+=("$arg") ;;
     esac

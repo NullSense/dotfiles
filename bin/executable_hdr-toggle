@@ -16,7 +16,9 @@
 
 set -eu
 
-MON=DP-1
+# Match the AORUS by description, not port name — cable can be on any DP port
+# (monitors.conf / hypr-monitor-dualmode use the same desc: matching).
+MON="desc:AORUS FO32U2"
 STATE=/tmp/hdr-state
 
 if [ "$(cat "$STATE" 2>/dev/null)" = "on" ]; then

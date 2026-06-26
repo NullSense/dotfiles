@@ -19,7 +19,15 @@ export GGML_VK_VISIBLE_DEVICES=0
 # graphics queue. Per llama.cpp PR #19976 ("vulkan: improve partial offloading performance
 # on AMD") this helps any partial offload, and incidentally reduces compositor stutter on
 # the same GPU because inference no longer monopolizes a single queue. Needs Mesa 26+.
-export RADV_PERFTEST="${RADV_PERFTEST:+$RADV_PERFTEST,}transfer_queue"
+# NOTE: transfer_queue moved OUT of RADV_PERFTEST — the installed Mesa prints
+#   "RADV_PERFTEST=transfer_queue is deprecated ... use RADV_EXPERIMENTAL=transfer_queue".
+#   (llama-gemma4 / llama-octen already use RADV_EXPERIMENTAL; this aligns them.)
+export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+# nogttspill (RADV_PERFTEST, Mesa 25.2+, llama.cpp #24066): stop the RADV allocator from
+# randomly spilling RESIDENT buffers to GTT, which silently craters RDNA2 MoE decode
+# (can drop ~30 t/s → <10 with no logged warning). Prioritizes VRAM; safe here because the
+# GPU-resident portion (n-cpu-moe 28 ≈ 9 GB) fits 12 GB, so it won't force an OOM.
+export RADV_PERFTEST="${RADV_PERFTEST:+$RADV_PERFTEST,}nogttspill"
 
 MODEL="${MODEL:-$HOME/.lmstudio/models/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf}"
 TEMPLATE="${TEMPLATE:-$HOME/.config/llama-cpp/qwen36-merged-fakezeta-allanchan-froggeric.jinja}"

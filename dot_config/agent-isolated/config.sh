@@ -18,4 +18,12 @@
 #     --setenv   MY_PROJECT_FOO            "$MY_PROJECT_FOO"
 # )
 
-# EXTRA_BWRAP_ARGS=()
+# GPU access for Vulkan (llama.cpp --device Vulkan0 / GGML_VK_VISIBLE_DEVICES=0).
+# Binds /dev/dri (card0 + renderD128) so Mesa/RADV can enumerate the RX 6750 XT.
+# /sys is bound read-only because Mesa reads sysfs during device enumeration;
+# without it some Mesa code paths refuse to initialise.
+# /dev/kfd is NOT needed — that's ROCm compute only, not Vulkan.
+EXTRA_BWRAP_ARGS=(
+    --dev-bind-try /dev/dri /dev/dri
+    --ro-bind-try  /sys     /sys
+)

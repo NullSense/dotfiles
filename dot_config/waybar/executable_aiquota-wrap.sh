@@ -15,9 +15,13 @@
 set -u
 
 # SINGLE SOURCE OF TRUTH for the binary location. Prefers `aiquota` on PATH
-# (the ~/bin shim) and falls back to the dev build. Override with AIQUOTA_BIN.
-BIN="${AIQUOTA_BIN:-$(command -v aiquota 2>/dev/null || printf '%s' "$HOME/Programming/aiquota/target/release/aiquota")}"
-TIMEOUT="${AIQUOTA_TIMEOUT:-10}"
+# (the `just install` target puts it in ~/.local/bin) and falls back to that
+# stable install path — never the wipeable target/ build dir. Override with
+# AIQUOTA_BIN.
+BIN="${AIQUOTA_BIN:-$(command -v aiquota 2>/dev/null || printf '%s' "$HOME/.local/bin/aiquota")}"
+# Wrapper budget. Must exceed the binary's worst case: provider fetch (~10s)
+# runs CONCURRENTLY with the codeburn refresh (≤4s), so 15s is comfortable.
+TIMEOUT="${AIQUOTA_TIMEOUT:-15}"
 
 # Subcommand passthrough for waybar on-click handlers (cycle / tui / …).
 if [ "$#" -gt 0 ]; then

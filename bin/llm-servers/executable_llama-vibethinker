@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# llama-server wrapper for VibeThinker-3B (WeiboAI) via Vulkan (RADV) — reasoning test box.
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# Model:    mradermacher/VibeThinker-3B-GGUF (Q8_0, ~3.3GB; near-lossless).
+#           Qwen2.5-Coder-3B base (3B dense, 36 layers, vocab 151936), RL-distilled for
+#           MATH / CODING / STEM reasoning. NOT trained on tool-calling, agents, instruction
+#           rewrites, or faithful summarization — it emits long chain-of-thought by design.
+# Card:     https://huggingface.co/WeiboAI/VibeThinker-3B
+#
+# ⚠ NO MTP. VibeThinker ships no multi-token-prediction / EAGLE draft head (none of the 32
+#   community GGUF quants do), so the lossless self-speculation used by llama-gemma4 is
+#   impossible here. The optimization that DOES apply is ordinary speculative decoding with a
+#   small same-vocab draft (Qwen2.5-Coder-0.5B-Instruct shares the 151936-token Qwen2.5
+#   vocab). It's off by default (SPEC=on to enable) — for a 3B target the win is modest and
+#   acceptance is distribution-limited (the 0.5B-Instruct is not a VibeThinker distill).
+#
+# Card-recommended sampling: temp 1.0, top_p 0.95, top_k -1 (disabled), max_tokens up to
+#   102400. It reasons before answering; --reasoning auto extracts the thought block into the
+#   API's reasoning_content so `content` carries only the final answer (clean for benchmarks).
+#
+# Why Vulkan, not ROCm/HIP: ROCm 7.2.3 has no gfx1031 Tensile library (see llama-qwen36);
+#   Vulkan/RADV is the stable RDNA2 path.
+# Why Q8_0: it's a reasoning model (quant-sensitive for chain quality) and only 3B — Q8_0
+#   fully offloads with gigabytes to spare, so we take near-lossless quality for free.
+set -euo pipefail
+
+# Discrete GPU only — index 1 is the Raphael iGPU we don't want kernels on.
+export GGML_VK_VISIBLE_DEVICES=0
+# Mesa 26+ dedicated transfer queue (see llama-qwen36 rationale).
+export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+
+REPO="mradermacher/VibeThinker-3B-GGUF"
+FILE="${FILE:-VibeThinker-3B.Q8_0.gguf}"
+MODEL_DIR="$HOME/.lmstudio/models/$REPO"
+MODEL="${MODEL:-$MODEL_DIR/$FILE}"
+SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots-vibethinker}"
+PORT="${PORT:-8084}"   # 8080 = qwen36/octen-embed, 8082 = gemma4 12B, 8083 = gemma4 E4B,
+                       # 8081 = taken (system), 8085 = nitter, 1234 = LM Studio. 8084 is free.
+CTX="${CTX:-32768}"    # Qwen2.5-Coder-3B native; card cites a 64K long-context window. Reasoning
+                       # eats OUTPUT tokens, not input ctx — 32k is ample for chat/bench and keeps
+                       # KV small. Raise to 65536 for long-context reasoning when GPU is idle.
+mkdir -p "$SLOTS_DIR"
+
+# First-run fetch — same hf-on-3.14 spurious-exit tolerance as llama-octen.
+fetch() { # repo file dir
+  local repo="$1" file="$2" dir="$3"
+  if python3 -c 'import hf_transfer' 2>/dev/null; then export HF_HUB_ENABLE_HF_TRANSFER=1; fi
+  command -v hf >/dev/null 2>&1 || { echo "llama-vibethinker: need 'hf' (huggingface-hub)" >&2; exit 1; }
+  echo "llama-vibethinker: fetching $repo/$file ..." >&2
+  hf download "$repo" "$file" --local-dir "$dir" || true
+}
+[[ -f "$MODEL" ]] || { fetch "$REPO" "$FILE" "$MODEL_DIR"; [[ -f "$MODEL" ]] || { echo "download failed: $MODEL" >&2; exit 1; }; }
+
+# MODE selects sampler + reasoning defaults. Clients override per request (OpenAI sampler
+# params; reasoning via --reasoning-budget / chat_template_kwargs where the template supports it).
+#   think — card-recommended reasoning sampling (temp 1.0). Math/code/STEM. (default)
+#   fast  — reasoning suppressed + low temp, for the dictation/latency A/B (expect quality loss:
+#           this model's competence lives in the chain it's no longer allowed to write).
+MODE="${MODE:-think}"
+case "$MODE" in
+  think) REASON=on;  TEMP=1.0; TOPP=0.95; TOPK=0;  RBUDGET=-1 ;;
+  fast)  REASON=off; TEMP=0.3; TOPP=0.95; TOPK=0;  RBUDGET=0  ;;
+  *) echo "MODE must be think | fast"; exit 1 ;;
+esac
+# top_k 0 in llama.cpp == disabled == the card's top_k -1.
+
+# Optional ordinary speculative decoding (NOT MTP — see header). Same-vocab Qwen2.5 draft.
+SPEC="${SPEC:-off}"
+SPECN="${SPECN:-4}"
+DRAFT_REPO="Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF"
+DRAFT_FILE="${DRAFT_FILE:-qwen2.5-coder-0.5b-instruct-q8_0.gguf}"
+DRAFT_DIR="$HOME/.lmstudio/models/$DRAFT_REPO"
+DRAFT="${DRAFT:-$DRAFT_DIR/$DRAFT_FILE}"
+SPEC_ARGS=()
+if [[ "$SPEC" == "on" ]]; then
+  [[ -f "$DRAFT" ]] || fetch "$DRAFT_REPO" "$DRAFT_FILE" "$DRAFT_DIR"
+  [[ -f "$DRAFT" ]] || { echo "draft download failed: $DRAFT" >&2; exit 1; }
+  SPEC_ARGS=(
+    --model-draft "$DRAFT"
+    --spec-type draft-simple
+    --spec-draft-n-max "$SPECN"
+    --gpu-layers-draft 99
+  )
+fi
+
+# Single slot: this is a reasoning/quality test box, not a throughput batcher (and the gemma
+# measurements showed NP>1 is a net loss on this backend for dense models). Raise NP to batch.
+NP="${NP:-1}"
+
+# exec -a sets argv[0] so process viewers (btop/htop/Mission Center, `pgrep -af`)
+# show "vibethinker-3b@8084.llama-server" instead of a generic "llama-server" — the
+# model + port are visible at a glance. "llama-server" stays in the name so existing
+# `pgrep -f llama-server` tooling keeps matching. See `llms` for the live overview.
+exec -a "vibethinker-3b@${PORT}.llama-server" llama-server \
+  --model "$MODEL" \
+  --alias "vibethinker-3b" \
+  --host 127.0.0.1 --port "$PORT" \
+  --device Vulkan0 \
+  --fit off \
+  --n-gpu-layers 99 \
+  --ctx-size "$CTX" \
+  --parallel "$NP" \
+  --slot-save-path "$SLOTS_DIR" \
+  --slot-prompt-similarity 0.5 \
+  --flash-attn on \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --threads 8 \
+  --threads-batch 8 \
+  --no-mmap \
+  --temp "$TEMP" \
+  --top-p "$TOPP" \
+  --top-k "$TOPK" \
+  --min-p 0.0 \
+  --repeat-penalty 1.0 \
+  --jinja \
+  --reasoning "$REASON" \
+  --reasoning-budget "$RBUDGET" \
+  --cache-ram 2048 \
+  "${SPEC_ARGS[@]}" \
+  --metrics

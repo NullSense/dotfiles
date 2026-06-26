@@ -104,7 +104,7 @@
             "^.\\[sudo\\] (.*)$":     "<span foreground='#F0C674'>󰄔</span>  $1",
             "(.*) — Mozilla Firefox":     "🦊  $1",
             "(.*) - Visual Studio Code":  "  $1",
-            "(.*) - Ghostty":             "  $1",
+            "(.*) - Alacritty":             "  $1",
             "(.*) - Foot":                "  $1"
         }
     },
@@ -250,22 +250,22 @@
         "interval": 5,
         "format": "   {usage}%",
         "tooltip-format": "CPU  {usage}%   load {load}\n  L-click  btop\n  R-click  htop",
-        "on-click": "ghostty --class=com.local.floating-monitor -e btop",
-        "on-click-right": "ghostty --class=com.local.floating-monitor -e htop"
+        "on-click": "alacritty --class=com.local.floating-monitor -e btop",
+        "on-click-right": "alacritty --class=com.local.floating-monitor -e htop"
     },
     "memory": {
         "interval": 10,
         "format": "   {used:0.1f}G",
         "tooltip-format": "RAM  {used:0.1f}G / {total:0.1f}G  ({percentage}%)\nswap {swapUsed:0.1f}G / {swapTotal:0.1f}G  ({swapPercentage}%)\n  L-click  btop\n  R-click  free -h",
-        "on-click": "ghostty --class=com.local.floating-monitor -e btop",
-        "on-click-right": "ghostty --class=com.local.floating-monitor -e sh -c 'free -h; echo; read -r _'"
+        "on-click": "alacritty --class=com.local.floating-monitor -e btop",
+        "on-click-right": "alacritty --class=com.local.floating-monitor -e sh -c 'free -h; echo; read -r _'"
     },
     "temperature": {
         "critical-threshold": 85,
         "format": "   {temperatureC}°",
         "format-critical": "   {temperatureC}°",
         "tooltip-format": "Temp  {temperatureC}°C  ({temperatureF}°F)\n  L-click  btop (sensors)",
-        "on-click": "ghostty --class=com.local.floating-monitor -e btop"
+        "on-click": "alacritty --class=com.local.floating-monitor -e btop"
     },
     "disk#home": {
         "interval": 30,
@@ -273,7 +273,7 @@
         "tooltip-format": "~  used {used} of {total}  ({percentage_used}%)\n  L-click  thunar ~\n  R-click  btop (disk view)",
         "path": "/home/",
         "on-click": "thunar $HOME",
-        "on-click-right": "ghostty --class=com.local.floating-monitor -e btop"
+        "on-click-right": "alacritty --class=com.local.floating-monitor -e btop"
     },
     "disk#root": {
         "interval": 30,
@@ -281,7 +281,7 @@
         "tooltip-format": "/  used {used} of {total}  ({percentage_used}%)\n  L-click  thunar /\n  R-click  df -h",
         "path": "/",
         "on-click": "thunar /",
-        "on-click-right": "ghostty --class=com.local.floating-monitor -e sh -c 'df -hT -x tmpfs -x devtmpfs -x squashfs; echo; read -r _'"
+        "on-click-right": "alacritty --class=com.local.floating-monitor -e sh -c 'df -hT -x tmpfs -x devtmpfs -x squashfs; echo; read -r _'"
     },
     "pulseaudio": {
         "format": "{icon}  {volume}%",
@@ -326,7 +326,7 @@
             "warning": 25,
             "critical": 10
         },
-        "on-click": "ghostty --class=com.local.floating-monitor -e sh -c 'upower -i $(upower -e | grep hidpp); echo; read -r _'"
+        "on-click": "alacritty --class=com.local.floating-monitor -e sh -c 'upower -i $(upower -e | grep hidpp); echo; read -r _'"
     },
     "tray": {
         "spacing": 12,

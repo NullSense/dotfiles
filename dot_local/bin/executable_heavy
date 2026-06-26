@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# heavy — run a memory-hungry job in its own capped cgroup scope, so if it
+# blows up it gets OOM-killed in ISOLATION instead of taking down the desktop.
+#
+# Added 2026-06-19 after a runaway ~30GB python3 ingest job caused a global
+# OOM that killed the whole Hyprland session.
+#
+# Usage:
+#   heavy <command> [args...]
+#   heavy python3 ingest.py
+#   HEAVY_MAX=52G heavy uv run bench.py
+#
+# Tunables (env, default tuned for 60G RAM — leaves ~12G for the desktop):
+#   HEAVY_HIGH  soft throttle (default 40G) — job slows + reclaims past this, doesn't die
+#   HEAVY_MAX   hard ceiling  (default 48G) — ONLY this scope is OOM-killed if exceeded
+#   HEAVY_SWAP  swap ceiling  (default 8G)
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: heavy <command> [args...]" >&2
+  exit 64
+fi
+
+HIGH="${HEAVY_HIGH:-40G}"
+MAX="${HEAVY_MAX:-48G}"
+SWAP="${HEAVY_SWAP:-8G}"
+
+echo "heavy: capping '$*' at MemoryHigh=$HIGH MemoryMax=$MAX MemorySwapMax=$SWAP (slice: heavy.slice)" >&2
+
+exec systemd-run --user --scope --quiet \
+  --slice=heavy.slice \
+  -p MemoryHigh="$HIGH" \
+  -p MemoryMax="$MAX" \
+  -p MemorySwapMax="$SWAP" \
+  -- "$@"

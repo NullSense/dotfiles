@@ -1,23 +1,23 @@
 [Unit]
-Description=Dropdown terminal (ghostty)
+Description=Dropdown terminal (alacritty)
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-# Spawn ghostty with a valid GTK reverse-DNS app ID — Ghostty silently
-# drops --class values that aren't a valid GTK application ID (see
-# ghostty#4596 / #382 / #3974), which is why the previous
-# `--class=dropdown_term` never set the Wayland app_id and the dropdown
-# ended up in the tiling layer instead of on special:dropdown. Use the
-# `=` form; the space-separated form was flaky for some users. Matching
-# windowrules live in dot_config/hypr/windows.conf.
+# Spawn alacritty with a fixed app_id so the windowrules in
+# dot_config/hypr/windows.conf can pin it to special:dropdown. Unlike
+# Ghostty (which silently dropped any --class that wasn't a valid GTK
+# reverse-DNS app ID), alacritty sets the Wayland app_id to the first
+# `--class` value verbatim — the `com.mitchellh.ghostty-dropdown` string
+# is kept only because it's the established match token in windows.conf;
+# renaming it would mean touching every matching rule for no functional gain.
 #
 # Restart=always keeps the workspace pre-warmed — closing the dropdown
 # respawns within 1s so the next $mod+u summon is instant.
-ExecStart=/usr/bin/ghostty --class=com.mitchellh.ghostty-dropdown
+ExecStart=/usr/bin/alacritty --class=com.mitchellh.ghostty-dropdown
 Restart=always
 RestartSec=1
-# Cap cascading restarts (ghostty crash-loop after a config edit) — fail
+# Cap cascading restarts (alacritty crash-loop after a config edit) — fail
 # loud after 5 retries in 60s instead of burning CPU silently.
 StartLimitBurst=5
 StartLimitIntervalSec=60

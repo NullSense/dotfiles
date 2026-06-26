@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# llama-server wrapper for Octen-Embedding-4B (Sift's embedding backend) via Vulkan (RADV)
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# Model:    mradermacher/Octen-Embedding-4B-GGUF (Q8_0, ~4.4GB)
+#           LoRA finetune of Qwen/Qwen3-Embedding-4B — qwen3 arch, 36 layers, 2560-dim,
+#           32k ctx, LAST-token pooling, L2-normalized.
+# Card:     https://huggingface.co/Octen/Octen-Embedding-4B
+#
+# Serves an OpenAI-compatible /v1/embeddings endpoint on :8080 — exactly what sift.yaml
+# expects (provider: custom, model qwen3-embedding-4b, dimensions 2560). Because Octen is a
+# Qwen3-Embedding-4B finetune it keeps the SAME 2560 dims → drop-in replacement, NO Qdrant
+# reindex. Start this, then `moon run sift:run`.
+#
+# Why Vulkan, not ROCm/HIP: ROCm lacks a gfx1031 Tensile library (see llama-qwen36) — HIP
+#   trips hipBLAS errors on RDNA2. Vulkan/RADV is the stable path.
+# Why Q8_0: embedding geometry is quant-sensitive (hurts retrieval more than it hurts
+#   generation). 4.4GB fully offloads on 12GB VRAM with room for a 32k-ctx prefill — so we
+#   take near-lossless quality at zero VRAM pressure.
+# ⚠ PORT 8080 collides with llama-qwen36 (the chat LLM). Run ONE or the other; for Sift
+#   indexing/search you want THIS embedder up.
+set -euo pipefail
+
+# Discrete GPU only — index 1 is the Raphael iGPU we don't want kernels on.
+export GGML_VK_VISIBLE_DEVICES=0
+# Mesa 26+ dedicated transfer queue (see llama-qwen36 rationale). transfer_queue now lives
+# under RADV_EXPERIMENTAL (RADV_PERFTEST=transfer_queue is deprecated on current Mesa).
+export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+
+REPO="mradermacher/Octen-Embedding-4B-GGUF"
+FILE="${FILE:-Octen-Embedding-4B.Q8_0.gguf}"
+MODEL_DIR="$HOME/.lmstudio/models/$REPO"
+MODEL="${MODEL:-$MODEL_DIR/$FILE}"
+PORT="${PORT:-8080}"
+CTX="${CTX:-32768}"        # Octen/Qwen3-Embedding native max sequence length
+UBATCH="${UBATCH:-4096}"   # -ub (physical) 4096 — drives the compute buffer / VRAM
+BATCH="${BATCH:-8192}"     # -b (logical) 8192 — lets 4 concurrent slots fill one batch;
+                           #   bigger logical batch = fewer CPU→GPU rounds, no extra VRAM
+PARALLEL="${PARALLEL:-4}"  # 4 slots un-serialize sift indexing (parallel=1 queued every
+                           #   request). ctx is split across slots (32k/4=8k/slot), so the
+                           #   KV total is unchanged → still co-fits next to a small summarizer.
+
+# First-run fetch — LM Studio hasn't downloaded this one.
+if [[ ! -f "$MODEL" ]]; then
+  echo "llama-octen: model not present, downloading $REPO/$FILE ..." >&2
+  # hf_transfer = parallel chunked downloads (~10-20x the default single HTTP stream).
+  # Enabled only when installed (AUR: python-hf-transfer) so hf doesn't error if it's absent.
+  if python3 -c 'import hf_transfer' 2>/dev/null; then export HF_HUB_ENABLE_HF_TRANSFER=1; fi
+  if ! command -v hf >/dev/null 2>&1; then
+    echo "llama-octen: need 'hf' (huggingface-hub) to fetch the model, or place it at:" >&2
+    echo "  $MODEL" >&2
+    exit 1
+  fi
+  # hf on Python 3.14 raises click.exceptions.Exit(0) as an UNCAUGHT traceback — a spurious
+  # non-zero exit even when the download succeeded. Under `set -e` that aborts us before
+  # llama-server starts, so tolerate it and verify success by file presence instead.
+  hf download "$REPO" "$FILE" --local-dir "$MODEL_DIR" || true
+  [[ -f "$MODEL" ]] || { echo "llama-octen: download failed — $MODEL missing" >&2; exit 1; }
+fi
+
+# Embedding server: no sampler / chat-template / reasoning flags — those are generation-only.
+#   --embeddings        enable the /v1/embeddings endpoint
+#   --pooling last      Octen/Qwen3-Embedding use last-token pooling (NOT mean/cls)
+#   --embd-normalize 2  L2-normalize (the card's F.normalize(p=2)); idempotent if Sift also normalizes
+#   --alias matches sift.yaml's `model: qwen3-embedding-4b` so requests resolve
+# KV is q8_0 (needs flash-attn on) to keep the 32k-ctx prefill comfortable inside 12GB.
+# exec -a self-labels argv[0] → process viewers show "octen-embed@8080.llama-server"
+# instead of bare "llama-server" (keeps "llama-server" for `pgrep -f`). See `llms`.
+exec -a "octen-embed@${PORT}.llama-server" llama-server \
+  --model "$MODEL" \
+  --alias "qwen3-embedding-4b" \
+  --host 127.0.0.1 --port "$PORT" \
+  --device Vulkan0 \
+  --fit off \
+  --n-gpu-layers 99 \
+  --embeddings \
+  --pooling last \
+  --embd-normalize 2 \
+  --ctx-size "$CTX" \
+  --batch-size "$BATCH" \
+  --ubatch-size "$UBATCH" \
+  --parallel "$PARALLEL" \
+  --flash-attn on \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --threads 8 \
+  --threads-batch 8 \
+  --no-mmap \
+  --metrics

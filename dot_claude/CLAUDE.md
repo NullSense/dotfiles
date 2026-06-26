@@ -34,6 +34,14 @@ Fix a bug → write a regression test immediately (TDD preferred).
 Resolve the ID first, then fetch a narrow topic (1–2k tokens; 5k+ for overviews). Reuse resolved
 IDs in-session. Check the version against project deps.
 
+## Research before answering (services, libraries, APIs, tools) — never from memory
+For any question about a third-party service/library/API/tool — even well-known ones — search until
+confident, THEN answer with the LATEST data. Don't answer from training memory alone.
+1. **Service/product** (apps, SaaS, hardware, OS features) → the service's **official docs** first.
+2. Official docs missing/thin on the answer → **exa** web search for current real-world fixes/issues.
+3. **Dev / libraries** → **Context7 + GitHub + Hugging Face** MCPs/searches (resolve the lib, read
+   current docs + issues + model cards); see Library docs → Context7 above for the Context7 flow.
+
 ## Structured memory → `~/.claude/memory/`
 `general.md` (cross-project conventions) · `tools/*.md` · `domain/*.md`. Write new cross-project
 conventions there, not into this file. Keep this file to top-level preferences only.

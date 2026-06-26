@@ -1,67 +1,22 @@
 #!/usr/bin/env bash
-# Localhost-services launcher.
-#
-# Scans every TCP listener on the loopback (or wildcard) interface, annotates
-# each port with the process name from `ss` plus an optional friendly label
-# from ~/.config/services.toml, then pipes the list into rofi. Picking a row
-# opens http://localhost:PORT in the default browser.
-#
-# Add descriptions in ~/.config/services.toml — see that file for examples.
-# Bind to Super+S in hypr/bindings.conf for one-keystroke "what's running where".
-
+# Localhost services launcher (Super+S). Ports + titles are AUTO-DISCOVERED by
+# ~/bin/discover-services — the SAME engine the Glance dashboard uses (DRY).
+# Titles: ~/.config/services.toml overrides > docker name > HTML <title> > process.
+# Friendly names / databases live in services.toml. Pick a row → opens the port.
 set -euo pipefail
 
-CONFIG="${HOME}/.config/services.toml"
+rows=$(~/bin/discover-services \
+  | jq -r '.[] | "\(.port)\t\(.title // "(no label)")\t\(.proc)"' \
+  | awk -F'\t' '{printf "%-6s  %-34.34s  %s\n", $1, $2, $3}')
 
-# --- Gather listeners --------------------------------------------------------
-# IPv4 + IPv6, TCP, listening only. Strip the addr to just port + process.
-listings=$(ss -tlnHp 2>/dev/null | awk '
-{
-    n = split($4, parts, ":")
-    port = parts[n]
-    proc = "?"
-    if (match($0, /users:\(\("([^"]+)"/, m)) proc = m[1]
-    if (port ~ /^[0-9]+$/) print port "\t" proc
-}' | sort -t$'\t' -nuk1,1)
+[[ -z "${rows:-}" ]] && { notify-send services "No localhost listeners found"; exit 0; }
 
-if [[ -z "$listings" ]]; then
-    notify-send "services" "No localhost listeners found"
-    exit 0
-fi
+choice=$(printf '%s\n' "$rows" | /home/nullsense/bin/launch-walker \
+    --dmenu --width 780 --placeholder 'localhost') || exit 0
+[[ -z "${choice:-}" ]] && exit 0
 
-# --- Load friendly descriptions from TOML-ish file ---------------------------
-# We accept simple `PORT = "label"` lines; full TOML parsing isn't needed.
-declare -A LABELS=()
-if [[ -f "$CONFIG" ]]; then
-    while IFS='=' read -r k v; do
-        k="${k//[[:space:]]/}"
-        [[ "$k" =~ ^[0-9]+$ ]] || continue
-        v="${v#"${v%%[![:space:]]*}"}"   # ltrim
-        v="${v%"${v##*[![:space:]]}"}"   # rtrim
-        v="${v#\"}"; v="${v%\"}"          # strip quotes
-        LABELS[$k]="$v"
-    done < "$CONFIG"
-fi
-
-# --- Build pretty rows -------------------------------------------------------
-rows=""
-while IFS=$'\t' read -r port proc; do
-    label="${LABELS[$port]:-}"
-    if [[ -n "$label" ]]; then
-        rows+=$(printf '%-6s  %-22s  %s\n' "$port" "$label" "$proc")
-    else
-        rows+=$(printf '%-6s  %-22s  %s\n' "$port" "(no label)" "$proc")
-    fi
-    rows+=$'\n'
-done <<< "$listings"
-
-# --- Pick via rofi -----------------------------------------------------------
-choice=$(printf '%s' "$rows" | /home/nullsense/bin/launch-walker \
-    --dmenu --width 720 --placeholder 'localhost') || exit 0
-
-[[ -z "$choice" ]] && exit 0
-port=$(awk '{print $1}' <<< "$choice")
+port=$(awk '{print $1}' <<<"$choice")
 [[ "$port" =~ ^[0-9]+$ ]] || exit 1
 
 xdg-open "http://localhost:$port" >/dev/null 2>&1 &
-notify-send -t 2000 "services" "Opened http://localhost:$port"
+notify-send -t 2000 services "Opened http://localhost:$port"

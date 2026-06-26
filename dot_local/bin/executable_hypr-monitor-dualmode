@@ -19,19 +19,21 @@
 # FHD-480 mode, `highres` will pick it up automatically with no change here.
 set -euo pipefail
 
-OUT="DP-1"
+# Match the AORUS by its description (model substring), not a port name — the
+# cable can land on any DP port (monitors.conf uses the same desc: matching).
+DESC="AORUS FO32U2"
 
 apply() {
     local w h scale
     read -r w h < <(hyprctl -j monitors all 2>/dev/null \
-        | jq -r --arg o "$OUT" '.[]|select(.name==$o)|"\(.width) \(.height)"') || return 0
+        | jq -r --arg d "$DESC" '.[]|select(.description|contains($d))|"\(.width) \(.height)"') || return 0
     [ -n "${w:-}" ] || return 0
     case "${w}x${h}" in
         3840x2160) scale=2.0 ;;
         1920x1080) scale=1.0 ;;
         *)         return 0 ;;   # unknown mode: leave Hyprland's own choice alone
     esac
-    hyprctl keyword monitor "$OUT, highres, 0x0, $scale, bitdepth, 10, cm, dp3" >/dev/null
+    hyprctl keyword monitor "desc:$DESC, highres, 0x0, $scale, bitdepth, 10, cm, dp3" >/dev/null
 }
 
 case "${1:-}" in

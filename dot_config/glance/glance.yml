@@ -1,12 +1,15 @@
-# Glance — local workstation dashboard. ~/.local/bin/glance, hot-reloads on save.
-# http://localhost:8088 .  Two pages: Home (status-first overview) + Status (uptime detail).
-# Design: status above the fold, grouped by function, critical things top-left (Z-pattern).
+# Glance — homelab dashboard. ~/.local/bin/glance, hot-reloads on save. http://localhost:8088
+# Tabs (in order): This machine · OnePlus-8T · Cortiq.
+# DRY: shared cache windows are YAML anchors (&name on first use, *name after).
+# URLs: Tailscale MagicDNS names for tailnet-reachable services (work from any tailnet node);
+#       localhost only for loopback-bound services (llama-swap, observability). wakezilla lives
+#       on the OnePlus phone (oneplus-8t-homelab), NOT on this machine.
 server:
   host: 127.0.0.1
   port: 8088
 
 branding:
-  custom-footer: <p>nullsense · local stack</p>
+  custom-footer: <p>nullsense · homelab</p>
 
 theme:
   background-color: 222 13 11
@@ -16,135 +19,67 @@ theme:
   contrast-multiplier: 1.15
 
 pages:
-  - $include: cortiq.yml
-  # ════════════════════════ HOME — overview ════════════════════════
-  - name: Home
+  # ═══════════════════════════ 1 · THIS MACHINE (nullsense-arch) ═══════════════════════════
+  - name: This machine
     width: wide
     columns:
-      # LEFT — machine health + the port you forget (critical, top-left)
+      # LEFT — machine health
       - size: small
         widgets:
           - type: server-stats
             servers:
               - type: local
-                name: workstation
-                hide-mountpoints-by-default: true   # collapse the btrfs subvolume noise
+                name: nullsense-arch
+                hide-mountpoints-by-default: true
                 mountpoints:
-                  "/":
-                    hide: false
-                    name: btrfs pool
+                  "/": { hide: false, name: btrfs pool }
                   "/mnt/media-2tb": { hide: false, name: Media 2TB }
                   "/mnt/media-3tb": { hide: false, name: Media 3TB }
-                  "/mnt/windows":   { hide: false, name: Windows }
+                  "/mnt/windows": { hide: false, name: Windows }
+          - type: clock
+            hour-format: 24h
           - type: bookmarks
             title: 🔐 agent-vault
             groups:
               - links:
-                  - title: HTTP proxy → :14321
-                    url: http://127.0.0.1:14321/
-                  - title: control → :14322
-                    url: http://127.0.0.1:14322/
-          - type: clock
-            hour-format: 24h
+                  - { title: HTTP proxy → :14321, url: "http://localhost:14321/" }
+                  - { title: control → :14322, url: "http://localhost:14322/" }
 
-      # CENTER — live service health (status-first) + docker
+      # CENTER — live health + docker
       - size: full
         widgets:
-          - type: monitor
-            title: LLM stack
-            cache: 30s
-            sites:
-              - title: LiteLLM gateway
-                url: http://localhost:4000/health/liveliness
-                icon: si:openai
-              - title: llama-swap
-                url: http://localhost:9292/v1/models
-                icon: si:nvidia
-              - title: Open WebUI
-                url: http://localhost:8090/
-                icon: si:openwebgui
-              - title: Langfuse (traces)
-                url: http://localhost:3002/
-                icon: di:langfuse
-              - title: Grafana (local)
-                url: http://localhost:3000/
-                icon: di:grafana
-              - title: Tempo
-                url: http://localhost:3200/ready
-              - title: dictation E4B (:8083)
-                url: http://localhost:8083/health
-          - type: monitor
-            title: Local services
-            cache: 30s
-            sites:
-              - title: Qdrant
-                url: http://localhost:6333/
-                icon: di:qdrant
-              - title: sift-api
-                url: http://localhost:8788/
-                alt-status-codes: [404]
-              - title: Formbricks
-                url: http://localhost:3100/
-              - title: nitter
-                url: http://localhost:8085/
-              - title: wakezilla (WoL)
-                url: http://localhost:3001/
-              - title: Vite dev
-                url: http://localhost:5173/
+          # service-status cards generated from the registry by stack/gen-glance-services.py
+          # (only currently-listening ports are shown). Re-run on `stack up` to refresh.
+          - $include: this-machine-services.yml
           - type: docker-containers
             title: Docker containers
-            running-only: true            # hide stopped/exited noise
-            format-container-names: true  # foo-bar-1 → "Foo Bar 1"
+            running-only: true
+            format-container-names: true
 
-      # RIGHT — prioritized links (apps first), then observability, homelab, releases
+      # RIGHT — endpoints + stack commands + releases
       - size: small
         widgets:
           - type: bookmarks
-            title: Cortiq (prod · tailnet)
+            title: Stack endpoints
             groups:
-              - title: Apps
+              - title: Gateway & UI
                 links:
-                  - title: Sift (search)
-                    url: https://sift.cortiq-lab.sh
-                  - title: Oracle (reader)
-                    url: https://oracle.cortiq-lab.sh
-              - title: Observability — real SLAs here
+                  - { title: "litellm · :4000/ui", url: "http://nullsense-arch:4000/ui/", icon: si:openai }
+                  - { title: "llama-swap · :9292/ui", url: "http://localhost:9292/ui/", icon: si:nvidia }
+                  - { title: "Open WebUI · :8090", url: "http://nullsense-arch:8090/", icon: si:openwebui }
+              - title: Observability
                 links:
-                  - title: Grafana
-                    url: https://grafana.cortiq-lab.sh
-                    icon: di:grafana
-                  - title: Dokploy
-                    url: https://dokploy.cortiq-lab.sh
-                    icon: di:dokploy
-                  - title: Infisical
-                    url: https://infisical.cortiq-lab.sh
-                    icon: di:infisical
-                  - title: Zitadel (auth)
-                    url: https://zitadel.cortiq-lab.sh
+                  - { title: "Langfuse · :3002", url: "http://localhost:3002/", icon: di:langfuse }
+                  - { title: "Grafana · :3000", url: "http://localhost:3000/", icon: di:grafana }
+                  - { title: "Uptime Kuma · :3009", url: "http://localhost:3009/" }
           - type: bookmarks
-            title: Homelab (OnePlus)
+            title: stack commands  ·  ~/bin/stack
             groups:
               - links:
-                  - title: AdGuard Home
-                    url: http://adguard.home
-                    icon: di:adguard-home
-                  - title: Home Assistant
-                    url: http://ha.home
-                    icon: di:home-assistant
-          - type: bookmarks
-            title: Local LLM stack
-            groups:
-              - links:
-                  - title: Open WebUI (chat)
-                    url: http://localhost:8090
-                    icon: si:openwebgui
-                  - title: Langfuse (LLM traces)
-                    url: http://localhost:3002
-                  - title: Grafana (local · :3000)
-                    url: http://localhost:3000
-                    icon: di:grafana
-                  - title: uptime-kuma (:3009)
-                    url: http://localhost:3009
+                  - { title: "stack up — llama-swap + litellm + dashboards", url: "http://nullsense-arch:4000/ui/" }
+                  - { title: "stack obs — Grafana / Tempo / Langfuse", url: "http://localhost:3000/" }
+                  - { title: "stack status — health + loaded models", url: "http://localhost:9292/ui/" }
+                  - { title: "stack logs — tail litellm + llama-swap", url: "http://localhost:9292/ui/" }
           - type: releases
             title: Tooling updates
             cache: 6h
@@ -154,25 +89,36 @@ pages:
               - mostlygeek/llama-swap
               - ggml-org/llama.cpp
 
-  # ════════════════════════ STATUS — uptime detail ════════════════════════
-  - name: Status
+  # ═══════════════════════════ 2 · ONEPLUS-8T (oneplus-8t-homelab) ═══════════════════════════
+  - name: OnePlus-8T
+    width: wide
     columns:
       - size: full
         widgets:
+          - $include: oneplus-services.yml
           - type: monitor
-            title: All services (live)
-            cache: 20s
+            title: Desktop reachability  (health only — does NOT wake)
+            cache: 30s
             sites:
-              - { title: LiteLLM, url: "http://localhost:4000/", icon: si:openai }
-              - { title: llama-swap, url: "http://localhost:9292/v1/models", icon: si:nvidia }
-              - { title: Qdrant, url: "http://localhost:6333/", icon: di:qdrant }
-              - { title: sift-api, url: "http://localhost:8788/", alt-status-codes: [404] }
-              - { title: Formbricks, url: "http://localhost:3100/" }
-              - { title: nitter, url: "http://localhost:8085/" }
-              - { title: wakezilla, url: "http://localhost:3001/" }
-              - { title: Grafana (prod), url: "https://grafana.cortiq-lab.sh", allow-insecure: true }
-          # Uptime Kuma status page — real uptime% + history. Set up Kuma (see chat),
-          # create a public status page, then point this at /status/<your-slug>.
-          - type: iframe
-            source: http://localhost:3009/status/local
-            height: 550
+              - { title: "wakezilla health · nullsense-arch:3001", url: "http://nullsense-arch:3001/" }
+
+      - size: small
+        widgets:
+          - type: bookmarks
+            title: OnePlus admin (.home)
+            groups:
+              - links:
+                  - { title: AdGuard, url: "http://adguard.home/", icon: di:adguard-home }
+                  - { title: Home Assistant, url: "http://ha.home/", icon: di:home-assistant }
+          - type: bookmarks
+            title: Actions
+            groups:
+              - title: Wake desktop
+                links:
+                  - { title: "⏻ Wake nullsense-arch", url: "http://oneplus-8t-homelab:8080/wake/nullsense-arch" }
+              - title: Shell
+                links:
+                  - { title: "SSH · oneplus-8t-homelab:22", url: "ssh://u0_a171@oneplus-8t-homelab" }
+
+  # ═══════════════════════════ 3 · CORTIQ (generated: scripts/gen-glance) ═══════════════════════════
+  - $include: cortiq.yml

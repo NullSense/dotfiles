@@ -1,34 +1,50 @@
-# Friendly labels for localhost ports. Loaded by ~/bin/services.
+# Friendly labels for localhost ports. Loaded by ~/bin/services (Super+S).
 # Anything not listed here falls back to the process name from `ss`.
-# Format:  PORT = "Description"
-# Comments are # at the start of a line.
+# Format:  PORT = "Description"   ·   # comments at line start.
 
-# ─── Your stuff ──────────────────────────────────────────────────────────────
+# ─── Local LLM stack ─────────────────────────────────────────────────────────
+4000  = "litellm gateway — OpenAI API + UI (/ui)"
+9292  = "llama-swap — model swapper (/ui)"
+8090  = "Open WebUI — chat"
+3002  = "Langfuse — LLM traces"
+3009  = "Uptime Kuma — status"
+3200  = "Tempo — traces"
+9090  = "Prometheus — metrics"
+5433  = "litellm Postgres (litellm-db)"
+8083  = "Dictation E4B (llama-server)"
+8088  = "Glance — homelab dashboard"
+
+# ─── Cortiq / dev services ───────────────────────────────────────────────────
+3000  = "Grafana (local) / Next.js dev"
+3100  = "Formbricks"
+6333  = "Qdrant — REST"
+6334  = "Qdrant — gRPC"
+8788  = "sift-api"
+8085  = "nitter"
+5173  = "Vite dev"
+4173  = "Vite preview"
+
+# ─── Homelab / desktop ───────────────────────────────────────────────────────
+3001  = "wakezilla — desktop health client (WoL)"
+
+# ─── Agent Vault ─────────────────────────────────────────────────────────────
 14321 = "Agent Vault — credential broker UI"
 14322 = "Agent Vault — HTTPS proxy"
-# 8080 = "aiquota dashboard"          # uncomment & adjust if you wire one up
 
-# ─── Common dev servers ──────────────────────────────────────────────────────
-3000  = "Next.js / CRA / Express"
-3001  = "Alt dev server"
-3333  = "tinacms / refine"
-4000  = "Phoenix / Foundry / GraphQL"
-4173  = "Vite preview"
+# ─── Common dev / db defaults (fallbacks) ────────────────────────────────────
 5000  = "Flask / .NET / AirPlay"
-5173  = "Vite default"
-5432  = "PostgreSQL"
 5500  = "Live Server"
 6379  = "Redis"
 7860  = "Gradio"
 8000  = "Django / Python http.server"
 8080  = "Generic backend / Tomcat"
-8081  = "Webpack dev server"
 8888  = "Jupyter / pgAdmin"
 9000  = "MinIO / SonarQube"
-9090  = "Prometheus"
-9200  = "Elasticsearch"
 11434 = "Ollama"
-
-# ─── Databases (informational; ss will show them but they're not browsable) ──
+5432  = "PostgreSQL"
 3306  = "MySQL"
 27017 = "MongoDB"
+
+# Unknown 'node' ports seen recently — add labels if you recognise them:
+# 3055 = "?"
+# 4723 = "? (Appium default port)"

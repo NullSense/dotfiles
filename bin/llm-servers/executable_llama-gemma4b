@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # llama-server wrapper for Gemma 4 E4B-it via Vulkan (RADV) — PARALLEL summarization box.
 # Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
-# Model:    bartowski/google_gemma-4-E4B-it-GGUF (Q5_K_M, 5.5GB; MatFormer "effective 4B",
+# Model:    unsloth/gemma-4-E4B-it-qat-GGUF (UD-Q4_K_XL, 4.0GB; MatFormer "effective 4B",
 #           raw 7.5B params, 42 layers). Same gemma4 arch as llama-gemma4's 12B.
-# Card:     https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
+#           QAT (Quantization-Aware Training) + Unsloth dynamic: near-BF16 quality
+#           (E4B top-1 98.5% / mean-KLD 0.0012 vs 90.9% / 0.038 for naive Q4_0) at a
+#           SMALLER footprint than the old bartowski Q5_K_M (4.0 vs 5.5GB) → +1.5GB VRAM
+#           headroom for KV/parallel slots. Single file by design: Unsloth found precisions
+#           above UD-Q4_K_XL degrade the QAT lattice. Matching QAT-assistant MTP draft below.
+# Card:     https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF
 #
 # Purpose: high-throughput batch work (article summarization at -np N) and as the
 # cheap hyprwhspr-ai dictation backend. KV here is exceptionally cheap — SWA
@@ -22,8 +27,8 @@ set -euo pipefail
 export GGML_VK_VISIBLE_DEVICES=0
 export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
 
-MODEL_DIR="$HOME/.lmstudio/models/bartowski/google_gemma-4-E4B-it-GGUF"
-MODEL="${MODEL:-$MODEL_DIR/google_gemma-4-E4B-it-Q5_K_M.gguf}"
+MODEL_DIR="$HOME/.lmstudio/models/unsloth/gemma-4-E4B-it-qat-GGUF"
+MODEL="${MODEL:-$MODEL_DIR/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf}"
 SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots-gemma4b}"
 PORT="${PORT:-8083}"   # 8080 = qwen36, 8082 = gemma4 12B, 8081 = taken, 1234 = LM Studio
 CTX="${CTX:-65536}"    # POOLED across slots (--kv-unified). GGUF n_ctx_train = 131072.
@@ -49,7 +54,7 @@ esac
 # MMPROJ=on to enable image input.
 MMPROJ_ARGS=()
 if [[ "${MMPROJ:-off}" == "on" ]]; then
-  MMPROJ_ARGS=(--mmproj "$MODEL_DIR/mmproj-google_gemma-4-E4B-it-f16.gguf")
+  MMPROJ_ARGS=(--mmproj "$MODEL_DIR/mmproj-F16.gguf")
 fi
 
 # MTP speculative decoding (optional, default OFF). The llama-swap summarization

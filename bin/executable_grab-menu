@@ -61,10 +61,10 @@ case "$choice" in
   *) exit 0 ;;
 esac
 
-# Run in ghostty as a floating popup (Hyprland floats class com.mitchellh.ghostty-grab
+# Run in alacritty as a floating popup (Hyprland floats class com.mitchellh.ghostty-grab
 # — see windows.conf). URL passed via env (U) to avoid quoting/injection issues.
 # Window stays open after completion until you press enter.
-U="$url" NEEDS_URL="$needs_url" INNER="$inner" setsid ghostty --class=com.mitchellh.ghostty-grab -e bash -lc '
+U="$url" NEEDS_URL="$needs_url" INNER="$inner" setsid alacritty --class=com.mitchellh.ghostty-grab -e bash -lc '
   export PATH="$HOME/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
   cd "$HOME"
   U="$U"

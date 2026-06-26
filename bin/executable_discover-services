@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Discover localhost services → JSON.  Single source of truth (DRY) for BOTH the
+Win+S picker (~/bin/services) and the Glance generator (gen-glance-services.py).
+
+Autodiscovery, no hardcoded port list:
+  1. listening TCP ports + owning process       (ss -tlnHp)
+  2. docker container name, if the port is published by a container
+  3. HTTP <title> of http://127.0.0.1:PORT/      (concurrent, 0.5s timeout)
+  4. friendly OVERRIDE from ~/.config/services.toml  (highest priority — only for
+     things with no good auto title, e.g. databases, or to force a nicer name)
+
+Title precedence: override > docker name > HTML <title> > process name.
+Emits a JSON array of {port, proc, title, kind, url} on stdout.
+Cached at ~/.cache/services-discovery.json (TTL 30s; --no-cache to force).
+"""
+from __future__ import annotations
+import json, os, re, subprocess, sys, time, urllib.request
+from concurrent.futures import ThreadPoolExecutor
+
+CACHE = os.path.expanduser("~/.cache/services-discovery.json")
+TTL = 30
+OVERRIDES = os.path.expanduser("~/.config/services.toml")
+
+
+def listeners() -> dict[int, str]:
+    out = subprocess.run(["ss", "-tlnHp"], capture_output=True, text=True).stdout
+    seen: dict[int, str] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        m = re.search(r":(\d+)$", parts[3])
+        if not m:
+            continue
+        port = int(m.group(1))
+        proc = "?"
+        pm = re.search(r'users:\(\("([^"]+)"', line)
+        if pm:
+            proc = pm.group(1)
+        if port not in seen or seen[port] == "?":
+            seen[port] = proc
+    return seen
+
+
+def overrides() -> dict[int, str]:
+    m: dict[int, str] = {}
+    if os.path.exists(OVERRIDES):
+        for ln in open(OVERRIDES):
+            mm = re.match(r'^\s*(\d+)\s*=\s*"(.*)"', ln)
+            if mm:
+                m[int(mm.group(1))] = mm.group(2)
+    return m
+
+
+def docker_map() -> dict[int, str]:
+    m: dict[int, str] = {}
+    try:
+        out = subprocess.run(["docker", "ps", "--format", "{{.Names}}\t{{.Ports}}"],
+                             capture_output=True, text=True, timeout=2).stdout
+        for ln in out.splitlines():
+            name, _, ports = ln.partition("\t")
+            for p in re.findall(r":(\d+)->", ports):
+                m[int(p)] = name
+    except Exception:
+        pass
+    return m
+
+
+def probe(port: int) -> tuple[bool, str | None]:
+    """Return (is_http, html_title). is_http=True if the port speaks HTTP at all
+    (even a 4xx/5xx) — lets the dashboard skip raw-TCP services like databases."""
+    import urllib.error
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"User-Agent": "discover-services"})
+        with urllib.request.urlopen(req, timeout=0.5) as r:
+            body = r.read(8192).decode("utf-8", "ignore")
+    except urllib.error.HTTPError:
+        return True, None          # HTTP responded (404/401/etc) → browsable, no title
+    except Exception:
+        return False, None         # not HTTP (DB/raw TCP) or down
+    t = re.search(r"<title[^>]*>(.*?)</title>", body, re.I | re.S)
+    title = re.sub(r"\s+", " ", t.group(1)).strip()[:48] if t else None
+    return True, (title or None)
+
+
+def discover() -> list[dict]:
+    ls, ov, dk = listeners(), overrides(), docker_map()
+    ports = sorted(ls)
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        probes = dict(zip(ports, ex.map(probe, ports)))
+    rows = []
+    for port in ports:
+        is_http, html_title = probes[port]
+        if port in ov:
+            title, kind = ov[port], "override"
+        elif port in dk:
+            title, kind = dk[port], "docker"
+        elif html_title:
+            title, kind = html_title, "http"
+        else:
+            title, kind = None, "proc"
+        rows.append({"port": port, "proc": ls[port], "title": title, "kind": kind,
+                     "http": is_http, "url": f"http://localhost:{port}/"})
+    return rows
+
+
+def main():
+    if "--no-cache" not in sys.argv and os.path.exists(CACHE) and time.time() - os.path.getmtime(CACHE) < TTL:
+        sys.stdout.write(open(CACHE).read())
+        return
+    data = json.dumps(discover())
+    try:
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        open(CACHE, "w").write(data)
+    except Exception:
+        pass
+    sys.stdout.write(data)
+
+
+if __name__ == "__main__":
+    main()

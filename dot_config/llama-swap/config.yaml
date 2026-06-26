@@ -18,89 +18,212 @@ logLevel: info
 startPort: 9300           # ${PORT} auto-increments from here per model
 
 models:
-  # ── embeddings: sift + oracle. Keep this one effectively always-on (see groups) ──
-  embed:
+  # ── embeddings: sift + oracle. On-demand, evicts when idle (was ttl:0 always-on). ──
+  octen-embedding-4b:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-octen
     proxy: http://127.0.0.1:${PORT}
-    ttl: 0                # never auto-unload (still evictable for VRAM unless in a persistent group)
-    aliases: [octen-embed, qwen3-embedding-4b]
-    description: Octen-Embedding-4B (Qwen3-Embedding finetune), 2560-dim, last-token pooling
+    ttl: 300              # evict after 5 min idle (matches globalTTL); no longer pinned in VRAM
+    name: "Octen-Embedding-4B (Q8_0)"
+    aliases: [embed, octen-embed, qwen3-embedding-4b]
+    description: "embedding · Octen-Embedding-4B (Qwen3-Embedding finetune), 2560-dim, last-token pooling. Shared embedder for sift + oracle."
+    metadata: { class: embedding, thinking: na, best_for: "semantic search / RAG / retrieval", tags: [embedding, local, shared] }
+
+  # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), Vulkan GPU (~0.4 GB VRAM).
+  #    Used by litellm mcp_semantic_tool_filter. (On the live config it's co-resident with the
+  #    small models via the matrix var `t` so it never evicts the chat model.) First load
+  #    auto-downloads the official llama.cpp GGUF (~379 MB Q8_0); needs a llama.cpp build with
+  #    the `lfm2-bidir` arch (if the Vulkan backend lacks it, fall back to -ngl 0). Filter
+  #    fails-open (all tools) if it can't load.
+  lfm2-embed-350m:
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0 --embeddings --pooling cls --ctx-size 512 --ubatch-size 512 --device Vulkan0 -ngl 99 --host 127.0.0.1 --port ${PORT} --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 3600
+    name: "LFM2.5-Embedding-350M (tool search, Vulkan GPU)"
+    aliases: [embed-lfm, tool-embed, lfm2-embed]
+    description: "embed·tools · LFM2.5-Embedding-350M 1024-dim CLS, Vulkan GPU (~0.4 GB VRAM) — semantic MCP tool filter. Asymmetric query:/document: prefixes recommended."
+    metadata: { class: embed, thinking: na, best_for: "MCP tool semantic search (litellm mcp_semantic_tool_filter)", tags: [embed, tools, local, lfm2, gpu, vulkan] }
+
+  # ── embeddings (option): LFM2.5-Embedding-350M — tiny multilingual bi-encoder ──
+  # Separate from `embed` (Octen): different family + dim → NOT index-interchangeable.
+  # Asymmetric model — callers must prefix "query: " / "document: " (see HF card).
+  # ⚠ verify `llama-server` is on PATH and align Vulkan device/quant flags with llama-octen;
+  #   pin a quant via `-hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0` if you don't want default.
+  lfm25-embedding-350m:
+    cmd: env PORT=${PORT} llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF --embeddings --host 127.0.0.1 --port ${PORT} -ngl 99
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300                # on-demand (~0.4 GB, trivial to load); not always-resident like octen
+    name: "LFM2.5-Embedding-350M (GGUF)"
+    aliases: [embed-lfm, lfm25-embed]
+    description: "embedding · LiquidAI LFM2.5-Embedding-350M — multilingual bi-encoder (11 langs), one vector/doc, ~1.5ms query. Asymmetric (query:/document: prefixes). Separate from `embed`."
+    metadata: { class: embedding, thinking: na, best_for: "fast multilingual semantic search / MCP tool RAG", tags: [embedding, local, lfm2, multilingual, option] }
+
+  # ── thinking-toggle convention ─────────────────────────────────────────────────────────
+  # Each reasoning-capable model exposes two extra aliases:
+  #   <model-id>:think  →  forces thinking ON  (chat_template_kwargs.enable_thinking: true)
+  #   <model-id>:fast   →  forces thinking OFF (chat_template_kwargs.enable_thinking: false)
+  # Callers pick the alias; no body params needed. Verified schema: filters.setParamsByID,
+  # PR #535 (mostlygeek/llama-swap v228+). Keys auto-register as aliases AND are listed
+  # explicitly in aliases: for UI visibility. See docs/CAPABILITIES.md for the full table.
+  # ──────────────────────────────────────────────────────────────────────────────────────
 
   # ── summarization: cheap bulk model, escalation target ──
-  summarize-cheap:
+  gemma-4-e4b:
     cmd: env PORT=${PORT} MODE=sum /home/nullsense/bin/llm-servers/llama-gemma4b
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
-    aliases: [gemma4-e4b]
-    description: Gemma-4 E4B — fast bulk summaries (oracle summarize-cheap)
+    name: "Gemma-4 E4B-it (QAT UD-Q4_K_XL)"
+    aliases: [summarize-cheap, gemma4-e4b, gemma-e4b, "gemma-4-e4b:think", "gemma-4-e4b:fast"]
+    description: "summarize · Gemma-4 E4B QAT UD-Q4_K_XL — fast, faithful bulk summaries (0% fabrication on the oracle set), near-BF16 quality at 4.0GB. Thinking toggleable (default off). oracle's cheap-first summariser."
+    metadata: { class: summarize, thinking: "toggle (default off)", best_for: "faithful extractive summaries, instruction-following, dictation rewrite", tags: [summarize, instruct, local, gemma, faithful] }
+    filters:
+      setParamsByID:
+        "gemma-4-e4b:think":
+          chat_template_kwargs:
+            enable_thinking: true
+        "gemma-4-e4b:fast":
+          chat_template_kwargs:
+            enable_thinking: false
 
-  summarize-strong:
+  gemma-4-12b-opus:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-gemma4
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
-    aliases: [gemma4-12b, gemma4-opus-distill]
-    description: Gemma-4 12B Opus-distill + MTP — escalation only (oracle summarize-strong)
+    name: "Gemma-4 12B-it Claude-Opus-distill (Q4_K_M) + MTP"
+    aliases: [summarize-strong, gemma4-12b, gemma-12b, gemma4-opus-distill, "gemma-4-12b-opus:think", "gemma-4-12b-opus:fast"]
+    description: "summarize·reason · Gemma-4 12B Claude-Opus-distill + MTP — richer/analytical summaries, escalation target. Thinking toggleable (default on)."
+    metadata: { class: "summarize·reason", thinking: "toggle (default on)", best_for: "analytical summaries needing reasoning; escalation from summarize", tags: [summarize, reason, local, gemma, analytical] }
+    filters:
+      setParamsByID:
+        "gemma-4-12b-opus:think":
+          chat_template_kwargs:
+            enable_thinking: true
+        "gemma-4-12b-opus:fast":
+          chat_template_kwargs:
+            enable_thinking: false
 
-  # ── E4B quant ladder (2026-06-19 bench): same model as summarize-cheap (Q5_K_M)
-  #    at Q4_K_M / Q8_0. Finding: faithfulness is quant-robust (Q4≈Q5≈Q8, 0% fab/leak)
+  # ── E4B quant ladder (2026-06-19 bench): bartowski PTQ Q4_K_M / Q8_0 baselines.
+  #    summarize-cheap now runs unsloth QAT UD-Q4_K_XL (better+smaller); these stay as the
+  #    PTQ ablation baselines. Finding: faithfulness is quant-robust (Q4≈Q5≈Q8, 0% fab/leak)
   #    so Q4 = max VRAM savings with no faithfulness cost. Kept as on-demand alternates
   #    (ttl 120s = evict fast). See ~/Programming/llm-stack/docs/leaderboard.md. ──
-  e4b-q4:
+  gemma-4-e4b-q4:
     cmd: env PORT=${PORT} MODE=sum MODEL=/home/nullsense/.lmstudio/models/bartowski/google_gemma-4-E4B-it-GGUF/google_gemma-4-E4B-it-Q4_K_M.gguf /home/nullsense/bin/llm-servers/llama-gemma4b
     proxy: http://127.0.0.1:${PORT}
     ttl: 120
-    description: Gemma-4 E4B Q4_K_M — quant-ablation vs summarize-cheap (Q5_K_M)
-  e4b-q8:
+    name: "Gemma-4 E4B-it Q4_K_M (bench)"
+    aliases: [e4b-q4]
+    description: "summarize · Gemma-4 E4B Q4_K_M — quant-ablation vs gemma-4-e4b (QAT UD-Q4_K_XL). Max VRAM savings, faithfulness quant-robust."
+    metadata: { class: summarize, thinking: "toggle (default off)", best_for: "smallest-VRAM faithful summaries (bench)", tags: [summarize, local, gemma, bench] }
+  gemma-4-e4b-q8:
     cmd: env PORT=${PORT} MODE=sum MODEL=/home/nullsense/.lmstudio/models/bartowski/google_gemma-4-E4B-it-GGUF/google_gemma-4-E4B-it-Q8_0.gguf /home/nullsense/bin/llm-servers/llama-gemma4b
     proxy: http://127.0.0.1:${PORT}
     ttl: 120
-    description: Gemma-4 E4B Q8_0 — quant-ablation vs summarize-cheap (Q5_K_M)
+    name: "Gemma-4 E4B-it Q8_0 (bench)"
+    aliases: [e4b-q8]
+    description: "summarize · Gemma-4 E4B Q8_0 — quant-ablation vs gemma-4-e4b (QAT UD-Q4_K_XL). Highest-fidelity quant."
+    metadata: { class: summarize, thinking: "toggle (default off)", best_for: "highest-quant faithful summaries (bench)", tags: [summarize, local, gemma, bench] }
 
-  # ── candidate cheap summarizer being benchmarked vs the 12B ──
-  vibethinker-3b:
-    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-vibethinker
+  # ── dictation rewrite — DEDICATED MTP-optimized E4B (NP=1 + SPEC=on draft) ──
+  #    hyprwhspr dictation routes here via litellm `rewrite-fast`. llama-swap loads it ON
+  #    DEMAND and evicts on TTL → replaces the old always-on :8083 service (no permanent 5 GB).
+  #    SEPARATE from gemma-4-e4b (summarize, NP=4 SPEC=off) on purpose: MTP draft (~80% accept,
+  #    ~40% faster, p50 136 vs 227 ms) wins for single-stream dictation but FIGHTS NP=4 batch
+  #    summarization. Same weights, so llama-swap swaps between them on demand — alternating
+  #    dictation↔summarize reloads (~10 s); each evicts when idle. ttl 900 keeps it warm
+  #    through a dictation session. Thinking stays off per-request (hyprwhspr extra_body).
+  rewrite:
+    cmd: env PORT=${PORT} NP=1 MODE=sum SPEC=on /home/nullsense/bin/llm-servers/llama-gemma4b
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300
-    description: VibeThinker-3B (Qwen2.5-Coder reasoning) — summarization/dictation A/B
+    ttl: 900
+    name: "Rewrite · Gemma-4 E4B + MTP (dictation, NP=1)"
+    description: "rewrite · Gemma-4 E4B QAT UD-Q4_K_XL + matching QAT-MTP draft — low-latency dictation/transcript cleanup. On-demand via llama-swap (replaces the old always-on :8083 server)."
+    metadata: { class: rewrite, thinking: "none (off for speed)", best_for: "dictation/transcript rewrite, short low-latency cleanups", tags: [rewrite, dictation, local, gemma, mtp] }
+
 
   # ── LiquidAI LFM2 — tiny VRAM-cheap summarizer candidates (vs gemma E4B/12B) ──
   lfm2-2.6b:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-2.6B-GGUF/LFM2-2.6B-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.3 --top-p 0.95 --metrics
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-2.6B-Exp-GGUF/LFM2-2.6B-Exp-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.3 --top-p 0.95 --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
-    description: LFM2-2.6B (LiquidAI) — ~1.7GB, beats Gemma-3-4B, summarizer A/B vs E4B
+    name: "LFM2-2.6B-Exp (LiquidAI, RL-improved, tiny summarizer)"
+    description: "summarize (tiny) · LFM2-2.6B-Exp ~1.6GB — RL-improved checkpoint (better instruction-following + lower fabrication than base). A/B candidate."
+    metadata: { class: summarize, thinking: none, best_for: "low-stakes bulk summaries where VRAM is scarce", tags: [summarize, local, lfm2, tiny] }
   lfm2-1.2b-extract:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.1 --metrics
+    # --temp 0: model card MANDATES greedy decode; 0.1 added stochastic noise that can
+    #   corrupt JSON structure/field names (Phase A fix). --ctx-size 32768 matches the
+    #   model's real 32k window (was silently truncating longer docs at 16k).
+    #   (Plan's `--spec-ngram-cache-size-n` was dropped — no such flag in llama.cpp b9672.)
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 32768 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
-    description: LFM2-1.2B-Extract (LiquidAI Nanos) — ~0.8GB, purpose-built extraction/structured summary
+    name: "LFM2-1.2B-Extract (Q4_K_M, structured JSON)"
+    description: "extract · LFM2-1.2B-Extract ~0.8GB — purpose-built structured extraction (JSON/fields). Greedy decode (temp 0, mandated), 32k ctx. NOT a general summariser."
+    metadata: { class: extract, thinking: none, best_for: "structured field/JSON extraction from documents", tags: [extract, local, lfm2, tiny, json] }
 
-  # ── Phi-4 (14B) summarizer candidate — strong external hallucination numbers,
-  #    benchmarked vs gemma E4B on our faithfulness set (2026-06-19) ──
-  phi4:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/bartowski/phi-4-GGUF/phi-4-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.3 --top-p 0.95 --cache-type-k q8_0 --cache-type-v q8_0 --no-mmap --metrics
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 120
-    description: Phi-4 14B Q4_K_M (Microsoft) — faithfulness summarizer A/B vs gemma E4B
-
-  # ── abliterated/uncensored chat — Qwen3.6-35B-A3B Uncensored (Harmony) ──
-  #    Same 35B-A3B MoE arch as oracle-llm; MXFP4_MOE quant, MoE experts offloaded to
-  #    CPU (--n-cpu-moe 28) to fit 12 GB, built-in Harmony template (--jinja, no MTP).
-  #    Tested 2026-06-19: loads in ~19s, coherent. Slow (partial offload) — for the
-  #    occasional unaligned/uncensored request, not bulk work. ──
-  qwen-uncensored:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF/Qwen3.6-35B-A3B-Uncensored-Harmony-MXFP4_MOE.gguf --alias qwen-uncensored --host 127.0.0.1 --port ${PORT} --device Vulkan0 --fit off --n-gpu-layers 99 --n-cpu-moe 28 --ctx-size 16384 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --threads 8 --threads-batch 8 --no-mmap --jinja --metrics
+  # ── abliterated/uncensored chat — Qwen3.6-35B-A3B Uncensored (Wasserstein IQ3_M) ──
+  #    Phase B (2026-06-19): switched Harmony MXFP4_MOE (20 GB, --n-cpu-moe 28) → Wasserstein
+  #    IQ3_M (15 GB). MXFP4 gets NO FP4 accel on gfx1031 (software decode); IQ3_M is 5 GB
+  #    smaller → --n-cpu-moe 16 (vs 28) ≈ HALF the PCIe expert transfers per token = faster.
+  #    ⚠ --n-cpu-moe 16 assumes the full 12 GB is available — if the always-on dictation :8083
+  #    server is still up (~5 GB), this may spill; bump n-cpu-moe or finish the dictation fold.
+  qwen3.6-35b-uncensored:
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Wasserstein-GGUF/Qwen3.6-35B-A3B-Uncensored.IQ3_M.gguf --alias qwen-uncensored --host 127.0.0.1 --port ${PORT} --device Vulkan0 --fit off --n-gpu-layers 99 --n-cpu-moe 16 --ctx-size 16384 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --threads 8 --threads-batch 8 --no-mmap --jinja --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
-    description: Qwen3.6-35B-A3B Uncensored/Harmony (abliterated) MXFP4_MOE — MoE CPU-offload
+    name: "Qwen3.6-35B-A3B Uncensored (Wasserstein IQ3_M)"
+    aliases: [qwen-uncensored, "qwen3.6-35b-uncensored:think", "qwen3.6-35b-uncensored:fast"]
+    description: "chat·uncensored · Qwen3.6-35B-A3B Uncensored/Harmony MXFP4_MOE — unaligned chat/reasoning, MoE experts on CPU (slow, occasional use). Thinking toggleable."
+    metadata: { class: "chat·uncensored", thinking: "toggle", best_for: "unaligned/uncensored chat + reasoning (occasional, slow)", tags: [chat, uncensored, abliterated, local, qwen, moe] }
+    filters:
+      setParamsByID:
+        "qwen3.6-35b-uncensored:think":
+          chat_template_kwargs:
+            enable_thinking: true
+        "qwen3.6-35b-uncensored:fast":
+          chat_template_kwargs:
+            enable_thinking: false
 
   # ── general reasoning / coding (oracle-llm, big local chat) ──
-  oracle-llm:
+  qwen3.6-35b-a3b:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-qwen36
     proxy: http://127.0.0.1:${PORT}
     ttl: 600
-    aliases: [qwen3.6-a3b, qwen3.6-35b-a3b-apex]
-    description: Qwen3.6 35B-A3B (MoE) + MTP — oracle's optional local reasoning LLM
+    name: "Qwen3.6-35B-A3B MoE + MTP (reason/chat)"
+    aliases: [oracle-llm, qwen3.6-a3b, qwen3.6-35b-a3b-apex, "qwen3.6-35b-a3b:think", "qwen3.6-35b-a3b:fast"]
+    description: "reason·chat·instruct · Qwen3.6 35B-A3B (MoE, ~3B active) + MTP — strongest local reasoning + conversation. Thinking toggleable (MODE code/chat/fast → reasoning on/off)."
+    metadata: { class: "reason·chat·instruct", thinking: "toggle (code/chat=on, fast=off)", best_for: "reasoning, NER arbitration, multi-turn chat, agentic", tags: [reason, chat, instruct, local, qwen, moe] }
+    filters:
+      setParamsByID:
+        "qwen3.6-35b-a3b:think":
+          chat_template_kwargs:
+            enable_thinking: true
+        "qwen3.6-35b-a3b:fast":
+          chat_template_kwargs:
+            enable_thinking: false
+
+  # ── vision/OCR (on-demand, evicts fast) — callable via litellm `granite-vision` ──
+  #    mmproj (SigLIP2 encoder) is F16 and must NOT be quantized (dims not /32 → garbage,
+  #    per IBM convert-vision-models docs). Vision is sensitive to KV quant + flash-attn,
+  #    so this entry deliberately uses default f16 KV and NO flash-attn (Phase A spec).
+  granite-vision-3.3-2b:
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/ibm-granite/granite-vision-3.3-2b-GGUF/granite-vision-3.3-2b-Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/ibm-granite/granite-vision-3.3-2b-GGUF/mmproj-model-f16.gguf --device Vulkan0 --n-gpu-layers 99 --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    name: "Granite-Vision 3.3-2b (IBM, VLM/OCR)"
+    aliases: [granite-vision]
+    description: "vision · Granite-Vision 3.3-2b VLM/OCR ~2.36GB (Q4_K_M + f16 mmproj). Image understanding / OCR. Evicts in <1s."
+    metadata: { class: vision, thinking: na, best_for: "OCR, document/image understanding (tables, forms, charts)", tags: [vision, ocr, local, granite, multimodal] }
+
+  # ── OCR — chandra-ocr-2 Q5_K_M (Phase B download). Vision is KV-quant + flash-attn
+  #    sensitive, so default f16 KV and NO flash-attn (sharper fine-grained OCR). On-demand.
+  chandra-ocr-2:
+    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/prithivMLmods/chandra-ocr-2-GGUF/chandra-ocr-2.Q5_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/prithivMLmods/chandra-ocr-2-GGUF/chandra-ocr-2.mmproj-f16.gguf --device Vulkan0 --n-gpu-layers 99 --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    name: "Chandra-OCR-2 (Q5_K_M, fine-grained OCR)"
+    aliases: [chandra]
+    description: "vision·ocr · Chandra-OCR-2 Q5_K_M ~3.9GB (LM + f16 mmproj). Sharper OCR on tables/forms/small digits than granite. On-demand."
+    metadata: { class: vision, thinking: na, best_for: "high-fidelity OCR — tables, forms, license plates, small text", tags: [vision, ocr, local, chandra, multimodal] }
 
   # ── GLiNER2 NER is ORACLE-OWNED, not in this stack (decided 2026-06-18). Oracle runs it
   #     in-process/sidecar with GLINER2_DEVICE=auto (GPU when a card is present, CPU fallback).

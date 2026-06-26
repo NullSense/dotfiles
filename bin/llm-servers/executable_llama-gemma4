@@ -61,11 +61,14 @@ esac
 # MTP speculative decoding. The card recommends n-max 4, but it also warns the
 # stock drafter has a lower hit rate on this finetune — live sessions measured
 # 23-42% acceptance (~1.1 accepted per 4-token draft round), where 4-deep
-# drafting is mostly waste. n-max 2 keeps the upside on agreeable spans and
-# halves the wasted draft work. SPECN=4 to restore the card's setting,
-# SPEC=off to disable speculation entirely (for A/B against plain decode).
+# drafting is mostly waste. BUT this wrapper now serves summarize-strong only
+# (long outputs) — dictation moved to the E4B — and for long generations n-max 4
+# amortizes draft overhead across far more verified tokens per round, matching the
+# card's own recommendation (~1.3x greedy / ~1.2x thinking). Speculation is lossless,
+# so the only risk is wasted draft compute on low-acceptance spans; default 4 per the
+# card. SPECN=2 reverts to the conservative dictation-era value, SPEC=off disables it.
 SPEC="${SPEC:-on}"
-SPECN="${SPECN:-2}"
+SPECN="${SPECN:-4}"
 SPEC_ARGS=()
 if [[ "$SPEC" == "on" ]]; then
   SPEC_ARGS=(

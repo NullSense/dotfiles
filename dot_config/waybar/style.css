@@ -297,8 +297,13 @@ window#waybar.hidden { opacity: 0; }
     animation: blink 1s linear infinite alternate;
 }
 #custom-aiquota.stale    { color: @gray; }
-/* unauth fallback (agent-vault session expired) — dim, distinct from critical */
-#custom-aiquota.unauth   { color: @orange; }
+/* wrapper error pill (binary missing / timeout / panic) — what aiquota-wrap.sh
+ * actually emits on failure; distinct from .critical */
+#custom-aiquota.error    { color: @orange; }
+
+/* mode-pin hint — subtle border when a click pins the bar to a non-auto window */
+#custom-aiquota.mode-5h,
+#custom-aiquota.mode-7d   { border-bottom: 1px dotted @gray; }
 
 /* ============================================================
  * Attention indicators — agents waiting + sudo open

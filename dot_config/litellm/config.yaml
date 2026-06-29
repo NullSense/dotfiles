@@ -81,7 +81,7 @@ model_list:
 - model_name: summarize-cheap
   litellm_params:                      # DEV → local Gemma-4 E4B NVFP4 via vLLM (FP8 KV), :8000
     model: openai/summarize-vllm
-    api_base: http://127.0.0.1:8000/v1
+    api_base: http://127.0.0.1:8001/v1
     api_key: "EMPTY"
     input_cost_per_token: 0
     output_cost_per_token: 0

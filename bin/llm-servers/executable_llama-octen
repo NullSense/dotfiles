@@ -27,8 +27,10 @@ MODEL_DIR="$HOME/.lmstudio/models/$REPO"
 MODEL="${MODEL:-$MODEL_DIR/$FILE}"
 PORT="${PORT:-8080}"
 CTX="${CTX:-32768}"        # Octen/Qwen3-Embedding native max sequence length
-UBATCH="${UBATCH:-4096}"   # -ub (physical) 4096 — drives the compute buffer / VRAM
-BATCH="${BATCH:-8192}"     # -b (logical) 8192 — lets 4 concurrent slots fill one batch;
+UBATCH="${UBATCH:-1024}"   # -ub (physical) — drives the compute buffer / VRAM. 1024 (was 4096):
+                           #   4096 ballooned the embed server to ~11.7GB on the 5090 and starved
+                           #   vLLM; 1024 keeps it ~5-6GB with ample embedding throughput.
+BATCH="${BATCH:-2048}"     # -b (logical) 2048 — lets the slots fill one batch;
                            #   bigger logical batch = fewer CPU→GPU rounds, no extra VRAM
 PARALLEL="${PARALLEL:-4}"  # 4 slots un-serialize sift indexing (parallel=1 queued every
                            #   request). ctx is split across slots (32k/4=8k/slot), so the
@@ -75,8 +77,8 @@ exec -a "octen-embed@${PORT}.llama-server" llama-server \
   --ubatch-size "$UBATCH" \
   --parallel "$PARALLEL" \
   --flash-attn on \
-  --cache-type-k f16 \
-  --cache-type-v f16 \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
   --threads 8 \
   --threads-batch 8 \
   --no-mmap \

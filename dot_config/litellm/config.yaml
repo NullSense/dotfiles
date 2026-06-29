@@ -26,10 +26,26 @@
 # `metadata` block (backend, vram, quant, tok/s, quality from OUR faithfulness bench, tags).
 # Costs are USD per TOKEN (OpenRouter $/1M ÷ 1e6). Quality = overall/5 on the oracle v5
 # summariser set, judged by a consistent Claude rubric (see docs/leaderboard.md); tok/s are
-# measured on the RX 6750 XT (gfx1031, llama.cpp Vulkan) and approximate (≈).
+# measured on the retired RX 6750 XT (Vulkan); now RTX 5090/CUDA so real tok/s is HIGHER — treat these as stale lower bounds (≈).
 
 model_list:
   # ── embeddings (sift, oracle) — local always ──────────────────────────────────
+- model_name: embed-lfm
+  litellm_params:
+    model: openai/embed-lfm                 # → llama-swap alias embed-lfm (LFM2.5-Embedding-350M, CPU)
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["embedding", "local", "lfm2", "multilingual"]
+  model_info:
+    mode: embedding
+    max_input_tokens: 512
+    metadata:
+      display_name: "Embed-LFM · LFM2.5-Embedding-350M (CPU, 1024-dim)"
+      backend: "llama.cpp CUDA (RTX 5090) · LFM2.5-Embedding-350M-GGUF Q8_0, ~0.4 GB VRAM"
+      role: "MCP tool semantic filter + fast multilingual embed (alias: tool-embed)"
+      source_url: https://huggingface.co/LiquidAI/LFM2.5-Embedding-350M
 - model_name: embed
   litellm_params:
     model: openai/embed                    # embeddings dialect — keep openai/ (llamafile provider is chat-only)
@@ -49,38 +65,12 @@ model_list:
     max_input_tokens: 8192
     metadata:
       display_name: "Embed · Octen-Embedding-4B (local)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · Octen-Embedding-4B (Qwen3-Embedding-4B finetune), 2560-dim"
+      backend: "llama.cpp CUDA (RTX 5090) · Octen-Embedding-4B (Qwen3-Embedding-4B finetune), 2560-dim"
       vram: "~4.4 GB"
       quant: "Q?_K_M"
       role: "shared embedder for sift + oracle"
       tags: ["embedding", "local", "shared", "qwen3-embedding"]
       source_url: https://huggingface.co/Qwen/Qwen3-Embedding-4B
-
-  # ── embeddings (option): LFM2.5-Embedding-350M — fast multilingual, separate from `embed` ──
-- model_name: embed-lfm
-  litellm_params:
-    model: openai/embed-lfm                 # → llama-swap alias embed-lfm (LFM2.5-Embedding-350M)
-    api_base: http://127.0.0.1:9292/v1
-    api_key: "none"
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-    tags:
-    - "embedding"
-    - "local"
-    - "lfm2"
-    - "multilingual"
-  model_info:
-    mode: embedding
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-    max_input_tokens: 8192
-    metadata:
-      display_name: "Embed · LFM2.5-Embedding-350M (local, option)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · LiquidAI LFM2.5-Embedding-350M, multilingual bi-encoder"
-      vram: "~0.4 GB"
-      role: "fast/multilingual embedder option — asymmetric (query:/document: prefixes); NOT interchangeable with `embed` (different dim)"
-      tags: ["embedding", "local", "lfm2", "multilingual", "option"]
-      source_url: https://huggingface.co/LiquidAI/LFM2.5-Embedding-350M
 
   # ── INTENT ROUTES: summarize-cheap / summarize-strong / oracle-llm ─────────────
   # These are load-bearing contract names for oracle (apps/ingest/summarize.py) + sift.
@@ -111,7 +101,7 @@ model_list:
     max_output_tokens: 8192
     metadata:
       display_name: "Summarize-cheap · Gemma-4 E4B (local, dev)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-E4B-it"
+      backend: "llama.cpp CUDA (RTX 5090) · gemma-4-E4B-it"
       quant: "Q5_K_M"
       vram: "5.1 GB"
       tokens_per_second: "≈49 single / ≈171 aggregate (NP=4)"
@@ -147,6 +137,35 @@ model_list:
       tags: ["summarization", "cloud", "deepseek", "cheap"]
       source_url: https://openrouter.ai/deepseek/deepseek-v4-flash
 
+  # ── summarize-fallback: env-independent DeepSeek-v4-flash (gateway failure fallback) ──
+  #    No supported_environments key → loaded in BOTH dev and prod, so a failed
+  #    local Gemma (dev) fails over to DeepSeek cloud "via litellm". Requires
+  #    OPENROUTER_API_KEY in the gateway env (same as the prod summarize deploys).
+- model_name: summarize-fallback
+  litellm_params:                      # BOTH envs → cloud DeepSeek-v4-flash via OpenRouter
+    model: openrouter/deepseek/deepseek-v4-flash
+    api_key: "os.environ/OPENROUTER_API_KEY"
+    input_cost_per_token: 9e-08
+    output_cost_per_token: 1.8e-07
+    tags:
+    - "summarization"
+    - "cloud"
+    - "deepseek"
+    - "fallback"
+  model_info:
+    mode: chat
+    supports_function_calling: true
+    input_cost_per_token: 0.00000009
+    output_cost_per_token: 0.00000018
+    max_input_tokens: 131072
+    max_output_tokens: 8192
+    metadata:
+      display_name: "Summarize-fallback · DeepSeek-v4-flash (cloud, both envs)"
+      backend: "OpenRouter · deepseek/deepseek-v4-flash"
+      vram: "0 (hosted)"
+      tags: ["summarization", "cloud", "deepseek", "fallback"]
+      source_url: https://openrouter.ai/deepseek/deepseek-v4-flash
+
   # ── summarize-strong: escalation target (oracle) ──────────────────────────────
 - model_name: summarize-strong
   litellm_params:                      # DEV → local Gemma-4 12B Opus-distill (7.4 GB)
@@ -171,7 +190,7 @@ model_list:
     max_output_tokens: 8192
     metadata:
       display_name: "Summarize-strong · Gemma-4 12B Opus-distill (local, dev)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-12B-it Claude-4.6/4.8-Opus-distill + MTP draft"
+      backend: "llama.cpp CUDA (RTX 5090) · gemma-4-12B-it Claude-4.6/4.8-Opus-distill + MTP draft"
       quant: "Q4_K_M"
       vram: "7.4 GB"
       tokens_per_second: "≈66 (MTP, 68% accept)"
@@ -230,7 +249,7 @@ model_list:
     max_output_tokens: 8192
     metadata:
       display_name: "Oracle-LLM · Qwen3.6 35B-A3B MoE (local, dev)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · Qwen3.6 35B-A3B (MoE, ~3B active) + MTP"
+      backend: "llama.cpp CUDA (RTX 5090) · Qwen3.6 35B-A3B (MoE, ~3B active) + MTP"
       role: "NER arbitration / span-refine / local reasoning"
       tags: ["reasoning", "local", "qwen", "moe"]
       source_url: https://huggingface.co/Qwen/Qwen3.6-35B-A3B
@@ -313,7 +332,7 @@ model_list:
     max_output_tokens: 8192
     metadata:
       display_name: "Gemma-4 E4B · google/gemma-4-E4B-it (local, Q5_K_M)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-E4B-it"
+      backend: "llama.cpp CUDA (RTX 5090) · gemma-4-E4B-it"
       quant: "Q5_K_M"
       vram: "5.1 GB"
       tokens_per_second: "≈49 single / ≈171 aggregate (NP=4)"
@@ -377,7 +396,7 @@ model_list:
     max_output_tokens: 8192
     metadata:
       display_name: "Gemma-4 12B Opus-distill · google/gemma-4-12B-it-Opus-distill (local, Q4_K_M)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · gemma-4-12B-it Claude-Opus-distill + MTP"
+      backend: "llama.cpp CUDA (RTX 5090) · gemma-4-12B-it Claude-Opus-distill + MTP"
       quant: "Q4_K_M"
       vram: "7.4 GB"
       tokens_per_second: "≈66 (MTP, 68% accept)"
@@ -409,7 +428,7 @@ model_list:
     max_input_tokens: 16384
     metadata:
       display_name: "LFM2-2.6B · LiquidAI/LFM2-2.6B (local, tiny)"
-      backend: "llama.cpp Vulkan · LiquidAI/LFM2-2.6B"
+      backend: "llama.cpp CUDA · LiquidAI/LFM2-2.6B"
       quant: "Q4_K_M"
       vram: "1.7 GB"
       quality_overall: 4.14
@@ -440,7 +459,7 @@ model_list:
     max_input_tokens: 16384
     metadata:
       display_name: "LFM2-1.2B-Extract · LiquidAI/LFM2-1.2B-Extract (local, tiny)"
-      backend: "llama.cpp Vulkan · LiquidAI/LFM2-1.2B-Extract"
+      backend: "llama.cpp CUDA · LiquidAI/LFM2-1.2B-Extract"
       quant: "Q4_K_M"
       vram: "0.8 GB"
       quality_overall: 1.44
@@ -495,7 +514,7 @@ model_list:
     max_input_tokens: 16384
     metadata:
       display_name: "Qwen3.6-35B Uncensored · LuffyTheFox/Qwen3.6-35B-A3B-Uncensored (local)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · LuffyTheFox Qwen3.6-35B-A3B-Uncensored-Harmony MXFP4_MOE (MoE experts on CPU, n-cpu-moe 28)"
+      backend: "llama.cpp CUDA (RTX 5090) · LuffyTheFox Qwen3.6-35B-A3B-Uncensored-Harmony MXFP4_MOE (MoE experts on CPU, n-cpu-moe 28)"
       vram: "partial — ~6-8 GB GPU + experts in RAM; slow (offload)"
       quant: "MXFP4_MOE"
       role: "uncensored/unaligned chat + reasoning"
@@ -526,7 +545,7 @@ model_list:
     supports_vision: true
     metadata:
       display_name: "Granite-Vision 3.3-2b · ibm-granite/granite-vision-3.3-2b (local, VLM/OCR)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · granite-vision-3.3-2b Q4_K_M + f16 mmproj (SigLIP2)"
+      backend: "llama.cpp CUDA (RTX 5090) · granite-vision-3.3-2b Q4_K_M + f16 mmproj (SigLIP2)"
       quant: "Q4_K_M (LLM) + F16 (mmproj)"
       vram: "~2.36 GB"
       role: "image understanding / OCR — callable by oracle, Docling, hyprwhspr, scripts"
@@ -556,7 +575,7 @@ model_list:
     supports_vision: true
     metadata:
       display_name: "Chandra-OCR-2 · prithivMLmods/chandra-ocr-2 (local, fine-grained OCR)"
-      backend: "llama.cpp Vulkan (RX 6750 XT) · chandra-ocr-2 Q5_K_M + f16 mmproj"
+      backend: "llama.cpp CUDA (RTX 5090) · chandra-ocr-2 Q5_K_M + f16 mmproj"
       quant: "Q5_K_M (LLM) + F16 (mmproj)"
       vram: "~3.9 GB"
       role: "high-fidelity OCR (tables, forms, small digits) — sharper than granite"
@@ -589,7 +608,7 @@ model_list:
     max_input_tokens: 131072
     metadata:
       display_name: "Gemma-4 E4B Q4_K_M · google/gemma-4-E4B-it:Q4_K_M (smallest, max VRAM savings)"
-      backend: "llama.cpp Vulkan · gemma-4-E4B-it"
+      backend: "llama.cpp CUDA · gemma-4-E4B-it"
       quant: "Q4_K_M"
       vram: "~4.5 GB"
       quality_overall: 4.14
@@ -620,7 +639,7 @@ model_list:
     max_input_tokens: 131072
     metadata:
       display_name: "Gemma-4 E4B Q8_0 · google/gemma-4-E4B-it:Q8_0 (highest quant)"
-      backend: "llama.cpp Vulkan · gemma-4-E4B-it"
+      backend: "llama.cpp CUDA · gemma-4-E4B-it"
       quant: "Q8_0"
       vram: "~8 GB"
       quality_overall: 4.21
@@ -660,7 +679,7 @@ model_list:
     max_output_tokens: 2048
     metadata:
       display_name: "Rewrite-fast · Gemma-4 E4B + MTP (dictation, on-demand via llama-swap)"
-      backend: "llama.cpp Vulkan · gemma-4-E4B-it Q5_K_M + MTP draft (llama-swap `rewrite`, NP=1 SPEC=on, on-demand)"
+      backend: "llama.cpp CUDA · gemma-4-E4B-it Q5_K_M + MTP draft (llama-swap `rewrite`, NP=1 SPEC=on, on-demand)"
       vram: "5.1 GB (on-demand; evicts on 900s TTL)"
       tokens_per_second: "MTP ≈40% faster than plain (p50 ≈136 vs 227 ms; ~80% draft accept)"
       role: "hyprwhspr-ai dictation rewrite — gateway → dedicated MTP llama-swap model"
@@ -936,8 +955,10 @@ litellm_settings:
   num_retries: 2
   request_timeout: 600          # local models + cold-swap loads can be slow
   drop_params: true             # tolerate clients sending params a backend doesn't support
-  # Escalation safety net at the gateway too (oracle also gates in-app):
-  fallbacks: ["summarize-cheap": ["summarize-strong"]]
+  # Failure-fallback at the gateway (oracle also gates in-app): a failed/unreachable
+  # summarize-cheap (local Gemma E4B in dev) fails over FIRST to DeepSeek-v4-flash
+  # cloud (env-independent), then to summarize-strong as a last resort.
+  fallbacks: ["summarize-cheap": ["summarize-fallback", "summarize-strong"]]
 
   # ── EXACT response cache (safe: byte-identical request → identical answer). NOT
   #    semantic — semantic carries a 3-8% wrong-answer false-hit rate, unacceptable for

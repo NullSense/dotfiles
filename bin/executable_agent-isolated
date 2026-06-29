@@ -471,6 +471,12 @@ case "$AGENT" in
         ;;
 esac
 
+# Shared litellm gateway key — claude/codex/opencode all reach the local litellm
+# MCP gateway (litellm.lan:4000/mcp). Forward the virtual key so the MCP
+# `${LLM_MCP_KEY}` Authorization header expands inside the sandbox. Raw key lives
+# in Infisical (Personal project root), injected by the shim's `infisical run`.
+[[ -n "${LLM_MCP_KEY:-}" ]] && ARGS+=( --setenv LLM_MCP_KEY "$LLM_MCP_KEY" )
+
 # Default signing agent: bind the sign-only ssh-agent socket
 # (git-sign-agent.service) and point SSH_AUTH_SOCK at it, so agents make SIGNED
 # commits with no flag. NOT the Bitwarden agent — this key can't auth anywhere
@@ -590,21 +596,37 @@ if (( ALLOW_PLANNOTATOR )); then
     ARGS+=( --setenv BROWSER "/usr/bin/echo" )
 fi
 
-# Default-on: GPU passthrough. Bind the AMD compute device nodes so ROCm/HIP
-# (rocminfo, PyTorch, llama.cpp HIP/Vulkan) can see the GPU from inside the
-# sandbox. The earlier `--dev /dev` builds a minimal devtmpfs that OMITS
-# /dev/kfd and the /dev/dri render nodes, which is why a sandboxed agent saw
-# "No HIP GPUs are available" even with sandboxing off-by-flag. Binding onto
-# the already-mounted /dev devtmpfs is the standard ROCm-in-container pattern
-# (mirrors Docker's `--device=/dev/kfd --device=/dev/dri`). The nodes are 0666
-# and credential-free, so this adds no secret surface; --dev-bind-try is a
-# no-op on hosts without the GPU, so the wrapper stays portable. --no-gpu opts
-# out for a run that wants zero device access.
+# Default-on: GPU passthrough. Bind the AMD (ROCm/HIP) and NVIDIA (CUDA)
+# compute device nodes so GPU compute (rocminfo, PyTorch, llama.cpp) can see
+# the GPU from inside the sandbox. The earlier `--dev /dev` builds a minimal
+# devtmpfs that OMITS these, which is why a sandboxed agent saw "No HIP GPUs
+# are available" (AMD) / "no CUDA-capable device is detected" (NVIDIA) even
+# with sandboxing off-by-flag. Binding onto the already-mounted /dev devtmpfs
+# is the standard GPU-in-container pattern (mirrors Docker's
+# `--device=/dev/kfd --device=/dev/dri` / nvidia-container-runtime). The nodes
+# are 0666 and credential-free, so this adds no secret surface; --dev-bind-try
+# is a no-op on hosts missing a node, so the wrapper stays portable across the
+# AMD->NVIDIA transition. --no-gpu opts out for a run that wants zero device
+# access.
+#
+# NOTE: the DRM render node (/dev/dri) alone only satisfies *Vulkan*. CUDA
+# additionally needs the /dev/nvidia* character devices below — without
+# /dev/nvidiactl + /dev/nvidia-uvm, CUDA init fails while Vulkan still works.
 if (( ALLOW_GPU )); then
     ARGS+=(
         --dev-bind-try /dev/kfd /dev/kfd
         --dev-bind-try /dev/dri /dev/dri
+        --dev-bind-try /dev/nvidiactl /dev/nvidiactl
+        --dev-bind-try /dev/nvidia-uvm /dev/nvidia-uvm
+        --dev-bind-try /dev/nvidia-uvm-tools /dev/nvidia-uvm-tools
+        --dev-bind-try /dev/nvidia-modeset /dev/nvidia-modeset
+        --dev-bind-try /dev/nvidia-caps /dev/nvidia-caps
     )
+    # Per-GPU device nodes (/dev/nvidia0, /dev/nvidia1, …) — enumerate so
+    # multi-GPU hosts work; the -e guard keeps it a no-op when none exist.
+    for _nv in /dev/nvidia[0-9]*; do
+        [[ -e "$_nv" ]] && ARGS+=( --dev-bind-try "$_nv" "$_nv" )
+    done
 fi
 
 # chdir
@@ -694,6 +716,10 @@ if (( SELF_TEST )); then
       run pos "GPU /dev/kfd exposed (ROCm)"    'test -e /dev/kfd && echo present'
     [[ -e /dev/dri/renderD128 ]] && \
       run pos "GPU render node exposed"        'test -e /dev/dri/renderD128 && echo present'
+    [[ -e /dev/nvidiactl ]] && \
+      run pos "GPU /dev/nvidiactl exposed (CUDA)" 'test -e /dev/nvidiactl && echo present'
+    [[ -e /dev/nvidia-uvm ]] && \
+      run pos "GPU /dev/nvidia-uvm exposed (CUDA)" 'test -e /dev/nvidia-uvm && echo present'
 
     echo
     printf "── %d passed, %d failed ──\n" "$pass" "$fail"

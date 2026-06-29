@@ -10,8 +10,6 @@ path=(
   $HOME/.cargo/bin
   $HOME/.bun/bin
   $HOME/.local/share/pnpm
-  /opt/rocm/bin
-  /opt/rocm/hip/bin
   $path
 )
 
@@ -30,20 +28,6 @@ export COLORTERM=truecolor TERMINAL=alacritty
 export XDG_CURRENT_DESKTOP
 export MOZ_ENABLE_WAYLAND=1
 export QT_QPA_PLATFORM=wayland QT_WAYLAND_DISABLE_WINDOWDECORATION=1
-
-# AMD ROCm (RX 6750 XT) — Arch's ROCm 7.x has no /opt/rocm/hip subdir.
-# Gated on /opt/rocm so non-GPU systems don't inherit a phantom lib path.
-# The case-test prevents the LD_LIBRARY_PATH entry from accumulating duplicates
-# when zshrc is sourced inside an already-set environment (nested zsh, IDE
-# integrated terminals, tmux respawns) — previously each child shell prepended
-# another copy.
-if [[ -d /opt/rocm/lib ]]; then
-  export ROCM_PATH=/opt/rocm HIP_PATH=/opt/rocm
-  case ":${LD_LIBRARY_PATH:-}:" in
-    *":$ROCM_PATH/lib:"*) ;;
-    *) export LD_LIBRARY_PATH="$ROCM_PATH/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
-  esac
-fi
 
 export BUN_INSTALL="$HOME/.bun"
 export PNPM_HOME="$HOME/.local/share/pnpm"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# llama-server wrapper for VibeThinker-3B (WeiboAI) via Vulkan (RADV) — reasoning test box.
-# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# llama-server wrapper for VibeThinker-3B (WeiboAI) via CUDA (RTX 5090) — reasoning test box.
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RTX 5090 (32GB, Blackwell sm_120) + 64GB DDR5-5800
 # Model:    mradermacher/VibeThinker-3B-GGUF (Q8_0, ~3.3GB; near-lossless).
 #           Qwen2.5-Coder-3B base (3B dense, 36 layers, vocab 151936), RL-distilled for
 #           MATH / CODING / STEM reasoning. NOT trained on tool-calling, agents, instruction
@@ -18,16 +18,15 @@
 #   102400. It reasons before answering; --reasoning auto extracts the thought block into the
 #   API's reasoning_content so `content` carries only the final answer (clean for benchmarks).
 #
-# Why Vulkan, not ROCm/HIP: ROCm 7.2.3 has no gfx1031 Tensile library (see llama-qwen36);
-#   Vulkan/RADV is the stable RDNA2 path.
+# Backend: CUDA on the RTX 5090 (llama.cpp-cuda build); AMD/Vulkan retired 2026-06. Unlike the
+#   Gemma wrappers, spec-decode here is `draft-simple` (a Qwen2.5 head_dim=128 draft), so
+#   flash-attn + q8 KV are fine (the fattn.cu:110 abort is Gemma-head_dim-256-specific).
 # Why Q8_0: it's a reasoning model (quant-sensitive for chain quality) and only 3B — Q8_0
 #   fully offloads with gigabytes to spare, so we take near-lossless quality for free.
 set -euo pipefail
 
-# Discrete GPU only — index 1 is the Raphael iGPU we don't want kernels on.
-export GGML_VK_VISIBLE_DEVICES=0
-# Mesa 26+ dedicated transfer queue (see llama-qwen36 rationale).
-export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+# Single CUDA GPU (RTX 5090).
+export CUDA_VISIBLE_DEVICES=0
 
 REPO="mradermacher/VibeThinker-3B-GGUF"
 FILE="${FILE:-VibeThinker-3B.Q8_0.gguf}"
@@ -95,7 +94,7 @@ exec -a "vibethinker-3b@${PORT}.llama-server" llama-server \
   --model "$MODEL" \
   --alias "vibethinker-3b" \
   --host 127.0.0.1 --port "$PORT" \
-  --device Vulkan0 \
+  --device CUDA0 \
   --fit off \
   --n-gpu-layers 99 \
   --ctx-size "$CTX" \

@@ -1,5 +1,5 @@
 [Unit]
-Description=hyprwhspr dictation rewrite backend — Gemma-4 E4B + MTP (llama.cpp Vulkan, :8083)
+Description=hyprwhspr dictation rewrite backend — Gemma-4 E4B + MTP (llama.cpp CUDA, :8083)
 Documentation=https://github.com/NullSense/hyprwhspr-ai
 After=graphical-session.target
 

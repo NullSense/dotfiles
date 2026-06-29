@@ -19,7 +19,7 @@
 # )
 
 # GPU access for Vulkan (llama.cpp --device Vulkan0 / GGML_VK_VISIBLE_DEVICES=0).
-# Binds /dev/dri (card0 + renderD128) so Mesa/RADV can enumerate the RX 6750 XT.
+# Binds /dev/dri (card0 + renderD128) so Mesa/RADV can enumerate the RTX 5090.
 # /sys is bound read-only because Mesa reads sysfs during device enumeration;
 # without it some Mesa code paths refuse to initialise.
 # /dev/kfd is NOT needed — that's ROCm compute only, not Vulkan.

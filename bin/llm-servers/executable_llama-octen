@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# llama-server wrapper for Octen-Embedding-4B (Sift's embedding backend) via Vulkan (RADV)
-# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# llama-server wrapper for Octen-Embedding-4B (Sift's embedding backend) via CUDA (RTX 5090)
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RTX 5090 (32GB, Blackwell sm_120) + 64GB DDR5-5800
 # Model:    mradermacher/Octen-Embedding-4B-GGUF (Q8_0, ~4.4GB)
 #           LoRA finetune of Qwen/Qwen3-Embedding-4B — qwen3 arch, 36 layers, 2560-dim,
 #           32k ctx, LAST-token pooling, L2-normalized.
@@ -11,20 +11,15 @@
 # Qwen3-Embedding-4B finetune it keeps the SAME 2560 dims → drop-in replacement, NO Qdrant
 # reindex. Start this, then `moon run sift:run`.
 #
-# Why Vulkan, not ROCm/HIP: ROCm lacks a gfx1031 Tensile library (see llama-qwen36) — HIP
-#   trips hipBLAS errors on RDNA2. Vulkan/RADV is the stable path.
+# Backend: CUDA on the RTX 5090 (llama.cpp-cuda build); AMD/Vulkan retired 2026-06.
 # Why Q8_0: embedding geometry is quant-sensitive (hurts retrieval more than it hurts
-#   generation). 4.4GB fully offloads on 12GB VRAM with room for a 32k-ctx prefill — so we
-#   take near-lossless quality at zero VRAM pressure.
+#   generation). 4.4GB fully offloads with near-lossless quality at zero VRAM pressure.
 # ⚠ PORT 8080 collides with llama-qwen36 (the chat LLM). Run ONE or the other; for Sift
 #   indexing/search you want THIS embedder up.
 set -euo pipefail
 
-# Discrete GPU only — index 1 is the Raphael iGPU we don't want kernels on.
-export GGML_VK_VISIBLE_DEVICES=0
-# Mesa 26+ dedicated transfer queue (see llama-qwen36 rationale). transfer_queue now lives
-# under RADV_EXPERIMENTAL (RADV_PERFTEST=transfer_queue is deprecated on current Mesa).
-export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+# Single CUDA GPU (RTX 5090).
+export CUDA_VISIBLE_DEVICES=0
 
 REPO="mradermacher/Octen-Embedding-4B-GGUF"
 FILE="${FILE:-Octen-Embedding-4B.Q8_0.gguf}"
@@ -69,7 +64,7 @@ exec -a "octen-embed@${PORT}.llama-server" llama-server \
   --model "$MODEL" \
   --alias "qwen3-embedding-4b" \
   --host 127.0.0.1 --port "$PORT" \
-  --device Vulkan0 \
+  --device CUDA0 \
   --fit off \
   --n-gpu-layers 99 \
   --embeddings \
@@ -80,8 +75,8 @@ exec -a "octen-embed@${PORT}.llama-server" llama-server \
   --ubatch-size "$UBATCH" \
   --parallel "$PARALLEL" \
   --flash-attn on \
-  --cache-type-k q8_0 \
-  --cache-type-v q8_0 \
+  --cache-type-k f16 \
+  --cache-type-v f16 \
   --threads 8 \
   --threads-batch 8 \
   --no-mmap \

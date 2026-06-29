@@ -1,6 +1,6 @@
 # llama-swap — local VRAM model swapper in front of the ~/bin/llama-* wrappers.
 # Each model's `cmd` just CALLS the existing wrapper with the swap-assigned ${PORT},
-# so every tuned flag (Vulkan/RADV, MTP, KV-quant, samplers, MODE) is preserved — the
+# so every tuned flag (CUDA, MTP, KV-quant, samplers, MODE) is preserved — the
 # wrappers stay the single source of truth. See ~/notes/LLM-STACK.md for the full design.
 #
 # Run:   llama-swap --config ~/.config/llama-swap/config.yaml --listen 127.0.0.1:9292
@@ -29,33 +29,19 @@ models:
     metadata: { class: embedding, thinking: na, best_for: "semantic search / RAG / retrieval", tags: [embedding, local, shared] }
 
   # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), Vulkan GPU (~0.4 GB VRAM).
-  #    Used by litellm mcp_semantic_tool_filter. (On the live config it's co-resident with the
-  #    small models via the matrix var `t` so it never evicts the chat model.) First load
-  #    auto-downloads the official llama.cpp GGUF (~379 MB Q8_0); needs a llama.cpp build with
-  #    the `lfm2-bidir` arch (if the Vulkan backend lacks it, fall back to -ngl 0). Filter
-  #    fails-open (all tools) if it can't load.
+  #    Used by litellm mcp_semantic_tool_filter. Co-resident with the small models via the
+  #    matrix (var `t`) so loading it NEVER evicts the chat model. First load auto-downloads
+  #    the official llama.cpp GGUF (~379 MB Q8_0); needs a llama.cpp build with the `lfm2-bidir`
+  #    arch (update llama.cpp if it errors "unknown architecture lfm2-bidir"; if the Vulkan
+  #    backend lacks it, fall back to -ngl 0). Filter fails-open (all tools) if it can't load.
   lfm2-embed-350m:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0 --embeddings --pooling cls --ctx-size 512 --ubatch-size 512 --device Vulkan0 -ngl 99 --host 127.0.0.1 --port ${PORT} --metrics
+    cmd: env PORT=${PORT} llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0 --embeddings --pooling cls --ctx-size 512 --ubatch-size 512 --device CUDA0 -ngl 99 --host 127.0.0.1 --port ${PORT} --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 3600
-    name: "LFM2.5-Embedding-350M (tool search, Vulkan GPU)"
+    name: "LFM2.5-Embedding-350M (tool search, CUDA GPU)"
     aliases: [embed-lfm, tool-embed, lfm2-embed]
-    description: "embed·tools · LFM2.5-Embedding-350M 1024-dim CLS, Vulkan GPU (~0.4 GB VRAM) — semantic MCP tool filter. Asymmetric query:/document: prefixes recommended."
-    metadata: { class: embed, thinking: na, best_for: "MCP tool semantic search (litellm mcp_semantic_tool_filter)", tags: [embed, tools, local, lfm2, gpu, vulkan] }
-
-  # ── embeddings (option): LFM2.5-Embedding-350M — tiny multilingual bi-encoder ──
-  # Separate from `embed` (Octen): different family + dim → NOT index-interchangeable.
-  # Asymmetric model — callers must prefix "query: " / "document: " (see HF card).
-  # ⚠ verify `llama-server` is on PATH and align Vulkan device/quant flags with llama-octen;
-  #   pin a quant via `-hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0` if you don't want default.
-  lfm25-embedding-350m:
-    cmd: env PORT=${PORT} llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF --embeddings --host 127.0.0.1 --port ${PORT} -ngl 99
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 300                # on-demand (~0.4 GB, trivial to load); not always-resident like octen
-    name: "LFM2.5-Embedding-350M (GGUF)"
-    aliases: [embed-lfm, lfm25-embed]
-    description: "embedding · LiquidAI LFM2.5-Embedding-350M — multilingual bi-encoder (11 langs), one vector/doc, ~1.5ms query. Asymmetric (query:/document: prefixes). Separate from `embed`."
-    metadata: { class: embedding, thinking: na, best_for: "fast multilingual semantic search / MCP tool RAG", tags: [embedding, local, lfm2, multilingual, option] }
+    description: "embed·tools · LFM2.5-Embedding-350M 1024-dim CLS, CUDA GPU (~0.4 GB VRAM) — semantic MCP tool filter. Asymmetric query:/document: prefixes recommended."
+    metadata: { class: embed, thinking: na, best_for: "MCP tool semantic search (litellm mcp_semantic_tool_filter)", tags: [embed, tools, local, lfm2, gpu, cuda] }
 
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
   # Each reasoning-capable model exposes two extra aliases:
@@ -142,7 +128,7 @@ models:
 
   # ── LiquidAI LFM2 — tiny VRAM-cheap summarizer candidates (vs gemma E4B/12B) ──
   lfm2-2.6b:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-2.6B-Exp-GGUF/LFM2-2.6B-Exp-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.3 --top-p 0.95 --metrics
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-2.6B-Exp-GGUF/LFM2-2.6B-Exp-Q4_K_M.gguf --device CUDA0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.3 --top-p 0.95 --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
     name: "LFM2-2.6B-Exp (LiquidAI, RL-improved, tiny summarizer)"
@@ -153,21 +139,20 @@ models:
     #   corrupt JSON structure/field names (Phase A fix). --ctx-size 32768 matches the
     #   model's real 32k window (was silently truncating longer docs at 16k).
     #   (Plan's `--spec-ngram-cache-size-n` was dropped — no such flag in llama.cpp b9672.)
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf --device Vulkan0 --n-gpu-layers 99 --flash-attn on --ctx-size 32768 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf --device CUDA0 --n-gpu-layers 99 --flash-attn on --ctx-size 32768 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
     name: "LFM2-1.2B-Extract (Q4_K_M, structured JSON)"
     description: "extract · LFM2-1.2B-Extract ~0.8GB — purpose-built structured extraction (JSON/fields). Greedy decode (temp 0, mandated), 32k ctx. NOT a general summariser."
     metadata: { class: extract, thinking: none, best_for: "structured field/JSON extraction from documents", tags: [extract, local, lfm2, tiny, json] }
 
-  # ── abliterated/uncensored chat — Qwen3.6-35B-A3B Uncensored (Wasserstein IQ3_M) ──
-  #    Phase B (2026-06-19): switched Harmony MXFP4_MOE (20 GB, --n-cpu-moe 28) → Wasserstein
-  #    IQ3_M (15 GB). MXFP4 gets NO FP4 accel on gfx1031 (software decode); IQ3_M is 5 GB
-  #    smaller → --n-cpu-moe 16 (vs 28) ≈ HALF the PCIe expert transfers per token = faster.
-  #    ⚠ --n-cpu-moe 16 assumes the full 12 GB is available — if the always-on dictation :8083
-  #    server is still up (~5 GB), this may spill; bump n-cpu-moe or finish the dictation fold.
+  # ── abliterated/uncensored chat — Qwen3.6-35B-A3B Uncensored (Harmony MXFP4_MOE) ──
+  #    On the 5090 (Blackwell) MXFP4 gets native FP4 acceleration — the opposite of gfx1031,
+  #    where it was software-decoded — so the 20GB MXFP4_MOE is now the right build, fully
+  #    GPU-resident (no --n-cpu-moe) in 32GB VRAM. (The Wasserstein IQ3_M downgrade was a
+  #    12GB-VRAM compromise; reverted.)
   qwen3.6-35b-uncensored:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Wasserstein-GGUF/Qwen3.6-35B-A3B-Uncensored.IQ3_M.gguf --alias qwen-uncensored --host 127.0.0.1 --port ${PORT} --device Vulkan0 --fit off --n-gpu-layers 99 --n-cpu-moe 16 --ctx-size 16384 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --threads 8 --threads-batch 8 --no-mmap --jinja --metrics
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF/Qwen3.6-35B-A3B-Uncensored-Harmony-MXFP4_MOE.gguf --alias qwen-uncensored --host 127.0.0.1 --port ${PORT} --device CUDA0 --fit off --n-gpu-layers 99 --ctx-size 32768 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --threads 8 --threads-batch 8 --no-mmap --jinja --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
     name: "Qwen3.6-35B-A3B Uncensored (Wasserstein IQ3_M)"
@@ -206,7 +191,7 @@ models:
   #    per IBM convert-vision-models docs). Vision is sensitive to KV quant + flash-attn,
   #    so this entry deliberately uses default f16 KV and NO flash-attn (Phase A spec).
   granite-vision-3.3-2b:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/ibm-granite/granite-vision-3.3-2b-GGUF/granite-vision-3.3-2b-Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/ibm-granite/granite-vision-3.3-2b-GGUF/mmproj-model-f16.gguf --device Vulkan0 --n-gpu-layers 99 --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/ibm-granite/granite-vision-3.3-2b-GGUF/granite-vision-3.3-2b-Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/ibm-granite/granite-vision-3.3-2b-GGUF/mmproj-model-f16.gguf --device CUDA0 --n-gpu-layers 99 --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
     name: "Granite-Vision 3.3-2b (IBM, VLM/OCR)"
@@ -217,7 +202,7 @@ models:
   # ── OCR — chandra-ocr-2 Q5_K_M (Phase B download). Vision is KV-quant + flash-attn
   #    sensitive, so default f16 KV and NO flash-attn (sharper fine-grained OCR). On-demand.
   chandra-ocr-2:
-    cmd: env PORT=${PORT} GGML_VK_VISIBLE_DEVICES=0 llama-server --model /home/nullsense/.lmstudio/models/prithivMLmods/chandra-ocr-2-GGUF/chandra-ocr-2.Q5_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/prithivMLmods/chandra-ocr-2-GGUF/chandra-ocr-2.mmproj-f16.gguf --device Vulkan0 --n-gpu-layers 99 --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/mradermacher/chandra-ocr-2-GGUF/chandra-ocr-2.Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/mradermacher/chandra-ocr-2-GGUF/chandra-ocr-2.mmproj-f16.gguf --device CUDA0 --n-gpu-layers 99 --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
     name: "Chandra-OCR-2 (Q5_K_M, fine-grained OCR)"
@@ -225,38 +210,79 @@ models:
     description: "vision·ocr · Chandra-OCR-2 Q5_K_M ~3.9GB (LM + f16 mmproj). Sharper OCR on tables/forms/small digits than granite. On-demand."
     metadata: { class: vision, thinking: na, best_for: "high-fidelity OCR — tables, forms, license plates, small text", tags: [vision, ocr, local, chandra, multimodal] }
 
+  # ── Documents-pipeline OCR cascade (3 GGUF VLMs on CUDA) ─────────────────────────────────────
+  #    Served on-demand for ~/Documents/pipeline engines.route_scanned (best-first → escalate to High
+  #    agreement → mark needs_claude). GGUF llama.cpp-cuda is the GPU OCR path on the 5090. Model ids
+  #    below MUST match settings.ocr.engines[].model in the pipeline. ttl 300 = evict 5 min idle
+  #    (tiny, ~1.2-1.7GB). NOTE: these 3 GGUFs were swept in the Jun-2026 disk cleanup — re-download
+  #    before use (HF: PaddlePaddle/PaddleOCR-VL-1.6-GGUF, JamePeng2023/MinerU2.5-Pro-2605-1.2B-GGUF,
+  #    ggml-org/GLM-OCR-GGUF).
+  paddleocr-vl:
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.cache/huggingface/hub/models--PaddlePaddle--PaddleOCR-VL-1.6-GGUF/snapshots/511b09642bb324401f15f97cc23bc67e8f0a291d/PaddleOCR-VL-1.6-GGUF.gguf --mmproj /home/nullsense/.cache/huggingface/hub/models--PaddlePaddle--PaddleOCR-VL-1.6-GGUF/snapshots/511b09642bb324401f15f97cc23bc67e8f0a291d/PaddleOCR-VL-1.6-GGUF-mmproj.gguf --device CUDA0 --n-gpu-layers 99 --ctx-size 8192 --temp 0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    name: "PaddleOCR-VL-1.6 (SOTA doc OCR, CUDA)"
+    aliases: [paddleocr-vl]
+    description: "ocr · PaddleOCR-VL-1.6 ~1.73GB (ERNIE-4.5-0.3B + SigLIP). SOTA OmniDocBench 96.33. Documents pipeline PRIMARY OCR (HTTP). Prompt 'OCR:'. On-demand."
+    metadata: { class: ocr, thinking: na, best_for: "document OCR — text/tables/formulas, primary cascade engine", tags: [ocr, vision, local, paddleocr, multimodal] }
+
+  mineru:
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.cache/huggingface/hub/models--JamePeng2023--MinerU2.5-Pro-2605-1.2B-GGUF/snapshots/930f9067342afd5a1dbbefdc920a1b0deaba6f53/MinerU2.5-Pro-2605-1.2b-Q8_0.gguf --mmproj /home/nullsense/.cache/huggingface/hub/models--JamePeng2023--MinerU2.5-Pro-2605-1.2B-GGUF/snapshots/930f9067342afd5a1dbbefdc920a1b0deaba6f53/mmproj-MinerU2.5-Pro-2605-Q8_0.gguf --device CUDA0 --n-gpu-layers 99 --ctx-size 20480 --temp 0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    name: "MinerU2.5-Pro-2605 (German doc OCR, CUDA)"
+    aliases: [mineru]
+    description: "ocr · MinerU2.5-Pro-2605-1.2B Q8_0 ~1.18GB (Qwen2.5-VL). OmniDocBench 95.69, native German (best umlaut fidelity). Documents pipeline 2nd consensus. Prompt '\\nText Recognition:' + sys. On-demand."
+    metadata: { class: ocr, thinking: na, best_for: "German document OCR — end-to-end page parse, cross-check engine", tags: [ocr, vision, local, mineru, multimodal] }
+
+  glm-ocr:
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.cache/huggingface/hub/models--ggml-org--GLM-OCR-GGUF/snapshots/65a42de1148dbed2297e922b5dbc7d9b70c36578/GLM-OCR-Q8_0.gguf --mmproj /home/nullsense/.cache/huggingface/hub/models--ggml-org--GLM-OCR-GGUF/snapshots/65a42de1148dbed2297e922b5dbc7d9b70c36578/mmproj-GLM-OCR-Q8_0.gguf --device CUDA0 --n-gpu-layers 99 --flash-attn off --fit off --ctx-size 12000 --temp 0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    name: "GLM-OCR (3rd consensus, CUDA)"
+    aliases: [glm-ocr]
+    description: "ocr · GLM-OCR Q8_0 (official ggml-org GGUF). OmniDocBench ~95.15. Documents pipeline 3rd consensus (rarely reached). Prompt 'OCR'. needs --flash-attn off. On-demand."
+    metadata: { class: ocr, thinking: na, best_for: "document OCR — third independent consensus engine", tags: [ocr, vision, local, glm, multimodal] }
+
   # ── GLiNER2 NER is ORACLE-OWNED, not in this stack (decided 2026-06-18). Oracle runs it
   #     in-process/sidecar with GLINER2_DEVICE=auto (GPU when a card is present, CPU fallback).
   #     It's not a llama.cpp/OpenAI-shaped model, so it doesn't belong behind llama-swap.
 
-# ── VRAM coexistence (single 12 GB GPU) ─────────────────────────────────────────────
-# Default behavior (no groups): ONE model at a time — a request for model B unloads A.
-# That means `embed` unloads whenever a summarizer loads, which breaks concurrent
-# sift+summarize. Octen (4.4 GB) co-fits with E4B (5.5 GB) or VibeThinker (3.3 GB) but NOT
-# with the 12 B (7.4 GB → ~11.8 GB total, spills to GTT). To keep `embed` resident
-# alongside the small summarizers, define a persistent group. ⚠ The groups schema differs
-# by llama-swap version — recent releases nest it under `routing:`. Verify with a startup
-# validation run, then enable ONE of these forms:
+# ── VRAM coexistence (single 32 GB RTX 5090) ────────────────────────────────────────
+# Default behavior (no matrix/groups): ONE model at a time — a request for model B
+# unloads A. The `matrix` solver below instead keeps all small/medium models co-resident
+# (32GB has the room) and lets only the big MoE models run solo. See the matrix block.
 #
-# Recent schema (routing/groups):
-# routing:
-#   router:
-#     settings:
-#       groups:
-#         resident:
-#           persistent: true        # cannot be evicted by other groups
-#           members: [embed]
-#         small-swap:
-#           swap: true              # only one of these at a time
-#           exclusive: false        # may co-exist with `resident`
-#           members: [summarize-cheap, vibethinker-3b]
-#         big-swap:
-#           swap: true
-#           exclusive: true         # loading these evicts everything incl. embed
-#           members: [summarize-strong, oracle-llm]
+# ── matrix: solver-based concurrency (VALIDATED to parse on llama-swap v228, 2026-06-20) ──
+# Semantics (docs/configuration.md): a model in NO set runs BY ITSELF (evicting all) —
+# so every omitted big model keeps its current exclusive behavior, nothing breaks.
+# `sets` is a MAPPING {name: DSL}; subset semantics = any subset of a set is a valid
+# concurrent state. `evict_costs` = relative reload cost (higher → solver avoids
+# evicting it). ⚠ llama-swap does NOT measure VRAM (maintainer: "users are responsible
+# for resolving conflicts") — the set above is hand-estimated to fit 32 GB.
 #
-# Older top-level `groups:` form (pre-2026-04):
-# groups:
-#   resident: { persistent: true, members: [embed] }
-#   small-swap: { swap: true, exclusive: false, members: [summarize-cheap, vibethinker-3b] }
-#   big-swap:   { swap: true, exclusive: true,  members: [summarize-strong, oracle-llm] }
+# CONFIRM headroom while the working set is loaded:
+#       watch -n1 'nvidia-smi --query-gpu=memory.used --format=csv,noheader'
+#   If it approaches ~31 GB, trim the `coresident` set. A timestamped backup of this
+#   file is in this dir: config.yaml.bak-*  (restore = cp it back).
+#
+matrix:
+  vars:
+    e: octen-embedding-4b      # embeddings (sift + oracle) — keep warm
+    s: gemma-4-e4b             # summarize  · NP=4 SPEC=off
+    d: rewrite                 # dictation  · NP=1 SPEC=on (+MTP draft)
+    t: lfm2-embed-350m         # MCP tool-search embedder (~0.4 GB) — keep warm, never evict chat
+    b: gemma-4-12b-opus        # strong summarizer/reasoner (~10 GB w/ MTP + 131k f16 KV)
+  evict_costs: { e: 10, s: 5, d: 5, t: 8, b: 6 }
+  sets:
+    # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident
+    # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(e4b+MTP)
+    # ~5.5 + tool 0.4 + 12B ~10 ≈ 25GB < 32. Big MoE (qwen3.6-35b-a3b ~26GB, uncensored
+    # MXFP4 ~20GB) are in NO set → they run SOLO (evict all), as before.
+    coresident: "e & s & d & t & b"
+#
+# Why matrix over legacy `groups`: groups force all-or-nothing exclusive unloads; the
+# matrix solver evicts the FEWEST/cheapest models to satisfy a request. (groups still
+# work; a config uses matrix OR groups, not both.) On 32 GB the common working set
+# (embed + both E4B instances + tool-embed + 12B) is all hot at once — what the old
+# 12 GB box could never do.

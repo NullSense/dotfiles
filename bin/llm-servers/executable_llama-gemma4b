@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# llama-server wrapper for Gemma 4 E4B-it via Vulkan (RADV) — PARALLEL summarization box.
-# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# llama-server wrapper for Gemma 4 E4B-it via CUDA (RTX 5090) — PARALLEL summarization box.
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RTX 5090 (32GB, Blackwell sm_120) + 64GB DDR5-5800
 # Model:    unsloth/gemma-4-E4B-it-qat-GGUF (UD-Q4_K_XL, 4.0GB; MatFormer "effective 4B",
 #           raw 7.5B params, 42 layers). Same gemma4 arch as llama-gemma4's 12B.
 #           QAT (Quantization-Aware Training) + Unsloth dynamic: near-BF16 quality
@@ -18,14 +18,13 @@
 # ⚠ VRAM exclusivity: 12GB fits EITHER this OR llama-gemma4 (12B), not both.
 #   Starting this next to a loaded 12B spills to GTT and craters both.
 #
-# Why Vulkan, not ROCm/HIP: ROCm has no gfx1031 Tensile library (see llama-qwen36).
-# Same SWA trade-offs as llama-gemma4: prompt-cache reuse = strict prefix
-# extension only; --cache-reuse / context-shift unsupported.
+# Backend: CUDA on the RTX 5090 (llama.cpp-cuda build). The old AMD/Vulkan path is gone
+# (card replaced 2026-06). Same SWA trade-offs as llama-gemma4: prompt-cache reuse = strict
+# prefix extension only; --cache-reuse / context-shift unsupported.
 set -euo pipefail
 
-# Discrete GPU only (index 1 is the Raphael iGPU).
-export GGML_VK_VISIBLE_DEVICES=0
-export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+# Single CUDA GPU (RTX 5090).
+export CUDA_VISIBLE_DEVICES=0
 
 MODEL_DIR="$HOME/.lmstudio/models/unsloth/gemma-4-E4B-it-qat-GGUF"
 MODEL="${MODEL:-$MODEL_DIR/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf}"
@@ -65,6 +64,13 @@ fi
 #   SPEC=on enable | SPECN n-max draft depth | SPEC=off for A/B vs plain decode.
 SPEC="${SPEC:-off}"
 SPECN="${SPECN:-2}"
+# Flash-attn: ON is faster for batch/long-ctx and works fine for plain decode. BUT the MTP
+# draft path (SPEC=on) ABORTS at ggml-cuda/fattn.cu:110 on Blackwell with FA enabled (no FA
+# kernel for the speculative-decode batch shape; `auto` aborts too). So FA defaults OFF when
+# SPEC=on (still 400+ tok/s via the draft), ON otherwise. Override with FA=on|off|auto.
+# KV is f16 (below), NOT q8_0: quantized V-cache REQUIRES flash-attn ("V cache quantization
+# requires flash_attn"), which the MTP/dictation path disables — f16 is valid either way.
+FA="${FA:-$([ "$SPEC" = on ] && echo off || echo on)}"
 DRAFT="${DRAFT:-$HOME/.lmstudio/models/amaranus/Gemma-4-E4B-it-MTP/gemma-4-E4B-it-qat-assistant-MTP-Q8_0.gguf}"
 SPEC_ARGS=()
 if [[ "$SPEC" == "on" ]]; then
@@ -82,7 +88,7 @@ exec -a "gemma4-e4b@${PORT}.llama-server" llama-server \
   --model "$MODEL" \
   --alias "gemma4-e4b" \
   --host 127.0.0.1 --port "$PORT" \
-  --device Vulkan0 \
+  --device CUDA0 \
   --fit off \
   --n-gpu-layers 99 \
   --ctx-size "$CTX" \
@@ -90,9 +96,9 @@ exec -a "gemma4-e4b@${PORT}.llama-server" llama-server \
   --kv-unified \
   --slot-save-path "$SLOTS_DIR" \
   --slot-prompt-similarity 0.5 \
-  --flash-attn on \
-  --cache-type-k q8_0 \
-  --cache-type-v q8_0 \
+  --flash-attn "$FA" \
+  --cache-type-k f16 \
+  --cache-type-v f16 \
   --threads 8 \
   --threads-batch 8 \
   --no-mmap \

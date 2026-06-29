@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# llama-server wrapper for Gemma4-12B-it Claude-Opus-distill + MTP via Vulkan (RADV)
-# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# llama-server wrapper for Gemma4-12B-it Claude-Opus-distill + MTP via CUDA (RTX 5090)
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RTX 5090 (32GB, Blackwell sm_120) + 64GB DDR5-5800
 # Model:    yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF (Q4_K_M, 7.4GB, dense 12B)
 #           + MTP draft head (gemma-4-12B-it-MTP-Q8_0.gguf, 0.44GB) — lossless self-spec.
 # Card:     https://huggingface.co/yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF
@@ -10,11 +10,10 @@
 # (enable_thinking template kwarg — template is the one EMBEDDED in the GGUF, no
 # external .jinja exists for this repo; --jinja activates it).
 #
-# Why Vulkan, not ROCm/HIP: same story as llama-qwen36 — ROCm 7.2.3 has no gfx1031
-# Tensile library. Vulkan/RADV is the stable path on RDNA2.
+# Backend: CUDA on the RTX 5090 (llama.cpp-cuda build); AMD/Vulkan retired 2026-06.
 #
 # Unlike the Qwen3.6 MoE setup there is NO --n-cpu-moe here: dense 12B at Q4_K_M
-# fits entirely in 12GB VRAM, so decode runs full-speed on GPU. Gemma 4 is
+# fits with huge headroom in 32GB VRAM, so decode runs full-speed on GPU. Gemma 4 is
 # mostly sliding-window attention (5:1 SWA:full, tiny global KV heads), and
 # llama.cpp's default window-sized SWA cache makes 131k ctx cheap enough to
 # keep on-GPU. NOTE the SWA trade-off: prompt-cache reuse only works for
@@ -22,28 +21,19 @@
 # context-shift are unsupported for SWA models, hence absent below.
 set -euo pipefail
 
-# Constrain Vulkan to the discrete GPU (0); index 1 is the Raphael iGPU.
-export GGML_VK_VISIBLE_DEVICES=0
-
-# RADV dedicated transfer queue (see llama-qwen36 for rationale; harmless here
-# since we're fully offloaded, still reduces compositor contention).
-# RADV_PERFTEST=transfer_queue is deprecated on this Mesa — the knob moved.
-export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
+# Single CUDA GPU (RTX 5090).
+export CUDA_VISIBLE_DEVICES=0
 
 MODEL_DIR="$HOME/.lmstudio/models/yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF"
 MODEL="${MODEL:-$MODEL_DIR/gemma4-opus48-Q4_K_M.gguf}"
 DRAFT="${DRAFT:-$MODEL_DIR/gemma-4-12B-it-MTP-Q8_0.gguf}"
 SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots-gemma4}"
 PORT="${PORT:-8082}"   # 8080 = llama-qwen36, 8081 = taken (system), 1234 = LM Studio
-# Context: 131072 (card max) DOES fit on paper — measured 65.9 t/s in isolation —
-# but it leaves only ~0.5 GiB VRAM slack next to a live desktop. The moment the
-# browser/Discord/Steam allocate, amdgpu evicts ~2.5 GiB of llama buffers to GTT
-# and decode craters to ~15-21 t/s (measured 2026-06-11; check with
-# mem_info_gtt_used on card1 — >1 GiB while serving = you're spilling).
-# 65536 frees ~1 GiB of headroom and is still plenty for ChatGPTBox/coding.
-# Use CTX=131072 only when the GPU is otherwise idle.
+# Context: 131072 = card max. On the 32GB 5090 the dense 12B (7.4GB) + full-ctx KV
+# leaves tens of GB of slack, so we run the full window by default (the old 65536 cap
+# was a 12GB-GTT-spill workaround on the retired AMD card).
 # (GGUF metadata claims n_ctx_train=262144, but the card says 131k max.)
-CTX="${CTX:-65536}"
+CTX="${CTX:-131072}"
 mkdir -p "$SLOTS_DIR"
 
 # MODE selects thinking + sampler defaults. Clients can override BOTH per request:
@@ -67,8 +57,15 @@ esac
 # card's own recommendation (~1.3x greedy / ~1.2x thinking). Speculation is lossless,
 # so the only risk is wasted draft compute on low-acceptance spans; default 4 per the
 # card. SPECN=2 reverts to the conservative dictation-era value, SPEC=off disables it.
-SPEC="${SPEC:-on}"
+# SPEC default OFF on the 5090. The MTP draft can't coexist with flash-attn here (Gemma's
+# head_dim=256 has no CUDA FA kernel for the speculative batch shape → ggml-cuda/fattn.cu:110
+# abort), so SPEC=on forces FA OFF — and for the 12B that's a net loss: without FA the full
+# 131k-ctx KV is huge (OOMs) and slow, while this finetune's MTP acceptance is only 23-42%.
+# FA on + full ctx + no draft wins. Flip SPEC=on (auto-forces FA off + you must lower CTX)
+# only to A/B the draft. FA tracks SPEC: off when SPEC=on, on otherwise. FA=on|off|auto.
+SPEC="${SPEC:-off}"
 SPECN="${SPECN:-4}"
+FA="${FA:-$([ "$SPEC" = on ] && echo off || echo on)}"
 SPEC_ARGS=()
 if [[ "$SPEC" == "on" ]]; then
   SPEC_ARGS=(
@@ -106,15 +103,15 @@ exec -a "gemma4-12b@${PORT}.llama-server" llama-server \
   --model "$MODEL" \
   --alias "gemma4-opus-distill" \
   --host 127.0.0.1 --port "$PORT" \
-  --device Vulkan0 \
+  --device CUDA0 \
   --fit off \
   --n-gpu-layers 99 \
   --ctx-size "$CTX" \
   --slot-save-path "$SLOTS_DIR" \
   --slot-prompt-similarity 0.5 \
-  --flash-attn on \
-  --cache-type-k q8_0 \
-  --cache-type-v q8_0 \
+  --flash-attn "$FA" \
+  --cache-type-k f16 \
+  --cache-type-v f16 \
   --threads 8 \
   --threads-batch 8 \
   "${PAR_ARGS[@]}" \

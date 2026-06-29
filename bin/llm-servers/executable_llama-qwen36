@@ -1,38 +1,28 @@
 #!/usr/bin/env bash
-# llama-server wrapper for Qwen3.6-35B-A3B APEX-MTP via Vulkan (RADV)
-# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RX 6750 XT (12GB, NAVI22/gfx1031) + 64GB DDR5-5800
+# llama-server wrapper for Qwen3.6-35B-A3B APEX-MTP via CUDA (RTX 5090)
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RTX 5090 (32GB, Blackwell sm_120) + 64GB DDR5-5800
 # Model:    mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF (I-Quality, ~24GB)
-# Features: MTP self-spec, 128k ctx, MoE CPU offload, persistent slot cache.
+# Features: MTP self-spec, 128k ctx, FULL GPU offload, persistent slot cache.
 #           (ngram-map-k4v was dropped 2026-05-21 — see the note above the spec flags)
 #
-# Why Vulkan, not ROCm/HIP: ROCm 7.2.3 lacks a gfx1031 Tensile library, and Tensile-symlink
-# workarounds still trip hipBLAS SGEMM internal errors during decode. Vulkan/RADV is the
-# stable path on RDNA2 — ~10% slower decode than working HIP would be, but actually works.
+# Backend: CUDA on the RTX 5090 (llama.cpp-cuda build); AMD/Vulkan retired 2026-06. The
+# whole ~24GB Q4 MoE now lives in 32GB VRAM, so --n-cpu-moe is GONE — every expert layer
+# runs on the GPU (the old gfx1031 box could only fit attention + ~12 expert layers, the
+# rest streamed off CPU RAM over PCIe and capped decode at ~31 t/s).
 set -euo pipefail
 
-# Constrain Vulkan to the discrete GPU (0). The 9700X also exposes a tiny Raphael iGPU
-# at index 1 that we don't want kernels landing on.
-export GGML_VK_VISIBLE_DEVICES=0
-
-# RADV dedicated transfer queue: routes CPU→GPU expert weight transfers (--n-cpu-moe path)
-# through a second Vulkan queue so they don't contend with compute submissions on the
-# graphics queue. Per llama.cpp PR #19976 ("vulkan: improve partial offloading performance
-# on AMD") this helps any partial offload, and incidentally reduces compositor stutter on
-# the same GPU because inference no longer monopolizes a single queue. Needs Mesa 26+.
-# NOTE: transfer_queue moved OUT of RADV_PERFTEST — the installed Mesa prints
-#   "RADV_PERFTEST=transfer_queue is deprecated ... use RADV_EXPERIMENTAL=transfer_queue".
-#   (llama-gemma4 / llama-octen already use RADV_EXPERIMENTAL; this aligns them.)
-export RADV_EXPERIMENTAL="${RADV_EXPERIMENTAL:+$RADV_EXPERIMENTAL,}transfer_queue"
-# nogttspill (RADV_PERFTEST, Mesa 25.2+, llama.cpp #24066): stop the RADV allocator from
-# randomly spilling RESIDENT buffers to GTT, which silently craters RDNA2 MoE decode
-# (can drop ~30 t/s → <10 with no logged warning). Prioritizes VRAM; safe here because the
-# GPU-resident portion (n-cpu-moe 28 ≈ 9 GB) fits 12 GB, so it won't force an OOM.
-export RADV_PERFTEST="${RADV_PERFTEST:+$RADV_PERFTEST,}nogttspill"
+# Single CUDA GPU (RTX 5090).
+export CUDA_VISIBLE_DEVICES=0
 
 MODEL="${MODEL:-$HOME/.lmstudio/models/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF/Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf}"
 TEMPLATE="${TEMPLATE:-$HOME/.config/llama-cpp/qwen36-merged-fakezeta-allanchan-froggeric.jinja}"
 SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots}"
 PORT="${PORT:-8080}"
+# Context: weights alone are ~21.3GB, so on the 32GB card the full 131k compute buffer
+# only fits when this model runs SOLO. With the always-on dictation server (:8083, ~4.4GB)
+# resident, 131k OOMs — 65536 keeps the compute buffer small enough to coexist and is
+# ample for coding/reasoning. Bump CTX=131072 when dictation is stopped and qwen runs alone.
+CTX="${CTX:-65536}"
 mkdir -p "$SLOTS_DIR"
 
 # MODE selects sampler + reasoning. preserve_thinking is a template-kwarg (no CLI flag).
@@ -44,23 +34,22 @@ case "$MODE" in
   *) echo "MODE must be code | chat | fast"; exit 1 ;;
 esac
 
-# MoE CPU offload for 12 GB VRAM + ~24 GB Q4 MoE.
-# Budget rationale: routed experts ~75% of model (~18 GB / 40 layers ≈ 450 MB/layer);
-#   12 GB VRAM − ~6 GB non-MoE − 0.75 GB KV (Q8 @ 128k) − ~1.5 GB compute ≈ 3.7 GB for experts.
-# Empirical sweep 2026-05-21 (Vulkan, 128k ctx, Q8 KV, fa on) — monotonic curve:
-#   28 → 31.7 t/s (no MTP)  30 → 29.1   32 → 27.2   36 → 23.7
-# NCPUMOE=28 is the sweet spot — VRAM headroom is sufficient at 128k.
-# Override at the CLI: NCPUMOE=30 ~/bin/llama-qwen36
-NCPUMOE="${NCPUMOE:-28}"
-
+# MoE CPU offload — default 0 (full GPU) on the 5090: the ~21.3GB weights + Q8 KV + compute
+# fit in 32GB and every expert runs on-GPU (the gfx1031 12GB box used --n-cpu-moe 28, which
+# capped decode at ~31 t/s). ESCAPE HATCH: weights alone are 21.3GB, so if a busy desktop /
+# game + the always-on dictation server (:8083, ~4.4GB) + Whisper leave <~24GB free, the
+# full-GPU load OOMs. Set NCPUMOE=8..16 to stream that many expert layers off CPU RAM and
+# load anyway (slower). 0 = the fast path this migration is built around.
+NCPUMOE="${NCPUMOE:-0}"
+#
 # --- Notes on the flags below (kept OUT of the exec block on purpose: an inline comment
 #     inside a backslash-continued command truncates it — the previous revision silently
 #     dropped every flag after --ubatch-size, i.e. threads/sampling/MTP/metrics) ---
 #
-# batch-size 3072 (raised 2048→3072 on 2026-05-21): larger logical batches improve PP
-#   throughput for CPU+GPU MoE (DocShotgun guide) via fewer CPU→GPU transfer rounds.
-#   Held at 3072 not 4096 — VRAM is ~11.5/12 GiB at long ctx and the compute buffer
-#   scales with batch-size, so 4096 may OOM. Bump only if 3072 holds at 90k+ ctx.
+# batch-size 2048 (default): the 3072 bump was a CPU+GPU MoE optimization (fewer CPU→GPU
+#   expert-transfer rounds) — pointless now that all experts are GPU-resident, and the
+#   compute buffer scales with batch-size. 2048 trims ~1GB of compute VRAM so the 24GB model
+#   can co-exist with the always-on dictation server (:8083, ~4.4GB) inside 32GB.
 #
 # ngram-map-k4v removed 2026-05-21: caused a vector OOB crash when slot context was
 #   rewound across an opencode session boundary (idle + new conversation). In live logs
@@ -71,11 +60,11 @@ exec -a "qwen3.6-a3b@${PORT}.llama-server" llama-server \
   --alias "qwen3.6-35b-a3b-apex" \
   --chat-template-file "$TEMPLATE" \
   --host 127.0.0.1 --port "$PORT" \
-  --device Vulkan0 \
+  --device CUDA0 \
   --fit off \
   --n-gpu-layers 99 \
   --n-cpu-moe "$NCPUMOE" \
-  --ctx-size 131072 \
+  --ctx-size "$CTX" \
   --keep -1 \
   --cache-reuse 256 \
   --slot-save-path "$SLOTS_DIR" \
@@ -83,7 +72,7 @@ exec -a "qwen3.6-a3b@${PORT}.llama-server" llama-server \
   --flash-attn on \
   --cache-type-k q8_0 \
   --cache-type-v q8_0 \
-  --batch-size 3072 \
+  --batch-size 2048 \
   --ubatch-size 512 \
   --threads 8 \
   --threads-batch 8 \

@@ -79,10 +79,10 @@ model_list:
 
   # ── summarize-cheap: bulk summaries (oracle cheap-first) ───────────────────────
 - model_name: summarize-cheap
-  litellm_params:                      # DEV → local Gemma-4 E4B (5.1 GB) via llama-swap
-    model: llamafile/summarize-cheap
-    api_base: http://127.0.0.1:9292/v1
-    api_key: "none"
+  litellm_params:                      # DEV → local Gemma-4 E4B NVFP4 via vLLM (FP8 KV), :8000
+    model: openai/summarize-vllm
+    api_base: http://127.0.0.1:8000/v1
+    api_key: "EMPTY"
     input_cost_per_token: 0
     output_cost_per_token: 0
     tags:
@@ -100,11 +100,11 @@ model_list:
     max_input_tokens: 131072
     max_output_tokens: 8192
     metadata:
-      display_name: "Summarize-cheap · Gemma-4 E4B (local, dev)"
-      backend: "llama.cpp CUDA (RTX 5090) · gemma-4-E4B-it"
-      quant: "Q5_K_M"
-      vram: "5.1 GB"
-      tokens_per_second: "≈49 single / ≈171 aggregate (NP=4)"
+      display_name: "Summarize-cheap · Gemma-4 E4B NVFP4 (vLLM, dev)"
+      backend: "vLLM (RTX 5090, sm_120) · gemma-4-E4B-it NVFP4 + FP8 KV cache"
+      quant: "NVFP4 (4-bit, Blackwell-native)"
+      vram: "~16 GB (gpu-util 0.50, incl. KV cache)"
+      tokens_per_second: "≈202 single / ≈1378 aggregate @16-concurrent (benchmarked, ~5x llama.cpp)"
       quality_overall: 4.36
       faithfulness: 4.96
       fabrication_pct: 0

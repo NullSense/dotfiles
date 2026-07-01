@@ -2,7 +2,7 @@
 # agent-isolated — bubblewrap sandbox for AI coding agents (claude, codex, opencode).
 #
 # Usage:
-#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--agent-vault] [--dotfiles] [--no-gpu] [--dry-run] [-- <agent args>]
+#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--no-docker] [--agent-vault] [--dotfiles] [--no-gpu] [--dry-run] [-- <agent args>]
 #   agent-isolated sh                            # interactive shell inside the sandbox
 #   agent-isolated --self-test                   # run negative + positive verifications
 #   AGENT_UNSANDBOX=1 agent-isolated <agent> …   # bypass the sandbox entirely (escape hatch)
@@ -35,6 +35,15 @@
 #                   this is NOT *-raw. Use for "update my hypr/waybar/zsh
 #                   config" tasks; default-off because configs are read-only
 #                   normally (writes confined to projects).
+#
+# Default-on (per user request — NOT low-risk):
+#   docker          Bind /run/docker.sock + set DOCKER_HOST so the agent can
+#                   drive the host Docker daemon (build/run/compose,
+#                   testcontainers) with no flag. DANGER: the daemon runs as
+#                   root, so socket access = host root — an agent can
+#                   `docker run -v /:/host …` and escape the sandbox entirely.
+#                   Opt out with --no-docker for untrusted/unsupervised runs.
+#                   Rootless Docker or a throwaway VM is the safer path.
 #
 # Default-on (low-risk, broadly useful):
 #   plannotator     Bind ~/.{local/share,config,cache}/plannotator so the
@@ -88,6 +97,12 @@ fi
 ALLOW_SSH=0
 ALLOW_GPG=0
 ALLOW_RBW=0
+# Default-on (per user request): bind the host Docker socket so container dev
+# work (build/run/compose/testcontainers) works with no flag. This is a real
+# security relaxation — the daemon is root, so socket access = host root and an
+# agent can escape the sandbox via `docker run -v /:/host`. Opt out per-run with
+# --no-docker for untrusted/unsupervised sessions.
+ALLOW_DOCKER=1
 # Default-on: every agent runs under agent-vault so outbound HTTPS gets
 # credential injection (agent talks to APIs, never sees upstream tokens).
 # Opt out per-invocation with --no-agent-vault; bypass all isolation with
@@ -135,6 +150,8 @@ while [[ $# -gt 0 ]]; do
         --ssh)            ALLOW_SSH=1; shift ;;
         --gpg)            ALLOW_GPG=1; shift ;;
         --rbw)            ALLOW_RBW=1; shift ;;
+        --docker)         ALLOW_DOCKER=1; shift ;;  # accepted for symmetry
+        --no-docker)      ALLOW_DOCKER=0; shift ;;
         --agent-vault)    ALLOW_AGENT_VAULT=1; shift ;;
         --no-agent-vault) ALLOW_AGENT_VAULT=0; shift ;;
         --dotfiles)       ALLOW_DOTFILES=1; shift ;;
@@ -627,6 +644,34 @@ if (( ALLOW_GPU )); then
     for _nv in /dev/nvidia[0-9]*; do
         [[ -e "$_nv" ]] && ARGS+=( --dev-bind-try "$_nv" "$_nv" )
     done
+fi
+
+# Default-on (per user request): Docker daemon socket. This is the single
+# biggest hole this sandbox can open — the daemon runs as root, so anything that
+# can talk to /run/docker.sock can `docker run -v /:/host …` and take over the
+# host, bypassing every mask/cap-drop above. Kept on for frictionless container
+# dev work; drop it per-run with --no-docker. The socket lands on the
+# --tmpfs /run mounted earlier (later
+# args win). We also point DOCKER_HOST at the canonical /run path so the CLI
+# doesn't chase the default context's /var/run/docker.sock (which /var/run,
+# absent on the tmpfs root, wouldn't resolve). ~/.docker is re-exposed (it was
+# tmpfs-masked above) so registry auth + contexts work; --bind-try is a no-op
+# when it doesn't exist. Rootless Docker ($XDG_RUNTIME_DIR/docker.sock, non-root
+# daemon) is the safer alternative if you want this always-on.
+if (( ALLOW_DOCKER )); then
+    _dhost="${DOCKER_HOST:-}"
+    _dsock="${_dhost#unix://}"
+    [[ "$_dsock" == "$_dhost" || -z "$_dsock" ]] && _dsock="/run/docker.sock"
+    if [[ -S "$_dsock" ]]; then
+        ARGS+=(
+            --bind "$_dsock" "$_dsock"
+            --setenv DOCKER_HOST "unix://$_dsock"
+            --bind-try "$HOME/.docker" "$HOME/.docker"
+        )
+    else
+        echo "agent-isolated: --docker requested but $_dsock is not a socket" >&2
+    fi
+    unset _dsock _dhost
 fi
 
 # chdir

@@ -1,5 +1,5 @@
 {
- "active": "litellm",
+ "active": "rewrite",
  "backends": {
   "lmstudio": {
    "kind": "lmstudio",
@@ -26,6 +26,11 @@
    "base_url": "http://127.0.0.1:4000",
    "model": "rewrite-fast",
    "api_key": "os.environ/HYPRWHSPR_LITELLM_KEY"
+  },
+  "rewrite": {
+   "kind": "llama-server",
+   "base_url": "http://127.0.0.1:9292",
+   "model": "rewrite"
   }
  }
 }

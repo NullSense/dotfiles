@@ -117,7 +117,7 @@ case "${1:-status}" in
     # obs is ~6 GB and only needed to VIEW traces → off by default. `stack obs` (or STACK_OBS=1
     # stack up) brings up otel-lgtm + Langfuse + collector; otherwise just the gateway DB.
     if [ "${STACK_OBS:-0}" = 1 ]; then ensure_obs; else ensure_gateway_db; fi
-    start_one llama-swap http://127.0.0.1:9292/health llama-swap --config "$LSWAP_CFG" --listen 127.0.0.1:9292
+    start_one llama-swap http://127.0.0.1:9292/health llama-swap --config "$LSWAP_CFG" --watch-config --listen 127.0.0.1:9292
     wait_tcp 127.0.0.1:5433 15 && echo "  • gateway DB ready :5433" \
       || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
     # local LLM-call tracing → otel-lgtm collector. House standard is gRPC :4317 (matches

@@ -3,7 +3,8 @@
   "cleanupPeriodDays": 9999,
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
-    "CLAUDE_CODE_NO_FLICKER": "1",
+    "CLAUDE_CODE_NO_FLICKER": "0",
+    "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1",
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
   },
   "permissions": {
@@ -150,17 +151,12 @@
         "/run/user/1000/gnupg",
         "~/.gnupg"
       ],
-      "allowRead": [
-        "~/Programming"
-      ]
+      "allowRead": ["~/Programming"]
     }
   },
   "effortLevel": "high",
   "editorMode": "vim",
   "skipAutoPermissionPrompt": true,
-  "additionalDirectories": [
-    "~/Programming",
-    "~/.cargo"
-  ],
+  "additionalDirectories": ["~/Programming", "~/.cargo"],
   "skipWorkflowUsageWarning": true
 }

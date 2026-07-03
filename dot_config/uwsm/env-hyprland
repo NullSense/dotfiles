@@ -1,0 +1,19 @@
+# uwsm compositor environment — sourced before Hyprland/aquamarine start.
+# AQ_* MUST live here (not in hypr/env.conf `env=`), because aquamarine reads
+# them at backend-creation, which is earlier than config `env=` application.
+
+# Use legacy (non-atomic) KMS modeset. Sidesteps the
+#   "atomic drm request: failed to commit: Device or resource busy"
+# death spiral that crashes Hyprland itself (SIGABRT in CHyprOpenGLImpl::begin)
+# when a vLLM/torch backfill saturates the RTX 5090 that also drives the
+# displays. 2026-07-03. See memory reference_dp2_10bit_wayland_crash (2nd trigger).
+# VERIFY after relogin: `hyprctl monitors` — confirm DP-1 4K@240 + DP-2 come up
+# and bitdepth-10 still holds. If 10-bit/240Hz breaks under legacy modeset,
+# drop this line and rely on __GL_VRR_ALLOWED + vLLM resource caps instead.
+export AQ_NO_ATOMIC=1
+
+# Disable VRR/G-Sync at the NVIDIA GL-driver level. Removes VRR-induced
+# page-flip timing races (belt-and-braces with AQ_NO_ATOMIC). Trade-off: also
+# disables G-Sync in fullscreen games launched from this session. Remove this
+# line if you want G-Sync back and AQ_NO_ATOMIC alone proves sufficient.
+export __GL_VRR_ALLOWED=0

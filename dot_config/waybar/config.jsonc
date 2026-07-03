@@ -178,7 +178,7 @@
     },
     "custom/hyprwhspr": {
         "format": "{}",
-        "exec": "/usr/lib/hyprwhspr/config/hyprland/hyprwhspr-tray.sh status",
+        "exec": "$HOME/.config/waybar/hyprwhspr-rewrite-wrap.sh",
         "interval": 1,
         "return-type": "json",
         "exec-on-event": true,

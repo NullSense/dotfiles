@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# agent-url-drain — host side of the sandbox URL forwarder. Triggered by
+# agent-url-opener.path whenever *.url files appear in the spool dir; opens
+# each URL in the real browser and removes the file. Loops until the spool is
+# empty so URLs that arrive mid-drain aren't missed.
+set -euo pipefail
+
+spool="${XDG_STATE_HOME:-$HOME/.local/state}/agent-url-open"
+browser="$HOME/.local/bin/helium"
+[[ -x "$browser" ]] || browser="$(command -v xdg-open || echo /usr/bin/xdg-open)"
+
+mkdir -p "$spool"
+shopt -s nullglob
+while :; do
+    files=( "$spool"/*.url )
+    (( ${#files[@]} )) || break
+    for f in "${files[@]}"; do
+        url="$(< "$f")"
+        rm -f "$f"
+        case "$url" in
+            http://*|https://*)
+                setsid -f "$browser" "$url" >/dev/null 2>&1 || true ;;
+        esac
+    done
+done

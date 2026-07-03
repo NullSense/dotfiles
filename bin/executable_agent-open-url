@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# agent-open-url — URL forwarder used INSIDE the agent-isolated sandbox.
+#
+# The sandbox has no browser: the Helium AppImage needs /dev/fuse and its
+# Chromium singleton IPC socket lives under the host /tmp, both hidden by the
+# sandbox's fresh --tmpfs /tmp. agent-isolated points $BROWSER (and the
+# shadowed /usr/bin/xdg-open) here. We drop the requested URL into a spool dir
+# under $HOME — which is RW-shared with the host — and the host-side
+# agent-url-opener.path unit opens it in the real browser (Helium). Called
+# either as `$BROWSER <url>` or as `xdg-open <url>`.
+set -euo pipefail
+
+url="${1:-}"
+[[ -z "$url" ]] && exit 0
+
+# Only forward real web URLs. Anything else (local file, mailto:, etc.) we
+# just print, matching the old stub, so we never surprise-open a path.
+case "$url" in
+    http://*|https://*) ;;
+    *) printf '%s\n' "$url"; exit 0 ;;
+esac
+
+spool="${XDG_STATE_HOME:-$HOME/.local/state}/agent-url-open"
+mkdir -p "$spool"
+
+# Unique filename without relying on /dev/urandom or uuidgen ($RANDOM is a
+# bash builtin, always available inside the sandbox).
+f="$spool/$$-${RANDOM}${RANDOM}.url"
+printf '%s\n' "$url" > "$f"
+
+# Still echo it so the human sees what was opened (and has a copy-paste
+# fallback if the host watcher is ever down).
+printf 'agent-open-url \xe2\x86\x92 host browser: %s\n' "$url" >&2

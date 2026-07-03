@@ -607,9 +607,25 @@ if (( ALLOW_PLANNOTATOR )); then
         ARGS+=( --bind "$_d" "$_d" )
     done
     unset _d
-    # Stub "browser" — when plannotator (or anything else inside the
-    # sandbox) tries to open a URL, print it instead. The user opens
-    # it manually in the existing host-side browser session.
+    # (Browser/URL forwarding is wired unconditionally just below, so
+    # plannotator's review URLs open in the host browser like anything else.)
+fi
+
+# Browser URL forwarding (host handoff). A sandboxed agent can't launch the
+# host browser directly: the Helium AppImage needs /dev/fuse and its Chromium
+# singleton IPC socket lives under the host /tmp, both hidden by our fresh
+# --tmpfs /tmp. So instead of a browser, point $BROWSER — and shadow the
+# /usr/bin/xdg-open the agent would otherwise call — at ~/bin/agent-open-url,
+# which drops the URL into a spool dir under $HOME (already RW-shared). The
+# host-side agent-url-opener.path unit watches that dir and runs the real
+# browser. Surface added: the agent can ask the host to open an arbitrary URL
+# in your logged-in browser — a deliberate, minor escalation over the old
+# print-only stub. No dbus, no /tmp singleton-socket exposure, no /dev/fuse.
+if [[ -x "$HOME/bin/agent-open-url" ]]; then
+    ARGS+=( --setenv BROWSER "$HOME/bin/agent-open-url" )
+    ARGS+=( --ro-bind-try "$HOME/bin/agent-open-url" /usr/bin/xdg-open )
+else
+    # Forwarder missing — fall back to the old print-only behaviour.
     ARGS+=( --setenv BROWSER "/usr/bin/echo" )
 fi
 

@@ -1,0 +1,6 @@
+[Unit]
+Description=Open agent-isolated sandbox URLs in the host browser
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/libexec/agent-url-drain

@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch agent-isolated sandbox URL spool and open links in the host browser
+
+[Path]
+# Fires agent-url-opener.service whenever the sandbox drops a *.url file here.
+PathExistsGlob=%h/.local/state/agent-url-open/*.url
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# vllm-serve — launch vLLM under CUDA MPS with an SM cap + a fixed KV budget, so
+# a bulk backfill can't starve the Hyprland compositor off the GPU and crash it.
+#
+# Why this exists (2026-07-03): a vLLM/torch backfill saturating the RTX 5090's
+# compute made the NVIDIA driver return "Device or resource busy" on the
+# compositor's atomic page-flips -> SIGABRT in CHyprOpenGLImpl::begin. Two guards
+# here: (1) MPS caps vLLM's SM share so ~15% of the GPU stays free for the
+# compositor's GL work; (2) a fixed --kv-cache-memory-bytes gives predictable
+# VRAM coexistence with infinity + on-demand llama-swap models (no free-mem race).
+# The AQ_NO_ATOMIC compositor guard (uwsm/env-hyprland) is the third, separate net.
+#
+# Usage:  vllm-serve <hf-model> [extra vllm serve args...]
+#   env:  VLLM_MPS_PCT   SM % cap for vLLM (default 85; the rest is left for GL)
+#         VLLM_KV_CACHE  fixed KV size    (default 10GiB; raise after watching the
+#                        "suggested kv_cache_memory_bytes" line in vLLM's startup log)
+#         VLLM_BIN       vllm entrypoint  (default: vllm on PATH; e.g. set to a
+#                        venv path, or run this from `uv run` where vllm resolves)
+# Note: leaves the GPU in DEFAULT compute mode on purpose — EXCLUSIVE_PROCESS would
+# deny the GL compositor a context. MPS isolation is therefore soft, not hard.
+set -euo pipefail
+
+MPS_PCT="${VLLM_MPS_PCT:-85}"
+KV="${VLLM_KV_CACHE:-10GiB}"
+
+# Start the MPS control daemon if it isn't already up (user-level, no root).
+if ! pgrep -x nvidia-cuda-mps-control >/dev/null 2>&1; then
+  nvidia-cuda-mps-control -d && echo "[vllm-serve] started CUDA MPS control daemon"
+fi
+
+# Cap THIS client's SM share. Kernels launch on <=$MPS_PCT% of SMs, leaving the
+# remainder for the compositor's direct (non-MPS, GL) rendering.
+export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE="$MPS_PCT"
+
+# Inject the fixed KV budget only if the caller didn't already set a memory flag.
+extra=()
+case " $* " in
+  *" --kv-cache-memory-bytes "*|*" --gpu-memory-utilization "*) : ;;  # caller controls memory
+  *) extra=(--kv-cache-memory-bytes "$KV") ;;
+esac
+
+echo "[vllm-serve] MPS SM cap=${MPS_PCT}%  KV=${extra[*]:-<caller-set>}  model/args: $*"
+exec "${VLLM_BIN:-vllm}" serve "$@" "${extra[@]}"

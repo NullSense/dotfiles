@@ -2,10 +2,9 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "cleanupPeriodDays": 9999,
   "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
-    "CLAUDE_CODE_NO_FLICKER": "0",
-    "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1",
-    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "CLAUDE_CODE_NO_FLICKER": "1",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
   },
   "permissions": {
     "allow": [
@@ -52,6 +51,41 @@
     "defaultMode": "auto"
   },
   "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh set"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedra agent hook receive --agent claude --quiet",
+            "timeout": 2,
+            "statusMessage": "Waiting for Zedra approval"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedra agent hook receive --agent claude --quiet",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -70,14 +104,23 @@
             "command": "bash $HOME/.claude/hooks/deny-secrets.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rtk hook claude"
+          }
+        ]
       }
     ],
-    "Notification": [
+    "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.claude/hooks/attention.sh set"
+            "command": "\"/home/nullsense/.claude/hooks/context-mode-cache-heal.mjs\""
           }
         ]
       }
@@ -88,6 +131,15 @@
           {
             "type": "command",
             "command": "bash $HOME/.claude/hooks/attention.sh clear"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedra agent hook receive --agent claude --quiet",
+            "timeout": 2
           }
         ]
       }
@@ -105,14 +157,13 @@
             "timeout": 5
           }
         ]
-      }
-    ],
-    "SessionStart": [
+      },
       {
         "hooks": [
           {
             "type": "command",
-            "command": "\"/home/nullsense/.claude/hooks/context-mode-cache-heal.mjs\""
+            "command": "zedra agent hook receive --agent claude --quiet",
+            "timeout": 2
           }
         ]
       }
@@ -123,17 +174,24 @@
     "command": "bash $HOME/.claude/statusline.sh"
   },
   "enabledPlugins": {
-    "superpowers@claude-plugins-official": true,
-    "rust-analyzer-lsp@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
     "claude-mem@thedotmack": true,
-    "context-mode@context-mode": true,
-    "security-guidance@claude-plugins-official": true
+    "context-mode@context-mode": false,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": true,
+    "zedra@zedra": true
   },
   "extraKnownMarketplaces": {
     "context-mode": {
       "source": {
         "source": "github",
         "repo": "mksglu/context-mode"
+      }
+    },
+    "zedra": {
+      "source": {
+        "source": "github",
+        "repo": "tanlethanh/zedra-plugin"
       }
     }
   },
@@ -151,12 +209,17 @@
         "/run/user/1000/gnupg",
         "~/.gnupg"
       ],
-      "allowRead": ["~/Programming"]
+      "allowRead": [
+        "~/Programming"
+      ]
     }
   },
   "effortLevel": "high",
+  "skipWorkflowUsageWarning": true,
   "editorMode": "vim",
   "skipAutoPermissionPrompt": true,
-  "additionalDirectories": ["~/Programming", "~/.cargo"],
-  "skipWorkflowUsageWarning": true
+  "additionalDirectories": [
+    "~/Programming",
+    "~/.cargo"
+  ]
 }

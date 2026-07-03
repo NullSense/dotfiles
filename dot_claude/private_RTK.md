@@ -1,20 +1,29 @@
-# RTK — Rust Token Killer
+# RTK - Rust Token Killer
 
-Token-optimized CLI proxy (60–90% savings). A Claude Code hook auto-rewrites commands
-(`git status` → `rtk git status`, 0 overhead). Run meta-commands directly:
-`rtk gain [--history]` · `rtk discover` · `rtk proxy <cmd>` (raw/unfiltered).
+**Usage**: Token-optimized CLI proxy (60-90% savings on dev operations)
 
-Sanity: `rtk --version` and `rtk gain` must work. If `rtk gain` fails you have the wrong binary
-(reachingforthejack/rtk = Rust Type Kit) — check `which rtk`.
+## Meta Commands (always use rtk directly)
 
-## Bypass with `rtk proxy <cmd>` when output is PARSED by another tool
-RTK reshapes output (strips diff headers, normalizes whitespace, truncates) — fine for humans,
-breaks parsers; there's no auto-detection.
+```bash
+rtk gain              # Show token savings analytics
+rtk gain --history    # Show command usage history with savings
+rtk discover          # Analyze Claude Code history for missed opportunities
+rtk proxy <cmd>       # Execute raw command without filtering (for debugging)
+```
 
-**Heuristic: if you pipe into a parser (`| jq`, `| git apply`, `| patch`, `| awk`, `| python -c`)
-or redirect to a file another tool reads → prepend `rtk proxy`.** Covers: unified diffs fed to
-apply/patch (`git diff|format-patch|apply --check|show`, `diff -u`); `--porcelain`/`-z`/`--null`,
-JSON/pair output (`lsblk -J`); NUL streams (`find -print0 | xargs -0`); custom `git log --format`
-consumed downstream.
+## Installation Verification
 
-Don't bypass for human-facing output (`git diff|log|status` shown to the user, `cat`/`head`/`tail`).
+```bash
+rtk --version         # Should show: rtk X.Y.Z
+rtk gain              # Should work (not "command not found")
+which rtk             # Verify correct binary
+```
+
+⚠️ **Name collision**: If `rtk gain` fails, you may have reachingforthejack/rtk (Rust Type Kit) installed instead.
+
+## Hook-Based Usage
+
+All other commands are automatically rewritten by the Claude Code hook.
+Example: `git status` → `rtk git status` (transparent, 0 tokens overhead)
+
+Refer to CLAUDE.md for full command reference.

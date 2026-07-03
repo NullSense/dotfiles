@@ -73,6 +73,15 @@ trust_level = "trusted"
 [projects."/home/nullsense/Programming/harpe"]
 trust_level = "trusted"
 
+[projects."/home/nullsense/Programming/harpe-site"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Programming/aiquota"]
+trust_level = "trusted"
+
+[projects."/home/nullsense/Documents"]
+trust_level = "trusted"
+
 [notice]
 hide_full_access_warning = true
 hide_gpt5_1_migration_prompt = true
@@ -88,6 +97,9 @@ shell_snapshot = true
 hooks = true
 
 [plugins."github@openai-curated"]
+enabled = true
+
+[plugins."zedra@zedra"]
 enabled = true
 
 [tui.model_availability_nux]
@@ -117,6 +129,27 @@ args = ["-y", "@react-grab/mcp", "--stdio"]
 
 [hooks.state."/home/nullsense/.codex/hooks.json:stop:0:0"]
 trusted_hash = "sha256:61130bff68b73e1edd6541b811eb6e6c297cff970fa56f293ea76d15fbcffa92"
+enabled = false
 
 [hooks.state."/home/nullsense/.codex/hooks.json:stop:1:0"]
 trusted_hash = "sha256:e34b01eb25803a4e4009f36753fa27807a6bb342484e4977d6e628bc7b476074"
+enabled = false
+
+[hooks.state."/home/nullsense/.codex/hooks.json:permission_request:0:0"]
+trusted_hash = "sha256:74b7c1489853dad43a4993747e5abfcf9776f053781d2ccb63e4fef4f887ba70"
+
+[hooks.state."/home/nullsense/.codex/hooks.json:post_tool_use:0:0"]
+trusted_hash = "sha256:a04b88ad24827d93cf2019b716e0b65b983201fcd30ed62004c9a6c88fc1ee94"
+
+[hooks.state."/home/nullsense/.codex/hooks.json:user_prompt_submit:0:0"]
+trusted_hash = "sha256:c4c482c84273223664b649ff19a994cd8b7223677ee85e5c2988629c7cf4d523"
+
+[hooks.state."/home/nullsense/.codex/hooks.json:stop:2:0"]
+trusted_hash = "sha256:da3f164aaa4522d4398f51e041ecd725d1827e53439c1fc1072f01a7f7ae34fb"
+enabled = false
+
+[marketplaces.zedra]
+last_updated = "2026-06-24T09:52:34Z"
+last_revision = "5bd042e852cc59acae17b079facf74408396d930"
+source_type = "git"
+source = "https://github.com/tanlethanh/zedra-plugin.git"

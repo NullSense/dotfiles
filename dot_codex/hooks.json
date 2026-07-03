@@ -4,27 +4,76 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "bash $HOME/.claude/hooks/attention.sh set codex"
+            "command": "bash $HOME/.claude/hooks/attention.sh set codex",
+            "type": "command"
           }
         ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "_source": "zedra-agent-hook",
+        "hooks": [
+          {
+            "command": "zedra agent hook receive --agent codex --quiet",
+            "statusMessage": "Waiting for Zedra approval",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "_source": "zedra-agent-hook",
+        "hooks": [
+          {
+            "command": "zedra agent hook receive --agent codex --quiet",
+            "timeout": 2,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
       }
     ],
     "Stop": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "bash $HOME/.claude/hooks/attention.sh clear codex"
+            "command": "bash $HOME/.claude/hooks/attention.sh clear codex",
+            "type": "command"
           }
         ]
       },
       {
         "hooks": [
           {
-            "type": "command",
             "command": "/home/nullsense/.local/bin/plannotator",
-            "timeout": 345600
+            "timeout": 345600,
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "_source": "zedra-agent-hook",
+        "hooks": [
+          {
+            "command": "zedra agent hook receive --agent codex --quiet",
+            "timeout": 2,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "_source": "zedra-agent-hook",
+        "hooks": [
+          {
+            "command": "zedra agent hook receive --agent codex --quiet",
+            "timeout": 2,
+            "type": "command"
           }
         ]
       }

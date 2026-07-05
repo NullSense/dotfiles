@@ -564,6 +564,15 @@ if (( ALLOW_AGENT_VAULT )); then
         _proxy="$AGENT_VAULT_ADDR"
         case "$_proxy" in http*://*) : ;; *) _proxy="http://$_proxy" ;; esac
     fi
+    # Node/undici (WebFetch, remote MCP connectors, any global fetch) REFUSES to
+    # set the TLS SNI/servername to a bare IP, so an https-scheme proxy pointed at
+    # 127.0.0.1 dies with ERR_INVALID_ARG_VALUE and every node fetch "socket
+    # closes" — surfacing as Vercel/Exa MCP "invalid/expired session" and WebFetch
+    # HTTP 000. curl is unaffected (it happily SNIs an IP), which is the tell.
+    # The MITM cert's SAN already covers DNS:localhost, so rewriting the proxy host
+    # IP→localhost gives undici a valid non-IP servername while keeping the chain
+    # verifiable. Verified 2026-07-05: node fetch via proxy 127.0.0.1→ERR, localhost→302.
+    _proxy="${_proxy//127.0.0.1:/localhost:}"
     if [[ -n "$_proxy" ]]; then
         ARGS+=(
             --setenv HTTPS_PROXY "$_proxy"

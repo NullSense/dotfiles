@@ -15,6 +15,14 @@ image_quality = 75
 image_alloc = 1073741824
 
 [plugin]
+# Main-pane image preview -> chafa block-art (see plugins/chafa.yazi). Alacritty
+# has no Sixel / Kitty-graphics protocol, so the stock `image` previewer draws
+# nothing; chafa renders dense octant blocks in truecolor instead. Delete this
+# line if you switch to a graphics-capable terminal (kitty/ghostty/foot).
+prepend_previewers = [
+	{ mime = "image/*", run = "chafa" },
+]
+
 # Tab on a hovered image -> rich spot panel (native dims + EXIF via exiftool).
 # Prepended so it wins over the built-in image spotter; needs perl-image-exiftool
 # for the EXIF rows, but degrades to the stock info if it's absent.

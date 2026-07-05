@@ -1,8 +1,10 @@
 -- Forked from omarchy's default/elephant/omarchy_background_selector.lua
--- Adds ~/Pictures/backgrounds/ as a third source so personal wallpapers
--- show up in the Style → Background picker for every theme.
--- Re-sync from upstream periodically; the only diff is the extra `dirs`
--- entry below.
+-- Adds ~/Pictures/backgrounds/ and ~/Pictures/harpe/ as extra sources so
+-- personal + harpe-art wallpapers show up in the Style → Background picker
+-- for every theme. harpe is a nested website-dump tree, so the find below
+-- recurses (maxdepth 4) instead of the upstream maxdepth 1.
+-- Re-sync from upstream periodically; the only diffs are the extra `dirs`
+-- entries and the maxdepth bump below.
 
 Name = "omarchyBackgroundSelector"
 NamePretty = "Omarchy Background Selector"
@@ -43,6 +45,7 @@ function GetEntries()
   local dirs = {
     home .. "/.config/omarchy/current/theme/backgrounds",
     home .. "/Pictures/backgrounds", -- personal pool, theme-agnostic
+    home .. "/Pictures/harpe",       -- harpe-art dump, theme-agnostic (recursed)
   }
   if theme_name then
     table.insert(dirs, home .. "/.config/omarchy/backgrounds/" .. theme_name)
@@ -54,7 +57,7 @@ function GetEntries()
   for _, wallpaper_dir in ipairs(dirs) do
     local handle = io.popen(
       "find -L " .. ShellEscape(wallpaper_dir)
-        .. " -maxdepth 1 -type f \\( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' -o -name '*.gif' -o -name '*.bmp' -o -name '*.webp' \\) 2>/dev/null | sort"
+        .. " -maxdepth 4 -type f \\( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' -o -name '*.gif' -o -name '*.bmp' -o -name '*.webp' \\) 2>/dev/null | sort"
     )
     if handle then
       for background in handle:lines() do

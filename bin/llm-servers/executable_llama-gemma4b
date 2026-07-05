@@ -15,8 +15,9 @@
 # window is just 512 tokens (vs 1024 on the 12B) and 18 of 42 layers SHARE KV —
 # so many parallel slots cost almost nothing in VRAM.
 #
-# ⚠ VRAM exclusivity: 12GB fits EITHER this OR llama-gemma4 (12B), not both.
-#   Starting this next to a loaded 12B spills to GTT and craters both.
+# VRAM: on the 32GB RTX 5090 this (4B) and llama-gemma4 (12B) co-reside
+#   comfortably. The old 12GB card could fit only EITHER/OR — starting this
+#   next to a loaded 12B spilled to GTT and cratered both. No longer a concern.
 #
 # Backend: CUDA on the RTX 5090 (llama.cpp-cuda build). The old AMD/Vulkan path is gone
 # (card replaced 2026-06). Same SWA trade-offs as llama-gemma4: prompt-cache reuse = strict

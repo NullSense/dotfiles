@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# vllm-diffusiongemma — serve google/diffusiongemma-26B-A4B-it (discrete text
+# DIFFUSION LM, MoE 25.2B/3.8B-active) as NVFP4 on the RTX 5090 via vLLM v0.24.0.
+#
+# Why v0.24.0: it's the first vLLM release that registers the
+# `DiffusionGemmaForBlockDiffusion` arch (0.23.0/latest do NOT). Block-diffusion
+# decoding needs the V2 model runner + TRITON attention backend + the gemma4
+# reasoning parser (per nvidia/diffusiongemma-26B-A4B-it-NVFP4 card).
+#
+# Summarization-tuned: thinking OFF (extractive task; CoT only adds latency +
+# JSON corruption), NVFP4 weights (Blackwell-native 4-bit), OpenAI API on :8002.
+#
+# Usage:  vllm-diffusiongemma        (Ctrl-C to stop; --rm cleans up)
+set -euo pipefail
+
+MODEL="${MODEL:-nvidia/diffusiongemma-26B-A4B-it-NVFP4}"
+PORT="${PORT:-8002}"
+NAME="${SERVED_NAME:-diffusiongemma}"
+IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:v0.24.0}"
+GPU_UTIL="${GPU_UTIL:-0.60}"   # MoE 3.8B-active NVFP4 ≈ 11-13 GB; 0.60≈19 GB is ample
+MAXLEN="${MAXLEN:-8192}"
+
+exec docker run --rm --gpus all --name vllm-diffusiongemma \
+  -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+  -e VLLM_USE_V2_MODEL_RUNNER=1 \
+  -e PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" \
+  -e HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" \
+  -p "${PORT}:8000" --ipc=host \
+  "$IMAGE" \
+  "$MODEL" \
+  --served-model-name "$NAME" \
+  --quantization modelopt_fp4 \
+  --trust-remote-code \
+  --attention-backend TRITON_ATTN \
+  --reasoning-parser gemma4 \
+  --max-model-len "$MAXLEN" \
+  --max-num-seqs "${MAX_SEQS:-8}" \
+  --gpu-memory-utilization "$GPU_UTIL" \
+  --default-chat-template-kwargs '{"enable_thinking":false}' \
+  "$@"

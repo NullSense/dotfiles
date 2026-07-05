@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# llama-summarize-auto — VRAM-aware summariser backend for llama-swap.
+#
+# At LOAD time (when llama-swap starts this cmd) it measures CURRENT free VRAM and execs the
+# biggest summariser that fits — so it adapts to ANY game/workload automatically (it keys off
+# free VRAM, never a game's size):
+#     free ≥ DIFF_MIN  → diffusiongemma-26B-A4B (vLLM NVFP4, best quality, ~22 GB)
+#     free ≥ E4B_MIN   → gemma-4-E4B (llama.cpp Q4, ~6 GB, coexists with a game)
+#     else             → exit 1 → the request fails → litellm/caller falls back to CLOUD
+#
+# The decision is made per LOAD, not continuously: pair with a SHORT ttl in llama-swap so an idle
+# summariser evicts fast and the next load re-checks VRAM. llama-swap's cmdStop stops the vLLM
+# container (see config). Thresholds + gpu-util are env-overridable; diffusion gpu-util is DERIVED
+# from free VRAM (uses what's available, minus headroom), so it self-tunes to the free space.
+set -euo pipefail
+: "${PORT:?llama-swap must set PORT}"
+
+DIFF_MIN="${SUMMARIZE_DIFF_MIN_MB:-24000}"   # diffusiongemma needs ~22 GB weights+KV + autotune headroom
+E4B_MIN="${SUMMARIZE_E4B_MIN_MB:-8000}"      # E4B ~6 GB + headroom
+TOTAL_MB="${SUMMARIZE_TOTAL_MB:-32768}"      # card size for the gpu-util fraction
+HEADROOM_MB="${SUMMARIZE_HEADROOM_MB:-2500}" # leave this much free above vLLM's budget
+
+log() { echo "[summarize-auto] $*" >&2; }
+free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -dc '0-9')
+free="${free:-0}"
+
+if [ "$free" -ge "$DIFF_MIN" ]; then
+  gu=$(awk -v f="$free" -v t="$TOTAL_MB" -v h="$HEADROOM_MB" \
+        'BEGIN{u=(f-h)/t; if(u>0.85)u=0.85; if(u<0.62)u=0.62; printf "%.2f",u}')
+  log "free ${free}MiB ≥ ${DIFF_MIN} → diffusiongemma (vLLM NVFP4), gpu-util=${gu}, port=${PORT}"
+  docker rm -f vllm-diffusiongemma >/dev/null 2>&1 || true   # clear a stale container from a hard kill
+  # SERVED_NAME=summarize so vLLM accepts the name llama-swap forwards (pinned via useModelName).
+  exec env PORT="$PORT" SERVED_NAME=summarize GPU_UTIL="$gu" MAX_SEQS=2 MAXLEN=4096 \
+    /home/nullsense/bin/llm-servers/vllm-diffusiongemma --enforce-eager --max-num-batched-tokens 2560
+elif [ "$free" -ge "$E4B_MIN" ]; then
+  log "free ${free}MiB in [${E4B_MIN},${DIFF_MIN}) → gemma-4-E4B (llama.cpp), port=${PORT}"
+  exec env PORT="$PORT" MODE=sum /home/nullsense/bin/llm-servers/llama-gemma4b
+else
+  log "free ${free}MiB < ${E4B_MIN} → no local summariser fits; failing so caller falls back to cloud"
+  exit 1
+fi

@@ -28,11 +28,11 @@ models:
     description: "embedding · Octen-Embedding-4B (Qwen3-Embedding finetune), 2560-dim, last-token pooling. Shared embedder for sift + oracle."
     metadata: { class: embedding, thinking: na, best_for: "semantic search / RAG / retrieval", tags: [embedding, local, shared] }
 
-  # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), Vulkan GPU (~0.4 GB VRAM).
+  # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), CUDA GPU (~0.4 GB VRAM).
   #    Used by litellm mcp_semantic_tool_filter. Co-resident with the small models via the
   #    matrix (var `t`) so loading it NEVER evicts the chat model. First load auto-downloads
   #    the official llama.cpp GGUF (~379 MB Q8_0); needs a llama.cpp build with the `lfm2-bidir`
-  #    arch (update llama.cpp if it errors "unknown architecture lfm2-bidir"; if the Vulkan
+  #    arch (update llama.cpp if it errors "unknown architecture lfm2-bidir"; if the CUDA
   #    backend lacks it, fall back to -ngl 0). Filter fails-open (all tools) if it can't load.
   lfm2-embed-350m:
     cmd: env PORT=${PORT} llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0 --embeddings --pooling cls --ctx-size 512 --ubatch-size 512 --device CUDA0 -ngl 99 --host 127.0.0.1 --port ${PORT} --metrics

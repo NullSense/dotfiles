@@ -1,0 +1,8 @@
+#!/bin/sh
+# llama-summarize-stop — cmdStop helper for the llama-swap `summarize` model.
+# llama-swap runs this INSTEAD of its default SIGTERM, so it must stop BOTH backends the
+# auto-launcher might have started: the diffusiongemma vLLM container (docker) OR the E4B
+# llama-server process (${PID}, passed as $1). No-ops on whichever isn't running.
+docker stop vllm-diffusiongemma >/dev/null 2>&1 || true
+[ -n "$1" ] && kill "$1" >/dev/null 2>&1 || true
+exit 0

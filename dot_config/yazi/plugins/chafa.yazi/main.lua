@@ -37,6 +37,11 @@ local function chafa_args(area, url)
 		"--dither=" .. CFG.dither,
 		"--work=" .. CFG.work,
 		"--font-ratio=" .. CFG.font_ratio,
+		-- CRITICAL: default --probe=auto writes a capability query to the
+		-- controlling terminal and waits up to 5s for the reply. Under Yazi that
+		-- reply leaks into stdin as phantom keystrokes (e.g. `d` -> trash prompt).
+		-- We force symbols + explicit --size, so the probe is useless. Turn it off.
+		"--probe=off",
 		"--polite=on", -- don't emit terminal query/control sequences
 		"--animate=off", -- first frame only for GIF/WebP
 		"--relative=off",

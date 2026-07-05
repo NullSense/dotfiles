@@ -26,6 +26,7 @@ hyprwhspr
 infisical
 Infisical
 kubectl
+llama-swap
 LM Studio
 Matas
 mise

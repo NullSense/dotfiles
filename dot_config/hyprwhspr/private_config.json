@@ -3,6 +3,7 @@
   "use_hypr_bindings": true,
   "audio_device_name": null,
   "transcription_backend": "onnx-asr",
+  "onnx_asr_quantization": null,
   "audio_ducking": true,
   "mute_detection": true,
   "recording_mode": "auto",

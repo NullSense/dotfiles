@@ -1,19 +1,31 @@
--- chafa.yazi — high-fidelity block-art image previews for terminals with no
--- graphics protocol (Alacritty has neither Sixel nor the Kitty graphics
--- protocol, so Yazi's built-in `image` previewer draws nothing here).
---
--- This renders every image with chafa's densest sub-cell block glyphs
--- (octants = 2x4 subpixels per cell) in 24-bit colour, so on a powerful box
--- you get "loads of blocks" that approximate the real image closely.
+-- chafa.yazi — terminal-adaptive image previews.
 --
 -- Routed via `prepend_previewers = [{ mime = "image/*", run = "chafa" }]` in
--- yazi.toml so it wins over the stock (graphics-only) image previewer.
+-- yazi.toml, so it owns image previews. It then picks per terminal:
 --
--- Tuning knobs live in CFG below. If you ever move to a graphics-capable
--- terminal (kitty/ghostty/foot), delete the prepend_previewers line and this
--- plugin is bypassed automatically.
+--   * Graphics terminal (kitty/ghostty/wezterm) → hand off to Yazi's built-in
+--     `image` previewer, which draws REAL pixels via the terminal's graphics
+--     protocol. Use `yk` (kitty -e yazi) to get this on demand.
+--   * Everything else (Alacritty has no Sixel / Kitty-graphics protocol) →
+--     render chafa's densest sub-cell block glyphs (octants = 2x4 subpixels)
+--     in 24-bit colour. "Loads of blocks" that approximate the image.
+--
+-- Why route chafa here instead of unsetting WAYLAND_DISPLAY to force Yazi's
+-- built-in chafa fallback: that env strip would also reach Yazi's openers, so
+-- GUI apps launched from Yazi (e.g. the tev image viewer) would lose their
+-- Wayland socket. Doing it at the previewer layer leaves Yazi's env untouched.
+--
+-- Chafa tuning knobs live in CFG below.
 
 local M = {}
+
+-- Terminals whose graphics protocol Yazi can drive natively. In these we defer
+-- to the built-in `image` previewer for real pixels; elsewhere we use chafa.
+local function graphics_terminal()
+	return os.getenv("KITTY_WINDOW_ID") ~= nil -- kitty
+		or os.getenv("GHOSTTY_RESOURCES_DIR") ~= nil -- ghostty
+		or os.getenv("WEZTERM_PANE") ~= nil -- wezterm
+end
 
 -- === tuning ================================================================
 local CFG = {
@@ -51,6 +63,13 @@ local function chafa_args(area, url)
 end
 
 function M:peek(job)
+	-- Real pixels when the terminal supports a graphics protocol. Delegate to
+	-- Yazi's built-in image previewer; fall through to chafa only if it errors.
+	if graphics_terminal() then
+		local ok = pcall(function() require("image"):peek(job) end)
+		if ok then return end
+	end
+
 	local area = job.area
 	local output, err = Command("chafa")
 		:arg(chafa_args(area, job.file.url))

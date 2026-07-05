@@ -139,7 +139,8 @@ autoload -U add-zsh-hook
 _eza_on_cd() { emulate -L zsh; eza -ah --icons=always --group-directories-first; print }
 add-zsh-hook chpwd _eza_on_cd
 
-# yazi launcher with cwd-on-exit
+# yazi launcher with cwd-on-exit (in the current terminal). In Alacritty this
+# shows chafa block-art previews; run it inside kitty for real-pixel previews.
 yy() {
   local tmp; tmp=$(mktemp -t yazi-cwd.XXXXXX)
   yazi "$@" --cwd-file="$tmp"
@@ -147,6 +148,12 @@ yy() {
   [[ -n $cwd && $cwd != $PWD ]] && builtin cd -- "$cwd"
   command rm -f -- "$tmp"
 }
+
+# yk — open yazi in a detached kitty window for REAL image previews (kitty
+# graphics protocol), while Alacritty stays the daily driver. The chafa.yazi
+# plugin auto-detects kitty and hands off to Yazi's built-in image renderer.
+# No cwd-on-exit here: it's a separate window, so it can't cd this shell.
+yk() { command -v kitty >/dev/null && kitty --detach yazi "$@"; }
 
 # ─── Local config & secrets ─────────────────────────────────────────────────
 [[ -f ~/bin/zshaliases ]] && source ~/bin/zshaliases

@@ -15,10 +15,10 @@ image_quality = 75
 image_alloc = 1073741824
 
 [plugin]
-# Main-pane image preview -> chafa block-art (see plugins/chafa.yazi). Alacritty
-# has no Sixel / Kitty-graphics protocol, so the stock `image` previewer draws
-# nothing; chafa renders dense octant blocks in truecolor instead. Delete this
-# line if you switch to a graphics-capable terminal (kitty/ghostty/foot).
+# Main-pane image preview -> terminal-adaptive (see plugins/chafa.yazi): real
+# pixels via the graphics protocol in kitty/ghostty/wezterm (use `yk` = kitty -e
+# yazi), dense octant chafa blocks in Alacritty (no Sixel/Kitty-graphics there).
+# The plugin auto-detects; nothing to toggle when switching terminals.
 prepend_previewers = [
 	{ mime = "image/*", run = "chafa" },
 ]

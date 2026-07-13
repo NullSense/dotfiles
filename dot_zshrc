@@ -192,10 +192,9 @@ unset _agent
 # isolated, which would re-resolve "claude" back to the shim.
 #
 # Use when you need to write to paths the sandbox doesn't bind (systemd unit
-# files, /etc, ~/.config/* outside chezmoi source, etc.) The deny-secrets
-# PreToolUse hook still blocks tool calls naming secret paths (~/.ssh,
-# ~/.gnupg, ~/.config/rbw, .env files, etc.) even in -raw mode — defense
-# in depth, deliberately layered above bwrap.
+# files, /etc, ~/.config/* outside chezmoi source, etc.) Full host access,
+# all secrets exposed — the bwrap sandbox was the only in-sandbox secret
+# boundary and -raw mode skips it entirely. Last resort only.
 alias claude-raw='$HOME/.local/bin/claude'
 alias codex-raw='/usr/bin/codex'
 alias opencode-raw='/usr/bin/opencode'

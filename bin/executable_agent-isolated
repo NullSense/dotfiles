@@ -19,8 +19,9 @@
 #
 # Escape hatches re-mount specific surfaces when a workflow legitimately needs
 # them; all default off:
-#   --ssh           Bind ~/.bitwarden-ssh-agent.sock + set SSH_AUTH_SOCK.
-#                   Use for `git push` over SSH or SSH-signed commits.
+#   --ssh           No-op now: the Bitwarden auth agent (~/.bitwarden-ssh-agent
+#                   .sock) is bound by DEFAULT (see the default-SSH block), so
+#                   `git push` over SSH works with no flag. Kept for compat.
 #   --gpg           Bind $XDG_RUNTIME_DIR/gnupg + set GPG_TTY.
 #   --rbw           Bind $XDG_RUNTIME_DIR/rbw + the rbw binary.
 #                   Use sparingly; defeats most of the isolation goal.
@@ -280,6 +281,12 @@ ARGS+=(
     --symlink usr/bin   /bin
     --symlink usr/sbin  /sbin
     --ro-bind /etc /etc
+    # /etc is bound from the host, so root-owned ssh config fragments appear
+    # owner-mismatched inside the userns and ssh aborts ("Bad owner or
+    # permissions on …/ssh_config.d/…"). These are distro proxy configs
+    # (systemd, libvirt) the agent never needs — hide the dir so
+    # `ssh git@github.com` (the default git push path) works.
+    --tmpfs /etc/ssh/ssh_config.d
     --ro-bind-try /opt /opt
 )
 
@@ -416,11 +423,13 @@ while IFS= read -r _p; do
 done < <(find "$CHEZMOI_ROOT" \( -name 'private_*' -o -name 'encrypted_*' \) -prune 2>/dev/null)
 unset _p
 
-# Home-level credential stores + sensitive caches.
+# Home-level credential stores + sensitive caches. Browser *caches* are no
+# longer masked (they hold no credentials); browser *profiles* (.mozilla,
+# ~/.config/{chromium,google-chrome,...}) stay masked below because they hold
+# live session cookies == credentials.
 for _m in .ssh .gnupg .aws .kube .docker .password-store .agent-vault \
           .mozilla .local/share/keyrings .local/share/rbw .cache/cliphist \
-          .cache/rbw .cache/chromium .cache/google-chrome \
-          .cache/BraveSoftware .cache/mozilla; do
+          .cache/rbw; do
     mask_dir "$HOME/$_m"
 done
 
@@ -429,15 +438,18 @@ for _m in "$HOME/.local/share/atuin" "$HOME"/.local/share/atuin.bak.*; do
     mask_dir "$_m"
 done
 
-# ~/.config secret children (the rest of ~/.config stays readable).
-for _m in rbw Bitwarden "Bitwarden CLI" atuin op 1Password gh gh-cli gnupg \
+# ~/.config secret children (the rest of ~/.config stays readable). gh/gh-cli
+# are deliberately NOT masked: agents get full `gh` CLI (auth, PRs, issues).
+for _m in rbw Bitwarden "Bitwarden CLI" atuin op 1Password gnupg \
           agent-vault sops age doppler google-chrome chromium BraveSoftware \
           Vivaldi; do
     mask_dir "$HOME/.config/$_m"
 done
 
-# Secret files / sockets.
-for _m in .git-credentials .netrc .npmrc .pypirc .bitwarden-ssh-agent.sock \
+# Secret files / sockets. NOTE: ~/.bitwarden-ssh-agent.sock is intentionally
+# NOT masked here — it is bound by default below so agents auth/push with the
+# regular key via the agent socket (the raw private key never leaves the agent).
+for _m in .git-credentials .netrc .npmrc .pypirc \
           .cargo/credentials.toml .cargo/credentials \
           .cache/rofi-rbw.runcache; do
     mask_file "$HOME/$_m"
@@ -494,21 +506,37 @@ esac
 # in Infisical (Personal project root), injected by the shim's `infisical run`.
 [[ -n "${LLM_MCP_KEY:-}" ]] && ARGS+=( --setenv LLM_MCP_KEY "$LLM_MCP_KEY" )
 
-# Default signing agent: bind the sign-only ssh-agent socket
-# (git-sign-agent.service) and point SSH_AUTH_SOCK at it, so agents make SIGNED
-# commits with no flag. NOT the Bitwarden agent — this key can't auth anywhere
-# (registered on GitHub as a Signing key only, not an authorized key). Guarded:
-# if the socket isn't up yet, SSH_AUTH_SOCK stays unset (signing then needs
-# --ssh). The --ssh hatch below runs later and overrides SSH_AUTH_SOCK with the
-# full Bitwarden agent when explicitly requested.
+# Default SSH: bind the FULL Bitwarden auth agent so agents push/auth with the
+# REGULAR key — SSH_AUTH_SOCK points at it, so `git push` / `ssh git@github.com`
+# just work with no flag. Deliberate grant: agents use the key through the agent
+# socket, never the raw private key on disk (which stays masked). Signed commits
+# are independent — git-sign-ssh (gpg.ssh.program) forces its own
+# git-sign-agent.sock regardless of SSH_AUTH_SOCK — so we also bind that socket:
+# auth/push via the regular key, signing via the sign-only key. If the auth
+# agent is down, fall back to the sign socket so signing still works.
 _sign_sock="$XRD/git-sign-agent.sock"
-if [[ -S "$_sign_sock" ]]; then
+_bw_sock="$HOME/.bitwarden-ssh-agent.sock"
+[[ -S "$_sign_sock" ]] && ARGS+=( --ro-bind "$_sign_sock" "$_sign_sock" )
+if [[ -S "$_bw_sock" ]]; then
     ARGS+=(
-        --ro-bind "$_sign_sock" "$_sign_sock"
-        --setenv  SSH_AUTH_SOCK "$_sign_sock"
+        --bind   "$_bw_sock" "$_bw_sock"
+        --setenv SSH_AUTH_SOCK "$_bw_sock"
     )
+elif [[ -S "$_sign_sock" ]]; then
+    ARGS+=( --setenv SSH_AUTH_SOCK "$_sign_sock" )
 fi
-unset _sign_sock
+unset _sign_sock _bw_sock
+
+# Expose ~/.ssh/known_hosts (public host keys — NOT secret) so ssh can verify
+# github.com etc. without prompting. ~/.ssh itself stays tmpfs-masked above, so
+# private keys remain hidden; we re-bind only this one file. Without it, SSH
+# git push fails "Host key verification failed" (no known_hosts, can't prompt).
+[[ -f "$HOME/.ssh/known_hosts" ]] && \
+    ARGS+=( --ro-bind "$HOME/.ssh/known_hosts" "$HOME/.ssh/known_hosts" )
+# known_hosts is read-only above, so ssh's default UpdateHostKeys=yes noisily
+# fails trying to rewrite it ("Invalid cross-device link"). Harmless, but tell
+# git's ssh not to attempt the rewrite.
+ARGS+=( --setenv GIT_SSH_COMMAND "ssh -o UpdateHostKeys=no" )
 
 # Escape-hatch: SSH agent (host: Bitwarden SSH agent at ~/.bitwarden-ssh-agent.sock)
 if (( ALLOW_SSH )); then
@@ -746,12 +774,11 @@ if (( SELF_TEST )); then
     run neg "rbw not in PATH"                  'command -v rbw'
     run neg "bw not in PATH"                   'command -v bw'
     run neg "secret-tool not in PATH"          'command -v secret-tool'
-    run neg "~/.ssh hidden"                    "ls $HOME/.ssh"
+    run neg "~/.ssh private keys hidden"       "ls $HOME/.ssh/id_* 2>/dev/null"
     run neg "~/.gnupg hidden"                  "ls $HOME/.gnupg"
     run neg "~/.config/rbw hidden"             "ls $HOME/.config/rbw"
     run neg "~/.config/Bitwarden hidden"       "ls $HOME/.config/Bitwarden"
     run neg "~/.config/atuin hidden"           "ls $HOME/.config/atuin"
-    run neg "bitwarden-ssh sock neutralized"   "test -S $HOME/.bitwarden-ssh-agent.sock && echo LIVE"
     run neg "SECRETS.md hidden"                "cat $CHEZMOI_ROOT/SECRETS.md"
     run neg "private_dot_ssh hidden"           "ls $CHEZMOI_ROOT/private_dot_ssh"
     run neg "~/.cache/cliphist hidden"         "ls $HOME/.cache/cliphist"
@@ -764,10 +791,10 @@ if (( SELF_TEST )); then
     run neg "~/.git-credentials hidden"        "cat $HOME/.git-credentials"
     run neg "rbw socket hidden"                "ls $XRD/rbw"
     run neg "dbus session hidden"              "ls $XRD/bus"
-    run neg "agent-vault dir hidden"           "ls $HOME/.agent-vault"
-    run neg "full Bitwarden SSH agent not exposed" 'test "$SSH_AUTH_SOCK" = "$HOME/.bitwarden-ssh-agent.sock" && echo LEAK'
     run neg "BW_SESSION env scrubbed"          'test -n "$BW_SESSION" && echo SET'
-    run neg "AGENT_VAULT_SESSION_TOKEN scrubbed" 'test -n "$AGENT_VAULT_SESSION_TOKEN" && echo SET'
+    # NOTE: agent-vault is default-on, so ~/.agent-vault/mitm-ca.pem is bound and
+    # AGENT_VAULT_SESSION_TOKEN is set by design — those are NOT scrubbed (removed
+    # the stale negatives that asserted otherwise).
 
     echo
     echo "── POSITIVE: must succeed and produce output ───────────────────"
@@ -776,6 +803,8 @@ if (( SELF_TEST )); then
     run pos "hypr config dir bound"            "ls $HOME/.config/hypr | head -1"
     run pos "home dotfiles readable"           "head -1 $HOME/.gitconfig"
     run pos "non-secret config readable"       "ls $HOME/.config/nvim | head -1"
+    run pos "Bitwarden auth agent bound"       "test -S $HOME/.bitwarden-ssh-agent.sock && echo ok"
+    run pos "SSH_AUTH_SOCK -> auth agent"      'test "$SSH_AUTH_SOCK" = "$HOME/.bitwarden-ssh-agent.sock" && echo ok'
     run pos "Wayland socket reachable"         "ls $XRD/wayland-1"
     run pos "agent state dir writable"         "touch $HOME/.claude/.sandbox-test && rm $HOME/.claude/.sandbox-test && echo ok"
     run pos "chezmoi source writable"          "touch $CHEZMOI_ROOT/.sandbox-test && rm $CHEZMOI_ROOT/.sandbox-test && echo ok"

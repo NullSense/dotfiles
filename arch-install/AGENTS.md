@@ -20,7 +20,7 @@ and given tools. This is the **map**; deep-dives are linked per section.
 | Dispatch shim (source) | `bin/executable__agent-shim` → `~/bin/_agent-shim` |
 | MCP source-of-truth | `.chezmoidata/mcp.yaml` |
 | MCP sync tool | `dot_local/bin/executable_mcp-sync` → `~/.local/bin/mcp-sync` |
-| Safety hooks | `dot_claude/hooks/{deny-secrets,destructive-guard,attention}.sh` |
+| Safety hooks | `dot_claude/hooks/{destructive-guard,attention}.sh` |
 | Hook registrations | `~/.claude/settings.json` → chezmoi `dot_claude/settings.json` (managed, but heavily LIVE-edited — edit the target then `chezmoi re-add`; source drifts otherwise) |
 
 > **chezmoi note:** the source repo has `autocommit = true` + `autopush = true`.
@@ -62,7 +62,7 @@ infisical run --silent --                      ◀── TIER 1  env-secret inje
                                               upstream APIs
 
 Host-side, Claude-Code-only, runs on each tool call (parallel to above):
-   PreToolUse hooks → deny-secrets.sh · dcg · rtk hook claude   ◀── TIER 3
+   PreToolUse hooks → dcg · rtk hook claude   ◀── TIER 3
 ```
 
 ## The tiers
@@ -71,7 +71,7 @@ Host-side, Claude-Code-only, runs on each tool call (parallel to above):
 |---|---|---|---|---|
 | 1 | **Infisical** (`infisical run`) | app secrets sitting in plaintext files | yes (if installed) | all agents |
 | 2 | **bwrap** (`agent-isolated`) | prompt-injection touching FS / reading secrets | yes | all agents |
-| 3 | **PreToolUse hooks** (`deny-secrets`, `dcg`) | secret-extraction & destructive commands | yes | **Claude only** |
+| 3 | **PreToolUse hooks** (`dcg`) | destructive commands | yes | **Claude only** |
 | 4 | **agent-vault** (MITM proxy) | API keys leaking into transcripts/env | opt-in (`--agent-vault`) | per-invocation |
 
 ### Tier 1 — Infisical
@@ -131,7 +131,6 @@ Registered in `~/.claude/settings.json` → `hooks.PreToolUse`:
 
 | Hook command | Source | Purpose |
 |---|---|---|
-| `deny-secrets.sh` | `dot_claude/hooks/` (ours) | regex-block secret-extraction commands (rbw/bw/gpg/ssh-add/`cat *.pem`/`cat ~/.ssh`…). Matches **Bash + Read/Edit/Write/NotebookEdit/Glob/Grep**. **Claude-only.** |
 | `bunx cc-safety-net@0.9.0 --claude-code` | [kenryu42/claude-code-safety-net](https://github.com/kenryu42/claude-code-safety-net) (npm `cc-safety-net`, bun-cached) | destructive git/fs command catcher. Replaced `dcg` on Claude 2026-05-28. Custom rules: `~/.cc-safety-net/config.json` / project `.safety-net.json`. |
 | `rtk hook claude` | RTK | token-optimizing command rewrite (not security). |
 
@@ -249,12 +248,11 @@ curl -s http://127.0.0.1:14321/health    # broker control API
    key as plaintext env. Blocked on the daemon + token-mint flow.
 3. **Tier 3 destructive guard: Claude+OpenCode done, Codex pending.**
    cc-safety-net is wired on Claude + OpenCode; Codex still needs its TUI
-   plugin install (no raw CLI hook mode). `deny-secrets` (secret-READ guard)
-   remains **Claude-only** — codex/opencode rely on the bwrap sandbox for that.
+   plugin install (no raw CLI hook mode). The `deny-secrets` PreToolUse hook
+   (secret-READ guard) was removed 2026-07-13; the bwrap sandbox is now the
+   sole in-sandbox secret boundary for all agents.
 4. **MCP supply chain.** stdio MCPs run `npx …@latest` inside the sandbox with
    the agent's full access; unpinned releases are a supply-chain vector.
-5. **deny-secrets is a regex blocklist** — bypassable via `base64`,
-   `python -c open(...)`, etc. Defense-in-depth, not a boundary.
 
 ## Conventions
 

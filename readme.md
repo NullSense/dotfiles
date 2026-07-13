@@ -18,7 +18,7 @@ github.com/NullSense/dotfiles                   ← THIS IS THE ONLY REPO
 │   ├── verify-system.sh                        post-install health check
 │   └── fix-boot-after-windows.sh               recovery
 │
-├── dot_claude/        chezmoi → ~/.claude/             Claude Code: CLAUDE.md, mcp.json, statusline, skills, commands, memory, hooks (deny-secrets, destructive-guard)
+├── dot_claude/        chezmoi → ~/.claude/             Claude Code: CLAUDE.md, mcp.json, statusline, skills, commands, memory, hooks (destructive-guard)
 ├── dot_codex/         chezmoi → ~/.codex/              Codex CLI: config.toml, rules
 ├── dot_config/        chezmoi → ~/.config/             hypr/, waybar/, ghostty/, mako/, opencode/, systemd/user/, agent-isolated/, etc.
 ├── dot_local/         chezmoi → ~/.local/              user-installed binaries (hypr-waybar-bridge, sudo-pill-daemon, etc.)
@@ -127,13 +127,15 @@ Every coding-agent CLI (`claude`, `codex`, `opencode`) is auto-wrapped by `~/bin
 
 Why shims, not zsh functions: a function only intercepts zsh invocations. Anything else — `command claude`, `/usr/bin/env claude`, any non-zsh shell, an `exec()` syscall from a program, a systemd unit — would bypass the wrapper. Real binaries on `$PATH` catch all PATH-based lookups regardless of context.
 
-The agent runs with `tmpfs /` + `tmpfs $HOME`, plus a curated allowlist of read-only paths and read-write workspaces. It **cannot** see `~/.ssh`, `~/.gnupg`, `~/.config/rbw`, the rbw/SSH-agent sockets, the chezmoi `private_*` sources, atuin history, the cliphist DB, or any secret-bearing env var.
+The agent runs with `tmpfs /` + `tmpfs $HOME`, plus a curated allowlist of read-only paths and read-write workspaces. It **cannot** see raw private keys/passwords — `~/.ssh/id_*`, `~/.gnupg`, `~/.config/rbw`, the rbw socket, browser profiles, the chezmoi `private_*` sources, atuin history, the cliphist DB, or any secret-bearing env var. Since **2026-07-13** it **can** (by default) use the Bitwarden SSH **auth** agent socket (`SSH_AUTH_SOCK` → `git push`/`ssh git@github.com`), `~/.ssh/known_hosts`, and `~/.config/gh` — so agents do git + `gh` directly. GitHub git is routed over SSH via gitconfig `insteadOf`, so no token is needed for git. `claude-raw`/`AGENT_UNSANDBOX=1` exposes everything.
 
-Escape-hatches (default off, opt-in per invocation):
-- `claude --ssh`          → binds `~/.bitwarden-ssh-agent.sock`, exports `SSH_AUTH_SOCK`
+Defaults-on (since 2026-07-13): Bitwarden SSH auth key, `agent-vault` HTTPS credential injection, docker socket, GPU nodes.
+
+Escape-hatches (opt-in per invocation):
+- `claude --ssh`          → no-op now (auth agent bound by default); kept for compat
 - `claude --gpg`          → binds `$XDG_RUNTIME_DIR/gnupg`
 - `claude --rbw`          → binds the rbw socket + config + binary
-- `claude --agent-vault`  → routes outbound HTTPS through agent-vault for credential injection
+- `claude --no-agent-vault` / `--no-docker` / `--no-gpu` → opt OUT of a default-on surface
 
 Bypasses (deliberate, no longer accidental):
 - `AGENT_UNSANDBOX=1 claude …` — env-var gate inside `agent-isolated`
@@ -143,11 +145,7 @@ Bypasses (deliberate, no longer accidental):
 
 Self-test: `~/bin/agent-isolated --self-test` runs 26 verifications (20 negative — secrets must be hidden, 6 positive — required surfaces must be reachable).
 
-### 3. Defense in depth — `deny-secrets` PreToolUse hook
-
-Lives at `dot_claude/hooks/deny-secrets.sh`. Pattern-matches every `Bash`, `Read`, `Edit`, `Write`, `NotebookEdit`, `Glob`, and `Grep` tool call inside an agent and refuses ones that name known secret-extraction commands or paths (`rbw`, `bw`, `cat ~/.ssh`, `cat ~/.gnupg`, etc.). Caught a real incident on 2026-05-08 — see `the-night-an-ai-ate-my-home-directory.md`. The hook is redundant with the bwrap sandbox (the secrets aren't reachable from inside anyway), but layered defense costs nothing. **Claude-only** — see "Known gaps" below for the codex/opencode story.
-
-### 4. Secret scanning at commit & push time
+### 3. Secret scanning at commit & push time
 
 Global git template at `dot_git-template/hooks/` deploys event-driven scanners to **every git repo** on the machine (existing repos via `git init` retrofit; new ones via `git config --global init.templateDir`):
 
@@ -163,13 +161,13 @@ Layer logic:
 
 Trufflehog gracefully no-ops if the binary is missing (`command -v` guard), so a broken install doesn't block pushes — gitleaks at commit time still applies.
 
-### 5. CVE visibility — `arch-audit-gtk` tray indicator
+### 4. CVE visibility — `arch-audit-gtk` tray indicator
 
 System-tray indicator polling [security.archlinux.org](https://security.archlinux.org) (the official Arch Security Team tracker) every 2–6 hours with random jitter for privacy. Green = no known unpatched CVEs in installed packages; yellow/red = there are some. xdg-autostarts on login; pacman post-transaction hook re-checks after every upgrade. Package maintainer (`kpcyrd`) is an Arch + Debian + Alpine packager with a background in reproducible builds and supply-chain security.
 
 No timer, no logs to read, no email — purely passive visibility.
 
-### 6. Network / DNS layer — AdGuard via Tailscale + firewalld
+### 5. Network / DNS layer — AdGuard via Tailscale + firewalld
 
 Three sub-layers; all cross-agent, none process-aware (which is fine because layer 2 above gives process-level FS isolation):
 
@@ -206,7 +204,6 @@ None of these run on a timer. They exist for incident response and curiosity.
 |---|---|---|
 | Bitwarden SSH agent | automatic | always-on, GUI-managed; 5min vault timeout |
 | `agent-isolated` bwrap shim | automatic | every `claude` / `codex` / `opencode` invocation via PATH |
-| `deny-secrets` hook | automatic | every Bash / Read / Edit / Write / Glob / Grep tool call (Claude only) |
 | gitleaks + infisical pre-commit | automatic | every `git commit` (all repos with template hook) |
 | trufflehog pre-push | automatic | every `git push` (all repos with template hook) |
 | arch-audit-gtk | automatic | 2–6h jittered + pacman post-tx hook |
@@ -235,7 +232,6 @@ pgrep -a arch-audit-gtk                     # expect process running (or check t
 
 | Gap | Impact | Status |
 |---|---|---|
-| Codex / OpenCode lack a `deny-secrets` equivalent hook | bwrap covers FS isolation but no in-agent regex deny like Claude's hook | open; non-trivial — Codex has `~/.codex/config.toml` sandbox config but no simple regex-deny path; OpenCode plugin system differs |
 | MCP servers not unified across Claude / Codex / OpenCode / Hermes | each has its own MCP config file; drift possible | open; chezmoi-template approach discussed, not yet implemented |
 | MCP server periodic scan with [MCP-Scan](https://github.com/invariantlabs-ai/mcp-scan) | tool-poisoning / rug-pull detection not automated | deferred; run `npx @invariant-ai/mcp-scan` ad-hoc when adding a new MCP server |
 | AUR `trufflehog-bin` PKGBUILD wrapper path bug | requires `sed` fix or pacman hook to re-patch after upgrades | mitigated by local pacman hook; bug to be reported to maintainer |

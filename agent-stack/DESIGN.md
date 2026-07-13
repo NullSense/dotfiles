@@ -8,7 +8,7 @@ versions, centralized config, and documented update paths.
 ## 1. Scope
 
 - **In scope:** the *agent layer* — `agent-isolated`, `_agent-shim`, the
-  `cc-safety-net` + `deny-secrets` hooks, `agent-vault` wiring, MCP via
+  `cc-safety-net` hook, `agent-vault` wiring, MCP via
   `mcp.yaml`/`mcp-sync`, and the external dependencies these need.
 - **Assumed present:** a working Linux box with chezmoi initialized (the base
   OS / desktop / dotfiles are out of scope — that's `arch-install/RUNBOOK.md`).
@@ -101,7 +101,7 @@ Green/red board, modeled on `agent-isolated --self-test`:
 - `agent-vault.service` active + `127.0.0.1:14321/health` OK
 - MCP endpoints reachable (exa/context7 HTTP; stdio MCP binaries resolve)
 - hooks registered: `cc-safety-net` (claude settings.json + opencode plugin;
-  codex flagged if not trusted), `deny-secrets` (claude)
+  codex flagged if not trusted)
 - installed tool versions == `mise.toml` pins
 - `~/.cache` writable inside the sandbox (regression guard for the EROFS fix)
 

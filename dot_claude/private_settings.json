@@ -41,9 +41,6 @@
       "Read(./server/.env)",
       "Read(./server/.env.*)",
       "Read(./secrets/**)",
-      "Read(~/.ssh/id_*)",
-      "Read(~/.aws/credentials)",
-      "Read(~/.config/gh/hosts.yml)",
       "Bash(rm -rf /*)",
       "Bash(rm -rf ~/*)",
       "Bash(rm -rf $HOME*)"
@@ -87,24 +84,6 @@
       }
     ],
     "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/hooks/deny-secrets.sh"
-          }
-        ]
-      },
-      {
-        "matcher": "Read|Edit|Write|NotebookEdit|Glob|Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $HOME/.claude/hooks/deny-secrets.sh"
-          }
-        ]
-      },
       {
         "matcher": "Bash",
         "hooks": [

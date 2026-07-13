@@ -96,8 +96,14 @@
 [gpg "ssh"]
 	allowedSignersFile = /home/nullsense/.config/git/allowed_signers
     program = /home/nullsense/bin/git-sign-ssh
-[url "https://github.com/"]
-    insteadOf = git@github.com:
+# Route all GitHub git operations over SSH (uses the Bitwarden auth key that
+# agents get by default). This deliberately reverses the old https-rewrite:
+# git-over-https to github.com relied on agent-vault token injection, which
+# only covers api.github.com, so `git push` from a sandboxed agent 401'd.
+# SSH sidesteps the proxy entirely. `gh` still uses https+agent-vault for
+# API calls (PRs/issues) — unaffected.
+[url "git@github.com:"]
+    insteadOf = https://github.com/
     insteadOf = ssh://git@github.com/
 [credential "https://github.com"]
 	helper = 

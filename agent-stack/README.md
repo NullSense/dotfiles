@@ -53,8 +53,7 @@ can't be automated): see below.
   the keyring, masked from sandboxes — so agents commit, **push happens
   host-side** (`!git push` / you).
 - **Destructive guard** — `cc-safety-net` on Claude (settings.json hook) +
-  OpenCode (plugin) + Codex (TUI plugin). `deny-secrets` (secret-read guard) is
-  Claude-only.
+  OpenCode (plugin) + Codex (TUI plugin).
 
 ## Update flows
 

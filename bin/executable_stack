@@ -97,13 +97,16 @@ ensure_dashboards() {
   if is_up http://127.0.0.1:3009/; then echo "  • uptime-kuma already up"
   elif command -v docker >/dev/null 2>&1 && docker start uptime-kuma >/dev/null 2>&1; then echo "  ▶ uptime-kuma → :3009 (docker)"
   else echo "  ⚠ uptime-kuma not running (one-time: docker run -d --restart=unless-stopped -p 3009:3001 -v uptime-kuma:/app/data --name uptime-kuma louislam/uptime-kuma:1)"; fi
-  # Open WebUI (chat front-end for the gateway; reachable on the tailnet for Conduit).
-  if is_up http://127.0.0.1:8090/; then echo "  • open-webui already up"
-  elif [ -s "$(dirname "$OWUI_COMPOSE")/.env" ] && command -v docker >/dev/null 2>&1; then
-    ( cd "$(dirname "$OWUI_COMPOSE")" && docker compose --env-file .env up -d >/dev/null 2>&1 ) \
-      && echo "  ▶ open-webui → :8090 (docker · tailnet http://100.121.121.37:8090)" \
-      || echo "  ⚠ open-webui failed to start (docker compose)"
-  else echo "  ⚠ open-webui not started (missing stack/open-webui/.env or docker)"; fi
+  # Open WebUI (chat front-end for the gateway). Retired 2026-07-09 — no longer used.
+  # Opt back in with STACK_OWUI=1 (its compose still lives in stack/open-webui/).
+  if [ "${STACK_OWUI:-0}" = "1" ]; then
+    if is_up http://127.0.0.1:8090/; then echo "  • open-webui already up"
+    elif [ -s "$(dirname "$OWUI_COMPOSE")/.env" ] && command -v docker >/dev/null 2>&1; then
+      ( cd "$(dirname "$OWUI_COMPOSE")" && docker compose --env-file .env up -d >/dev/null 2>&1 ) \
+        && echo "  ▶ open-webui → :8090 (docker · tailnet http://100.121.121.37:8090)" \
+        || echo "  ⚠ open-webui failed to start (docker compose)"
+    else echo "  ⚠ open-webui not started (missing stack/open-webui/.env or docker)"; fi
+  fi
   # Refresh Glance's auto-discovered service cards (DRY: same ~/bin/discover-services the
   # Super+S picker uses). Glance hot-reloads on file change. Non-fatal.
   if [ -f "$HOME/Programming/llm-stack/stack/gen-glance-services.py" ]; then
@@ -148,17 +151,85 @@ case "${1:-status}" in
       [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2
       start_one litellm http://127.0.0.1:4000/health "${LITELLM_CMD[@]}"
     fi
-    # Dictation rewrite backend (Gemma-4 E4B + MTP, :8083) — its OWN systemd service
-    # (always-on daily driver, enabled at boot). Ensure it's up here too. hyprwhspr talks
-    # to it DIRECTLY (not via the gateway) to preserve chat_template_kwargs/enable_thinking;
-    # the gateway `rewrite-fast` model just mirrors it for the catalog.
-    if systemctl --user start hyprwhspr-rewrite-e4b.service 2>/dev/null; then
+    # Dictation rewrite backend — RETIRED 2026-07-09. Dictation now shares the always-on
+    # vLLM E4B slot (:8001, serves "rewrite" — NVFP4 W4A16 + MTP, chat_template_kwargs via
+    # --default-chat-template-kwargs). The old standalone :8083 llama.cpp service is off to
+    # avoid a duplicate 6GB E4B. Opt back in with STACK_DICT_8083=1.
+    if [ "${STACK_DICT_8083:-0}" = "1" ] && systemctl --user start hyprwhspr-rewrite-e4b.service 2>/dev/null; then
       echo "  • dictation rewriter → :8083 (E4B + MTP, systemd)"
-    else
-      echo "  • dictation rewriter service not present (skip)"
     fi
-    ensure_dashboards
-    echo "  stack up. gateway → :4000 · dict → :8083 · dash → :8088  (obs off — 'stack obs' for grafana/langfuse)"
+    # Always-on vLLM E4B slot (:8001) — NVFP4 W4A16 + MTP n=3, serves BOTH "summarize"
+    # (oracle summarize-cheap) and "rewrite" (dictation). ~410 tok/s, fp8 KV, ~8s warm
+    # load (shared compile cache). Detached docker; the gateway routes summarize-cheap here.
+    if curl -s -o /dev/null --max-time 3 http://127.0.0.1:8001/health 2>/dev/null; then
+      echo "  • vllm-gemma4b already up (:8001)"
+    elif command -v docker >/dev/null 2>&1; then
+      docker rm -f vllm-gemma4b >/dev/null 2>&1
+      ( PORT=8001 setsid /home/nullsense/bin/llm-servers/vllm-gemma4b >/tmp/vllm-gemma4b.log 2>&1 < /dev/null & )
+      echo "  ▶ vllm-gemma4b → :8001 (E4B NVFP4 + MTP · summarize+rewrite)"
+    fi
+    # Dashboards (glance :8088 + uptime-kuma :3009) are monitoring, not serving → opt-in.
+    # `STACK_DASH=1 stack up` (or run `stack dash`) brings them up. Keeps `stack up` minimal:
+    # just the gateway + always-on light models; heavy/monitoring bits load on demand.
+    if [ "${STACK_DASH:-0}" = 1 ]; then ensure_dashboards; fi
+    echo "  stack up (minimal). gateway → :4000 · vllm E4B → :8001  (obs off: 'stack obs' · dashboards off: 'stack dash')"
+    ;;
+  dash) ensure_dashboards; echo "  dashboards up → glance :8088 · uptime-kuma :3009"; ;;
+  gateway)  # JUST the litellm router (:4000) — NO models, 0 GB VRAM. It's a pure OpenAI proxy:
+    # cloud routes (code→OpenRouter, and everything under LITELLM_ENVIRONMENT=production) + virtual-
+    # key/config mgmt work immediately. Local logical names (summarize→:8001, reason→llama-swap) 5xx
+    # until you `stack up` their backends. Handy for config testing or cloud-only use. `stack down`
+    # stops it. Shares the up) launch logic — just omits llama-swap + the vLLM E4B container.
+    if [ "${STACK_OBS:-0}" = 1 ]; then ensure_obs; else ensure_gateway_db; fi
+    wait_tcp 127.0.0.1:5433 15 && echo "  • gateway DB ready :5433" \
+      || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
+    export LITELLM_OTEL_V2=true OTEL_EXPORTER="${OTEL_EXPORTER:-otlp_grpc}" \
+      OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4317}" \
+      OTEL_SERVICE_NAME=litellm OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
+    export LITELLM_ENVIRONMENT="${LITELLM_ENVIRONMENT:-development}"
+    echo "  • litellm environment: $LITELLM_ENVIRONMENT ($([ "$LITELLM_ENVIRONMENT" = production ] && echo 'CLOUD/OpenRouter' || echo 'LOCAL/llama-swap'))"
+    LITELLM_CMD=(litellm --config "$LITELLM_CFG" --port 4000)
+    if command -v agent-vault >/dev/null 2>&1 && _AVT="$(agent-vault vault token --vault default 2>/dev/null)" && [ -n "$_AVT" ]; then
+      export AV_HTTPS_PROXY="https://${_AVT}:default@127.0.0.1:14322"
+      export AV_CA="$HOME/.agent-vault/mitm-ca.pem"
+      unset _AVT
+    fi
+    if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
+      echo "  • litellm secrets ← Infisical (${INFISICAL_ENV:-dev}:${INFISICAL_PATH:-/litellm})"
+      start_one litellm http://127.0.0.1:4000/health \
+        infisical run --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "${LITELLM_CMD[@]}"
+    else
+      [ -n "${OPENROUTER_API_KEY:-}" ] || echo "  ⚠ OPENROUTER_API_KEY unset — cloud routes will 401" >&2
+      [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2
+      start_one litellm http://127.0.0.1:4000/health "${LITELLM_CMD[@]}"
+    fi
+    echo "  gateway up → :4000 (no models · 'stack up' adds llama-swap + vLLM E4B)"
+    ;;
+  pro)  # PREMIUM summary window: diffusiongemma (:8002, summarize-pro). Measured: the 26B MoE
+        # NVFP4 needs ~24GB, which does NOT fit alongside BOTH the E4B slot (~15GB) AND the
+        # parakeet STT (~5.7GB) on a 32GB card. So `pro on` evicts BOTH (summarize-cheap +
+        # dictation fully DOWN for the window); `pro off` restores both. Explicit, on-demand,
+        # fully reversible. Parakeet's permanent config is untouched — it's only stopped while open.
+    case "${2:-on}" in
+      on|start)
+        command -v docker >/dev/null 2>&1 || { echo "  ⚠ docker not found"; exit 1; }
+        echo "  ▶ premium window: freeing VRAM (evicting E4B + parakeet STT) for diffusiongemma…"
+        docker rm -f vllm-gemma4b >/dev/null 2>&1 && echo "  ■ vllm-gemma4b stopped — summarize-cheap DOWN until 'stack pro off'"
+        systemctl --user stop hyprwhspr.service 2>/dev/null && echo "  ■ hyprwhspr STT stopped — dictation DOWN until 'stack pro off'"
+        docker rm -f vllm-diffusiongemma >/dev/null 2>&1
+        ( PORT=8002 setsid /home/nullsense/bin/llm-servers/vllm-diffusiongemma >/tmp/vllm-diffusiongemma.log 2>&1 < /dev/null & )
+        echo "  ▶ vllm-diffusiongemma → :8002 (summarize-pro · warming ~40-60s). Watch: tail -f /tmp/vllm-diffusiongemma.log"
+        ;;
+      off|stop)
+        echo "  ▶ closing premium window: diffusiongemma → E4B + parakeet…"
+        docker rm -f vllm-diffusiongemma >/dev/null 2>&1 && echo "  ■ vllm-diffusiongemma stopped (:8002)"
+        systemctl --user start hyprwhspr.service 2>/dev/null && echo "  ▶ hyprwhspr STT restored (dictation back up)"
+        docker rm -f vllm-gemma4b >/dev/null 2>&1
+        ( PORT=8001 setsid /home/nullsense/bin/llm-servers/vllm-gemma4b >/tmp/vllm-gemma4b.log 2>&1 < /dev/null & )
+        echo "  ▶ vllm-gemma4b restored → :8001 (summarize-cheap + dictation back up ~8-14s)"
+        ;;
+      *) echo "usage: stack pro [on|off]"; exit 1 ;;
+    esac
     ;;
   down)  # stops the LLM serving stack only — leaves observability + dashboards monitoring
     sweep_swap_children   # reap llama-server backends BEFORE killing llama-swap (else they orphan + pin VRAM)
@@ -168,6 +239,10 @@ case "${1:-status}" in
       kill_port "$port" && echo "  ■ stopped $name (:$port)" || echo "  • $name not running"
       rm -f "$RUN/$name.pid"
     done
+    if command -v docker >/dev/null 2>&1; then
+      docker ps -q --filter name=vllm-gemma4b | grep -q . && docker rm -f vllm-gemma4b >/dev/null 2>&1 && echo "  ■ stopped vllm-gemma4b (:8001)"
+      docker ps -q --filter name=vllm-diffusiongemma | grep -q . && docker rm -f vllm-diffusiongemma >/dev/null 2>&1 && echo "  ■ stopped vllm-diffusiongemma (:8002)"
+    fi
     echo "  (observability + dashboards left running — 'stack mon-down' to stop those too)"
     ;;
   mon-down)
@@ -208,5 +283,5 @@ case "${1:-status}" in
     echo "  ✓ prisma generated + LiteLLM_* tables ready — 'stack restart' then llm-vkey works"
     ;;
   logs) tail -n 40 -F "$RUN"/*.log ;;
-  *) echo "usage: stack {up|obs|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;
+  *) echo "usage: stack {up|gateway|dash|pro|obs|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;
 esac

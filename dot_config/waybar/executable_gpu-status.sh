@@ -14,6 +14,13 @@ set -u
 
 SMI=$(command -v nvidia-smi) || { printf '{"text":"󰢮 n/a","tooltip":"nvidia-smi not found","class":"crit"}\n'; exit 0; }
 
+# Every data-path nvidia-smi call is time-boxed. During a large VRAM allocation
+# (a model loading — e.g. vLLM grabbing 15G) the driver can block for seconds;
+# an unbounded call here would wedge the whole waybar module, freezing the value
+# AND stalling click dispatch until waybar is killed. `timeout` keeps the 5s
+# poll honest and self-recovering. (Click actions below exec directly, no smi.)
+smi() { timeout 4 "$SMI" "$@"; }
+
 # --- Handle click actions --------------------------------------------------
 case "${1:-}" in
   nvtop)
@@ -27,9 +34,15 @@ esac
 # --- Summary line ----------------------------------------------------------
 # used,total (MiB), util%, tempC, powerW
 IFS=',' read -r MEM_USED MEM_TOTAL UTIL TEMP POWER < <(
-  "$SMI" --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw \
-         --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' '
+  smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw \
+      --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' '
 )
+# Query timed out or errored → keep the module alive with a transient pill
+# rather than rendering a bogus "0.0G"; the next poll retries in 5s.
+if [[ -z ${MEM_USED:-} ]]; then
+  printf '{"text":"󰢮 …","tooltip":"nvidia-smi busy (query timed out)","class":"warn"}\n'
+  exit 0
+fi
 MEM_USED=${MEM_USED:-0}; MEM_TOTAL=${MEM_TOTAL:-1}
 UTIL=${UTIL:-0}; TEMP=${TEMP:-0}; POWER=${POWER:-0}
 
@@ -81,7 +94,7 @@ while IFS='|' read -r pid used; do
   name=$(resolve_name "$pid")
   ug=$(awk -v m="$used" 'BEGIN{printf "%.1f", m/1024}')
   rows+="$used|$ug|$name|$pid"$'\n'
-done < <("$SMI" 2>/dev/null | grep -oE '[0-9]+ +[CG][+CG]* +.* [0-9]+MiB' | \
+done < <(smi 2>/dev/null | grep -oE '[0-9]+ +[CG][+CG]* +.* [0-9]+MiB' | \
            sed -E 's/^([0-9]+) +[CG][+CG]* +.* ([0-9]+)MiB/\1|\2/')
 
 # Sort desc by MiB, keep top 6, format aligned lines with pango.

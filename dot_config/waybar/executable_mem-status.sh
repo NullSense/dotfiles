@@ -82,5 +82,5 @@ tt+="\n  L-click  btop"
 tt=${tt//\\n/$'\n'}   # literal "\n" from double-quoted strings → real newline
 tt=${tt//\\/\\\\}; tt=${tt//\"/\\\"}; tt=${tt//$'\n'/\\n}
 
-printf '{"text":"  %s/%sG%s","tooltip":"%s","class":"%s","percentage":%s}\n' \
+printf '{"text":"󰍛 %s/%sG%s","tooltip":"%s","class":"%s","percentage":%s}\n' \
   "$used_g" "$total_g" "$sw_seg" "$tt" "$cls" "$pct"

@@ -11,37 +11,41 @@
 set -uo pipefail
 
 TRAY="/usr/lib/hyprwhspr/config/hyprland/hyprwhspr-tray.sh"
-SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hyprwhspr-ai.sock"
-BACKENDS="$HOME/.config/hyprwhspr-ai/backends.json"
+CTL="$HOME/.config/waybar/hyprwhspr-rewrite-ctl.sh"
+RUN="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+NOTIFY_STAMP="$RUN/hyprwhspr-rewrite-notify"   # rate-limit failure notifications
+NOTIFY_MIN_INTERVAL=120                         # seconds between repeat alerts
 
 base="$("$TRAY" status 2>/dev/null)"
 [ -n "$base" ] || base='{"text":"","class":"","tooltip":""}'
 
-rw_ok=0
-if [ -S "$SOCK" ]; then
-  hp="$(python3 - "$BACKENDS" 2>/dev/null <<'PY'
-import json, sys, urllib.parse
-d = json.load(open(sys.argv[1]))
-b = d["backends"][d["active"]]
-u = urllib.parse.urlparse(b["base_url"])
-print(f"{u.hostname or '127.0.0.1'} {u.port or 80}")
-PY
-)"
-  if [ -n "$hp" ]; then
-    read -r host port <<<"$hp"
-    timeout 0.3 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null && rw_ok=1
-  fi
-fi
+# Rewrite health: disabled (you turned it off) | ok | error:<reason>.
+# Distinguishes an intentional OFF (dim, no alarm) from a genuine backend
+# failure (red badge + a rate-limited desktop notification).
+h="$(bash "$CTL" health 2>/dev/null || echo 'error:health probe failed')"
 
-if command -v jq >/dev/null 2>&1; then
-  if [ "$rw_ok" = 1 ]; then
-    printf '%s' "$base" | jq -c '.tooltip = ((.tooltip // "") + "\n✎ rewrite: ON")'
-  else
+if ! command -v jq >/dev/null 2>&1; then printf '%s' "$base"; exit 0; fi
+
+case "$h" in
+  disabled)
     printf '%s' "$base" | jq -c '
-      .text    = ((.text // "") + " ✎̶")
-    | .class   = (((.class // "") | if type=="array" then join(" ") else . end) + " rewrite-off")
-    | .tooltip = ((.tooltip // "") + "\n✎̶ rewrite: OFF — hyprwhspr-ai daemon or backend down")'
-  fi
-else
-  printf '%s' "$base"
-fi
+        .class   = (((.class // "") | if type=="array" then join(" ") else . end) + " rewrite-disabled")
+      | .tooltip = ((.tooltip // "") + "\n✎ rewrite: OFF (you disabled it — middle-click to enable)")' ;;
+  ok)
+    printf '%s' "$base" | jq -c '.tooltip = ((.tooltip // "") + "\n✎ rewrite: ON  (middle-click to toggle)")' ;;
+  error:*)
+    reason="${h#error:}"
+    # rate-limited notification on genuine failure
+    now=$(date +%s); last=$(cat "$NOTIFY_STAMP" 2>/dev/null || echo 0)
+    if (( now - last >= NOTIFY_MIN_INTERVAL )); then
+      notify-send -a hyprwhspr -i dialog-error -u critical \
+        "Dictation rewrite is failing" "$reason — dictation still works (raw text)." 2>/dev/null || true
+      echo "$now" >"$NOTIFY_STAMP"
+    fi
+    printf '%s' "$base" | jq -c --arg r "$reason" '
+        .text    = ((.text // "") + " ✎̶")
+      | .class   = (((.class // "") | if type=="array" then join(" ") else . end) + " rewrite-error")
+      | .tooltip = ((.tooltip // "") + "\n✎̶ rewrite: ERROR — " + $r)' ;;
+  *)
+    printf '%s' "$base" ;;
+esac

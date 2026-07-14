@@ -463,6 +463,14 @@ calendar:indeterminate          { color: @gray; }
     border-bottom-color: @aqua;
 }
 #custom-hyprwhspr.error  { color: @yellow; border-bottom-color: @yellow; }
+/* rewrite pass: dim when you've toggled it off; red + pulse when the backend
+ * is genuinely failing (also fires a rate-limited desktop notification). */
+#custom-hyprwhspr.rewrite-disabled { opacity: 0.6; }
+#custom-hyprwhspr.rewrite-error {
+    color: @red;
+    border-bottom-color: @red;
+    animation: blink 1.2s ease-in-out infinite alternate;
+}
 #custom-hyprwhspr:hover  { background: @bg2; }
 
 /* ============================================================

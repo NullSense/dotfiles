@@ -249,10 +249,16 @@
         "format": "{}",
         "exec": "$HOME/.config/waybar/hyprwhspr-rewrite-wrap.sh",
         "interval": 1,
+        "signal": 12,
         "return-type": "json",
         "exec-on-event": true,
+        // L = record · R = restart STT service · M = toggle the rewrite pass
+        // (on/off, unloads the rewrite model's VRAM when off). The pill's
+        // tooltip carries live rewrite health; a genuine backend failure also
+        // fires a rate-limited desktop notification.
         "on-click": "/usr/lib/hyprwhspr/config/hyprland/hyprwhspr-tray.sh record",
         "on-click-right": "/usr/lib/hyprwhspr/config/hyprland/hyprwhspr-tray.sh restart",
+        "on-click-middle": "$HOME/.config/waybar/hyprwhspr-rewrite-ctl.sh toggle",
         "tooltip": true
     },
     "custom/xt3-status": {

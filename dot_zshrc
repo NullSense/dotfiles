@@ -46,14 +46,19 @@ ZVM_VI_INSERT_ESCAPE_BINDKEY=jk
 # and the setting was silently a no-op (zvm fell back to "last mode"). Use
 # the literal value so each new prompt actually starts in insert mode.
 ZVM_LINE_INIT_MODE=i
-# Default ZVM_KEYTIMEOUT is 0.4s — the time zvm waits after ESC to see if
-# more keys follow (to disambiguate `jk` from a bare ESC and to swallow
-# arrow-key escape sequences). At 0.4s, pressing ESC then quickly `gg` lands
-# the first `g` while zvm is still in disambiguation state, so vi commands
-# "sometimes don't work." 0.05s is well under typical deliberate-keystroke
-# latency, and `jk` still fires because the two keys of that chord land
-# within ~30ms when typed as a real chord.
-ZVM_KEYTIMEOUT=0.05
+# ZVM's NEX read engine uses TWO independent timeouts (plugin lines ~606-616):
+#   ZVM_KEYTIMEOUT (default 0.4s) — wait for the 2nd key of any NON-ESC vi
+#     sequence: `gg`, `dd`, `cw`, text objects, visual-mode motions, and the
+#     `jk` escape chord. Too low → these multi-key commands abort mid-sequence.
+#   ZVM_ESCAPE_KEYTIMEOUT (default 0.03s) — wait after a BARE ESC to swallow
+#     arrow-key CSI sequences. THIS is the real "ESC then quickly `gg`" knob;
+#     it's already fast by default, so we leave it alone.
+# 0.05 was a misdiagnosis: it capped every multi-key command at 50ms (you can't
+# press `gg`/`dd`/`vi(` that fast) yet did nothing for the ESC race. 0.2s:
+# deliberate `gg`/`dd` land easily, the `jk` chord still fires, and a literal
+# `j` in insert mode lags only 200ms. Raise toward 0.3-0.4 if `gg` feels flaky;
+# drop to ~0.15 for snappier literal-`j` typing.
+ZVM_KEYTIMEOUT=0.2
 zinit ice depth=1
 zinit light jeffreytse/zsh-vi-mode
 

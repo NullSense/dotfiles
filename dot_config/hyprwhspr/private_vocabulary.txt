@@ -16,6 +16,7 @@ Dokploy
 .env
 Exa
 Gemma
+Gliner2
 Helium
 Hermes
 Hyprland

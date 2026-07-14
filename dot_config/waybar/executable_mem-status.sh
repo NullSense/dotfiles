@@ -47,9 +47,30 @@ elif (( pct >= 75 )); then cls="warn"
 else                       cls="ok"
 fi
 
-# --- Top RSS processes ------------------------------------------------------
-top=$(ps -eo rss=,comm= --sort=-rss 2>/dev/null | head -5 | \
-  awk "{ printf \"  <span color='#d3869b'>%5.1fG</span>  %s\n\", \$1/1048576, \$2 }")
+# --- Top memory by APPLICATION ---------------------------------------------
+# Aggregate PSS across each app's processes (a browser's dozens of renderer
+# processes roll into ONE honest number) and use PSS not RSS so shared pages
+# aren't double-counted — otherwise a single pill can read "3G" while 20+
+# renderers quietly hold the rest. ~one smaps_rollup read per process; fine at
+# the 5s poll. Falls back to aggregated RSS if smaps isn't readable.
+top=$(python3 - <<'PY' 2>/dev/null
+import glob
+agg = {}
+for f in glob.glob('/proc/[0-9]*/smaps_rollup'):
+    pid = f.split('/')[2]
+    try:
+        comm = open(f'/proc/{pid}/comm').read().strip()
+        for line in open(f):
+            if line.startswith('Pss:'):
+                agg[comm] = agg.get(comm, 0) + int(line.split()[1])
+                break
+    except Exception:
+        pass
+for c, kb in sorted(agg.items(), key=lambda x: -x[1])[:5]:
+    print(f"  <span color='#d3869b'>{kb/1048576:5.1f}G</span>  {c}")
+PY
+)
+[[ -z "$top" ]] && top=$(ps -eo rss=,comm= 2>/dev/null | awk '{a[$2]+=$1} END{for(c in a)printf "%d %s\n",a[c],c}' | sort -rn | head -5 | awk "{printf \"  <span color='#d3869b'>%5.1fG</span>  %s\n\", \$1/1048576, \$2}")
 
 tt="<b>RAM</b>   <b>${used_g}G</b> / ${total_g}G   (${pct}%)\n"
 tt+="avail  ${avail_g}G      cached ${cached_g}G\n"

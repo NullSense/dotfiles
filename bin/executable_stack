@@ -158,15 +158,23 @@ case "${1:-status}" in
     if [ "${STACK_DICT_8083:-0}" = "1" ] && systemctl --user start hyprwhspr-rewrite-e4b.service 2>/dev/null; then
       echo "  • dictation rewriter → :8083 (E4B + MTP, systemd)"
     fi
-    # Always-on vLLM E4B slot (:8001) — NVFP4 W4A16 + MTP n=3, serves BOTH "summarize"
-    # (oracle summarize-cheap) and "rewrite" (dictation). ~410 tok/s, fp8 KV, ~8s warm
-    # load (shared compile cache). Detached docker; the gateway routes summarize-cheap here.
+    # vLLM E4B (:8001, NVFP4+MTP, serves "summarize"+"rewrite") is now llama-swap-MANAGED
+    # (moved 2026-07-14 — see the `rewrite` model entry in llama-swap/config.yaml for the
+    # full rationale: fixed :8001 so oracle's summarize-cheap + hyprwhspr keep working
+    # unchanged, ttl:0 so it stays always-resident, but llama-swap now owns start/stop so
+    # any agent can unload/reload it via the standard API instead of bare docker commands).
+    # Fire one warm request THROUGH llama-swap so it's hot immediately after `stack up`
+    # (ttl:0 models are lazy-load-on-first-request, not eager — this replaces the old
+    # eager `docker run` here). Backgrounded + non-blocking (cold start ~30-50s).
     if curl -s -o /dev/null --max-time 3 http://127.0.0.1:8001/health 2>/dev/null; then
       echo "  • vllm-gemma4b already up (:8001)"
-    elif command -v docker >/dev/null 2>&1; then
-      docker rm -f vllm-gemma4b >/dev/null 2>&1
-      ( PORT=8001 setsid /home/nullsense/bin/llm-servers/vllm-gemma4b >/tmp/vllm-gemma4b.log 2>&1 < /dev/null & )
-      echo "  ▶ vllm-gemma4b → :8001 (E4B NVFP4 + MTP · summarize+rewrite)"
+    else
+      ( curl -s -o /dev/null --max-time 90 http://127.0.0.1:9292/v1/chat/completions \
+          -H 'Content-Type: application/json' \
+          -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
+          && echo "  ▶ vllm-gemma4b warmed via llama-swap → :8001 (E4B NVFP4 + MTP · summarize+rewrite)" \
+          || echo "  ⚠ vllm-gemma4b warm request failed — check llama-swap logs" ) &
+      echo "  ▶ vllm-gemma4b warming via llama-swap (:8001, background, ~30-50s cold start)…"
     fi
     # Dashboards (glance :8088 + uptime-kuma :3009) are monitoring, not serving → opt-in.
     # `STACK_DASH=1 stack up` (or run `stack dash`) brings them up. Keeps `stack up` minimal:
@@ -214,7 +222,11 @@ case "${1:-status}" in
       on|start)
         command -v docker >/dev/null 2>&1 || { echo "  ⚠ docker not found"; exit 1; }
         echo "  ▶ premium window: freeing VRAM (evicting E4B + parakeet STT) for diffusiongemma…"
-        docker rm -f vllm-gemma4b >/dev/null 2>&1 && echo "  ■ vllm-gemma4b stopped — summarize-cheap DOWN until 'stack pro off'"
+        # vllm-gemma4b is llama-swap-managed now (rewrite, fixed :8001) — unload it through
+        # llama-swap's own API instead of a bare docker rm, so llama-swap's internal state
+        # (loaded/unloaded) stays truthful for anyone else querying /running or /v1/models.
+        curl -s --max-time 5 'http://127.0.0.1:9292/unload?model=rewrite' >/dev/null 2>&1 \
+          && echo "  ■ vllm-gemma4b unloaded via llama-swap — summarize-cheap DOWN until 'stack pro off'"
         systemctl --user stop hyprwhspr.service 2>/dev/null && echo "  ■ hyprwhspr STT stopped — dictation DOWN until 'stack pro off'"
         docker rm -f vllm-diffusiongemma >/dev/null 2>&1
         ( PORT=8002 setsid /home/nullsense/bin/llm-servers/vllm-diffusiongemma >/tmp/vllm-diffusiongemma.log 2>&1 < /dev/null & )
@@ -224,9 +236,14 @@ case "${1:-status}" in
         echo "  ▶ closing premium window: diffusiongemma → E4B + parakeet…"
         docker rm -f vllm-diffusiongemma >/dev/null 2>&1 && echo "  ■ vllm-diffusiongemma stopped (:8002)"
         systemctl --user start hyprwhspr.service 2>/dev/null && echo "  ▶ hyprwhspr STT restored (dictation back up)"
-        docker rm -f vllm-gemma4b >/dev/null 2>&1
-        ( PORT=8001 setsid /home/nullsense/bin/llm-servers/vllm-gemma4b >/tmp/vllm-gemma4b.log 2>&1 < /dev/null & )
-        echo "  ▶ vllm-gemma4b restored → :8001 (summarize-cheap + dictation back up ~8-14s)"
+        # Reload through llama-swap (fixed :8001 `rewrite`) instead of a bare docker run —
+        # same reasoning as `pro on` above.
+        ( curl -s -o /dev/null --max-time 90 http://127.0.0.1:9292/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
+            && echo "  ▶ vllm-gemma4b restored via llama-swap → :8001 (summarize-cheap + dictation back up)" \
+            || echo "  ⚠ vllm-gemma4b warm request failed — check llama-swap logs" ) &
+        echo "  ▶ vllm-gemma4b reloading via llama-swap (:8001, background)…"
         ;;
       *) echo "usage: stack pro [on|off]"; exit 1 ;;
     esac
@@ -239,8 +256,10 @@ case "${1:-status}" in
       kill_port "$port" && echo "  ■ stopped $name (:$port)" || echo "  • $name not running"
       rm -f "$RUN/$name.pid"
     done
+    # vllm-gemma4b is now a llama-swap child (see `rewrite` model, fixed :8001) — sweep_swap_children
+    # above already reaped it as llama-swap's own subprocess. vllm-diffusiongemma stays a separate,
+    # non-llama-swap-managed on-demand container (stack pro), so it's still stopped explicitly here.
     if command -v docker >/dev/null 2>&1; then
-      docker ps -q --filter name=vllm-gemma4b | grep -q . && docker rm -f vllm-gemma4b >/dev/null 2>&1 && echo "  ■ stopped vllm-gemma4b (:8001)"
       docker ps -q --filter name=vllm-diffusiongemma | grep -q . && docker rm -f vllm-diffusiongemma >/dev/null 2>&1 && echo "  ■ stopped vllm-diffusiongemma (:8002)"
     fi
     echo "  (observability + dashboards left running — 'stack mon-down' to stop those too)"

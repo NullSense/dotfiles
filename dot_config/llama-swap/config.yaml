@@ -28,11 +28,11 @@ models:
     description: "embedding · Octen-Embedding-4B (Qwen3-Embedding finetune), 2560-dim, last-token pooling. Shared embedder for sift + oracle."
     metadata: { class: embedding, thinking: na, best_for: "semantic search / RAG / retrieval", tags: [embedding, local, shared] }
 
-  # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), CUDA GPU (~0.4 GB VRAM).
+  # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), Vulkan GPU (~0.4 GB VRAM).
   #    Used by litellm mcp_semantic_tool_filter. Co-resident with the small models via the
   #    matrix (var `t`) so loading it NEVER evicts the chat model. First load auto-downloads
   #    the official llama.cpp GGUF (~379 MB Q8_0); needs a llama.cpp build with the `lfm2-bidir`
-  #    arch (update llama.cpp if it errors "unknown architecture lfm2-bidir"; if the CUDA
+  #    arch (update llama.cpp if it errors "unknown architecture lfm2-bidir"; if the Vulkan
   #    backend lacks it, fall back to -ngl 0). Filter fails-open (all tools) if it can't load.
   lfm2-embed-350m:
     cmd: env PORT=${PORT} llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0 --embeddings --pooling cls --ctx-size 512 --ubatch-size 512 --device CUDA0 -ngl 99 --host 127.0.0.1 --port ${PORT} --metrics
@@ -52,13 +52,30 @@ models:
   # explicitly in aliases: for UI visibility. See docs/CAPABILITIES.md for the full table.
   # ──────────────────────────────────────────────────────────────────────────────────────
 
-  # ── summarization: cheap bulk model, escalation target ──
+  # ── summarize: VRAM-ADAPTIVE summariser — diffusiongemma when there's room, else E4B ──
+  # The `cmd` measures live free VRAM at load and execs the biggest summariser that fits
+  # (diffusiongemma-26B vLLM ~22GB → gemma-4-E4B llama.cpp ~6GB → fail-to-cloud). Adapts to any
+  # game automatically. SHORT ttl so an idle summariser evicts fast and re-checks VRAM next load.
+  # cmdStop stops whichever backend it picked (docker container OR llama-server PID).
+  summarize:
+    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-summarize-auto
+    cmdStop: /home/nullsense/bin/llm-servers/llama-summarize-stop ${PID}
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: summarize   # both backends serve as "summarize"; pin the upstream name so the
+                              # summarize-cheap alias (or any) doesn't 404 the vLLM served-model-name
+    ttl: 120
+    name: "Summarize (VRAM-adaptive: diffusiongemma ⟂ E4B)"
+    aliases: [summarize-cheap]
+    description: "summarize · picks diffusiongemma-26B (vLLM NVFP4, ~22GB, best quality+speed) when VRAM is free, else gemma-4-E4B (llama.cpp, ~6GB, game-friendly); fails so the caller falls back to cloud if neither fits. Thresholds env-overridable (SUMMARIZE_DIFF_MIN_MB / _E4B_MIN_MB); diffusion gpu-util derived from free VRAM."
+    metadata: { class: summarize, thinking: "off", best_for: "VRAM-adaptive bulk summaries alongside gaming", tags: [summarize, adaptive, local, vllm, diffusion, gemma] }
+
+  # ── summarization: cheap bulk model (direct E4B; also dictation rewrite / escalation) ──
   gemma-4-e4b:
     cmd: env PORT=${PORT} MODE=sum /home/nullsense/bin/llm-servers/llama-gemma4b
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
     name: "Gemma-4 E4B-it (QAT UD-Q4_K_XL)"
-    aliases: [summarize-cheap, gemma4-e4b, gemma-e4b, "gemma-4-e4b:think", "gemma-4-e4b:fast"]
+    aliases: [gemma4-e4b, gemma-e4b, "gemma-4-e4b:think", "gemma-4-e4b:fast"]
     description: "summarize · Gemma-4 E4B QAT UD-Q4_K_XL — fast, faithful bulk summaries (0% fabrication on the oracle set), near-BF16 quality at 4.0GB. Thinking toggleable (default off). oracle's cheap-first summariser."
     metadata: { class: summarize, thinking: "toggle (default off)", best_for: "faithful extractive summaries, instruction-following, dictation rewrite", tags: [summarize, instruct, local, gemma, faithful] }
     filters:
@@ -87,64 +104,40 @@ models:
           chat_template_kwargs:
             enable_thinking: false
 
-  # ── E4B quant ladder (2026-06-19 bench): bartowski PTQ Q4_K_M / Q8_0 baselines.
-  #    summarize-cheap now runs unsloth QAT UD-Q4_K_XL (better+smaller); these stay as the
-  #    PTQ ablation baselines. Finding: faithfulness is quant-robust (Q4≈Q5≈Q8, 0% fab/leak)
-  #    so Q4 = max VRAM savings with no faithfulness cost. Kept as on-demand alternates
-  #    (ttl 120s = evict fast). See ~/Programming/llm-stack/docs/leaderboard.md. ──
-  gemma-4-e4b-q4:
-    cmd: env PORT=${PORT} MODE=sum MODEL=/home/nullsense/.lmstudio/models/bartowski/google_gemma-4-E4B-it-GGUF/google_gemma-4-E4B-it-Q4_K_M.gguf /home/nullsense/bin/llm-servers/llama-gemma4b
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 120
-    name: "Gemma-4 E4B-it Q4_K_M (bench)"
-    aliases: [e4b-q4]
-    description: "summarize · Gemma-4 E4B Q4_K_M — quant-ablation vs gemma-4-e4b (QAT UD-Q4_K_XL). Max VRAM savings, faithfulness quant-robust."
-    metadata: { class: summarize, thinking: "toggle (default off)", best_for: "smallest-VRAM faithful summaries (bench)", tags: [summarize, local, gemma, bench] }
-  gemma-4-e4b-q8:
-    cmd: env PORT=${PORT} MODE=sum MODEL=/home/nullsense/.lmstudio/models/bartowski/google_gemma-4-E4B-it-GGUF/google_gemma-4-E4B-it-Q8_0.gguf /home/nullsense/bin/llm-servers/llama-gemma4b
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 120
-    name: "Gemma-4 E4B-it Q8_0 (bench)"
-    aliases: [e4b-q8]
-    description: "summarize · Gemma-4 E4B Q8_0 — quant-ablation vs gemma-4-e4b (QAT UD-Q4_K_XL). Highest-fidelity quant."
-    metadata: { class: summarize, thinking: "toggle (default off)", best_for: "highest-quant faithful summaries (bench)", tags: [summarize, local, gemma, bench] }
-
-  # ── dictation rewrite — DEDICATED MTP-optimized E4B (NP=1 + SPEC=on draft) ──
-  #    hyprwhspr dictation routes here via litellm `rewrite-fast`. llama-swap loads it ON
-  #    DEMAND and evicts on TTL → replaces the old always-on :8083 service (no permanent 5 GB).
-  #    SEPARATE from gemma-4-e4b (summarize, NP=4 SPEC=off) on purpose: MTP draft (~80% accept,
-  #    ~40% faster, p50 136 vs 227 ms) wins for single-stream dictation but FIGHTS NP=4 batch
-  #    summarization. Same weights, so llama-swap swaps between them on demand — alternating
-  #    dictation↔summarize reloads (~10 s); each evicts when idle. ttl 900 keeps it warm
-  #    through a dictation session. Thinking stays off per-request (hyprwhspr extra_body).
+  # ── dictation rewrite — vLLM E4B (NVFP4 + MTP), llama-swap-MANAGED (moved 2026-07-14) ──
+  #    Retired the duplicate llama.cpp NP=1/SPEC=on E4B that used to live here (~6.2 GB,
+  #    same weights as gemma-4-e4b above just tuned for single-stream dictation) — vLLM's
+  #    NVFP4+MTP E4B now covers BOTH `summarize` (oracle summarize-cheap, DIRECT :8001 —
+  #    see litellm config) and `rewrite` (dictation) from one process, and llama-swap owns
+  #    its lifecycle instead of a bare standalone `docker run` + a hand-run stack.sh block.
+  #
+  #    ⚠ PORT IS PINNED to 8001 (NOT llama-swap's dynamic ${PORT} pool) — deliberately, so
+  #    every EXISTING direct consumer (oracle's litellm `summarize-cheap`, litellm
+  #    `rewrite-fast`, hyprwhspr-ai's backends.json) keeps hitting the same stable :8001
+  #    with ZERO config changes. llama-swap still fully supervises start/stop/health here
+  #    (cmd/cmdStop below), and any agent can manage it the standard llama-swap way:
+  #      curl :9292/unload?model=rewrite   → stops it (frees ~11 GB, cmdStop below)
+  #      curl :9292/v1/chat/completions -d '{"model":"rewrite",...}'  → (re)loads it
+  #    ttl:0 = never auto-evict on idle (dictation is latency-critical; a TTL swap-in would
+  #    cost ~30-50s cold start on the first real dictation after idle) — same "always
+  #    resident but still llama-swap-manageable" pattern as qwen3.6-35b-uncensored.
+  #    CAVEAT: because direct :8001 callers bypass llama-swap's proxy, a manual unload via
+  #    llama-swap will NOT auto-reload for them — only a request THROUGH llama-swap
+  #    (:9292, model=rewrite) triggers a respawn. `stack up`/`stack pro off` fire that warm
+  #    request explicitly so the common paths still self-heal.
   rewrite:
-    cmd: env PORT=${PORT} NP=1 MODE=sum SPEC=on /home/nullsense/bin/llm-servers/llama-gemma4b
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 900
-    name: "Rewrite · Gemma-4 E4B + MTP (dictation, NP=1)"
-    description: "rewrite · Gemma-4 E4B QAT UD-Q4_K_XL + matching QAT-MTP draft — low-latency dictation/transcript cleanup. On-demand via llama-swap (replaces the old always-on :8083 server)."
-    metadata: { class: rewrite, thinking: "none (off for speed)", best_for: "dictation/transcript rewrite, short low-latency cleanups", tags: [rewrite, dictation, local, gemma, mtp] }
+    cmd: env PORT=8001 /home/nullsense/bin/llm-servers/vllm-gemma4b
+    cmdStop: docker stop vllm-gemma4b
+    proxy: http://127.0.0.1:8001
+    useModelName: rewrite
+    ttl: 0
+    name: "Rewrite · Gemma-4 E4B (vLLM NVFP4 + MTP, llama-swap-managed, fixed :8001)"
+    description: "rewrite · Gemma-4 E4B NVFP4 + MTP on vLLM — low-latency dictation/transcript cleanup, same process oracle's summarize-cheap hits directly on :8001. llama-swap-managed (ttl:0, always-resident) so any agent can unload/reload it via the standard API; replaces the retired NP=1/SPEC=on llama.cpp duplicate."
+    metadata: { class: rewrite, thinking: "off (server default)", best_for: "dictation/transcript rewrite, short low-latency cleanups", tags: [rewrite, dictation, local, vllm, gemma, mtp, nvfp4] }
 
 
-  # ── LiquidAI LFM2 — tiny VRAM-cheap summarizer candidates (vs gemma E4B/12B) ──
-  lfm2-2.6b:
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-2.6B-Exp-GGUF/LFM2-2.6B-Exp-Q4_K_M.gguf --device CUDA0 --n-gpu-layers 99 --flash-attn on --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0.3 --top-p 0.95 --metrics
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 300
-    name: "LFM2-2.6B-Exp (LiquidAI, RL-improved, tiny summarizer)"
-    description: "summarize (tiny) · LFM2-2.6B-Exp ~1.6GB — RL-improved checkpoint (better instruction-following + lower fabrication than base). A/B candidate."
-    metadata: { class: summarize, thinking: none, best_for: "low-stakes bulk summaries where VRAM is scarce", tags: [summarize, local, lfm2, tiny] }
-  lfm2-1.2b-extract:
-    # --temp 0: model card MANDATES greedy decode; 0.1 added stochastic noise that can
-    #   corrupt JSON structure/field names (Phase A fix). --ctx-size 32768 matches the
-    #   model's real 32k window (was silently truncating longer docs at 16k).
-    #   (Plan's `--spec-ngram-cache-size-n` was dropped — no such flag in llama.cpp b9672.)
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/LiquidAI/LFM2-1.2B-Extract-GGUF/LFM2-1.2B-Extract-Q4_K_M.gguf --device CUDA0 --n-gpu-layers 99 --flash-attn on --ctx-size 32768 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 300
-    name: "LFM2-1.2B-Extract (Q4_K_M, structured JSON)"
-    description: "extract · LFM2-1.2B-Extract ~0.8GB — purpose-built structured extraction (JSON/fields). Greedy decode (temp 0, mandated), 32k ctx. NOT a general summariser."
-    metadata: { class: extract, thinking: none, best_for: "structured field/JSON extraction from documents", tags: [extract, local, lfm2, tiny, json] }
+  # (Retired 2026-07-09: LFM2-2.6B + LFM2-1.2B-Extract generative bench entries removed —
+  #  unused, not in the matrix. The LFM2.5-Embedding-350M *embedding* entry above stays.)
 
   # ── abliterated/uncensored chat — Qwen3.6-35B-A3B Uncensored (Harmony MXFP4_MOE) ──
   #    On the 5090 (Blackwell) MXFP4 gets native FP4 acceleration — the opposite of gfx1031,
@@ -152,13 +145,19 @@ models:
   #    GPU-resident (no --n-cpu-moe) in 32GB VRAM. (The Wasserstein IQ3_M downgrade was a
   #    12GB-VRAM compromise; reverted.)
   qwen3.6-35b-uncensored:
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF/Qwen3.6-35B-A3B-Uncensored-Harmony-MXFP4_MOE.gguf --alias qwen-uncensored --host 127.0.0.1 --port ${PORT} --device CUDA0 --fit off --n-gpu-layers 99 --ctx-size 32768 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --threads 8 --threads-batch 8 --no-mmap --jinja --metrics
+    # RTX 5090 / Blackwell tuned from model-card guidance:
+    # - recommended MXFP4_MOE quant, fully GPU-resident (-ngl 999)
+    # - >=262K context to preserve Qwen3.6 thinking capabilities
+    # - q4_0 KV + flash-attn to make long context fit in 32GB VRAM
+    # - batch/ubatch/parallel from 5090 llama.cpp benchmark-style serving
+    # - coding/agent sampler: temp 0.6, top_p 0.95, top_k 20, min_p 0, presence penalty 0
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF/Qwen3.6-35B-A3B-Uncensored-Harmony-MXFP4_MOE.gguf --alias qwen-uncensored --host 127.0.0.1 --port ${PORT} --device CUDA0 --fit off --n-gpu-layers 999 --ctx-size 262144 --flash-attn on --cache-type-k q4_0 --cache-type-v q4_0 --batch-size 1024 --ubatch-size 256 --parallel 1 --threads 8 --threads-batch 8 --no-mmap --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 --metrics
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300
-    name: "Qwen3.6-35B-A3B Uncensored (Wasserstein IQ3_M)"
+    ttl: 0
+    name: "Qwen3.6-35B-A3B Uncensored Harmony (MXFP4_MOE, RTX 5090 tuned)"
     aliases: [qwen-uncensored, "qwen3.6-35b-uncensored:think", "qwen3.6-35b-uncensored:fast"]
-    description: "chat·uncensored · Qwen3.6-35B-A3B Uncensored/Harmony MXFP4_MOE — unaligned chat/reasoning, MoE experts on CPU (slow, occasional use). Thinking toggleable."
-    metadata: { class: "chat·uncensored", thinking: "toggle", best_for: "unaligned/uncensored chat + reasoning (occasional, slow)", tags: [chat, uncensored, abliterated, local, qwen, moe] }
+    description: "chat·agent·uncensored · Qwen3.6-35B-A3B Uncensored/Harmony MXFP4_MOE — Blackwell/RTX 5090 tuned, fully GPU-resident, 262K ctx, q4_0 KV, llama.cpp Jinja template, thinking toggleable."
+    metadata: { class: "chat·agent·uncensored", thinking: "toggle (default on; use :fast for off)", best_for: "Hermes Agent local reasoning/chat/tool use on RTX 5090", tags: [chat, agent, uncensored, abliterated, local, qwen, moe, rtx5090] }
     filters:
       setParamsByID:
         "qwen3.6-35b-uncensored:think":
@@ -270,15 +269,16 @@ matrix:
   vars:
     e: octen-embedding-4b      # embeddings (sift + oracle) — keep warm
     s: gemma-4-e4b             # summarize  · NP=4 SPEC=off
-    d: rewrite                 # dictation  · NP=1 SPEC=on (+MTP draft)
+    d: rewrite                 # dictation · vLLM E4B NVFP4+MTP, fixed :8001, ttl:0 (moved off llama.cpp 2026-07-14)
     t: lfm2-embed-350m         # MCP tool-search embedder (~0.4 GB) — keep warm, never evict chat
     b: gemma-4-12b-opus        # strong summarizer/reasoner (~10 GB w/ MTP + 131k f16 KV)
   evict_costs: { e: 10, s: 5, d: 5, t: 8, b: 6 }
   sets:
     # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident
-    # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(e4b+MTP)
-    # ~5.5 + tool 0.4 + 12B ~10 ≈ 25GB < 32. Big MoE (qwen3.6-35b-a3b ~26GB, uncensored
-    # MXFP4 ~20GB) are in NO set → they run SOLO (evict all), as before.
+    # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(vLLM E4B
+    # NVFP4+MTP, util 0.35) ~11.15 + tool 0.4 + 12B ~10 ≈ 31GB, close to the 32GB ceiling —
+    # watch headroom (see the CONFIRM note above) and trim GPU_UTIL further if it's tight.
+    # Big MoE (qwen3.6-35b-a3b ~26GB, uncensored MXFP4 ~20GB) are in NO set → SOLO (evict all).
     coresident: "e & s & d & t & b"
 #
 # Why matrix over legacy `groups`: groups force all-or-nothing exclusive unloads; the

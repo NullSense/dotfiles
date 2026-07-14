@@ -36,12 +36,17 @@ health() {
   if ! timeout 0.4 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; then
     echo "error:backend $host:$port unreachable"; return
   fi
-  # llama-swap always accepts TCP even if the model can't serve → verify the
-  # model id is actually registered before calling it healthy.
-  if [[ "$port" == "9292" && -n "$model" ]]; then
+  # kind "llama-server" (see llm_backend.py docstring) always accepts TCP even
+  # when the specific model can't serve — true for BOTH llama-swap (:9292,
+  # many models behind one port) and an always-resident vLLM instance (its
+  # own dedicated port, e.g. :8001 for the E4B). Either way, presence in the
+  # OpenAI-standard /v1/models listing is what "loaded" actually means, so
+  # gate on `kind`, not a hardcoded llama-swap port (generalized 2026-07-14
+  # when dictation-rewrite moved off llama-swap:9292 onto vLLM:8001).
+  if [[ "$kind" == "llama-server" && -n "$model" ]]; then
     if ! curl -s --max-time 1.5 "http://$host:$port/v1/models" | jq -e --arg m "$model" \
          '.data[]?|select(.id==$m)' >/dev/null 2>&1; then
-      echo "error:llama-swap has no '$model' model"; return
+      echo "error:backend $host:$port has no '$model' model"; return
     fi
   fi
   echo ok
@@ -57,7 +62,11 @@ case "${1:-status}" in
     pkill -RTMIN+12 waybar 2>/dev/null || true ;;
   off)
     echo 0 >"$TOGGLE"
-    # free the rewrite model's VRAM now; llama-swap reloads on demand.
+    # Free the rewrite model's VRAM now — but only llama-swap (:9292) supports
+    # an /unload endpoint; vLLM (e.g. :8001) holds the E4B always-resident with
+    # no equivalent call, so this is a no-op there. Either way "off" still stops
+    # the LLM call via the toggle file above (the hook short-circuits to raw
+    # text) — on vLLM it just won't additionally free VRAM.
     read -r host port _ _ < <(backend_target)
     [[ "$port" == "9292" ]] && curl -s --max-time 3 "http://$host:$port/unload?model=rewrite" >/dev/null 2>&1 || true
     notify-send -a hyprwhspr -i audio-input-microphone -u low \

@@ -1,36 +1,36 @@
 {
- "active": "rewrite",
- "backends": {
-  "lmstudio": {
-   "kind": "lmstudio",
-   "base_url": "http://127.0.0.1:1234",
-   "model": "google_gemma-4-e4b-it"
-  },
-  "gemma4": {
-   "kind": "llama-server",
-   "base_url": "http://127.0.0.1:8082",
-   "model": "gemma4-opus-distill"
-  },
-  "vibethinker": {
-   "kind": "llama-server",
-   "base_url": "http://127.0.0.1:9292",
-   "model": "vibethinker-3b"
-  },
-  "e4b": {
-   "kind": "llama-server",
-   "base_url": "http://127.0.0.1:8083",
-   "model": "gemma4-e4b"
-  },
-  "litellm": {
-   "kind": "llama-server",
-   "base_url": "http://127.0.0.1:4000",
-   "model": "rewrite-fast",
-   "api_key": "os.environ/HYPRWHSPR_LITELLM_KEY"
-  },
-  "rewrite": {
-   "kind": "llama-server",
-   "base_url": "http://127.0.0.1:9292",
-   "model": "rewrite"
+  "active": "rewrite",
+  "backends": {
+    "lmstudio": {
+      "kind": "lmstudio",
+      "base_url": "http://127.0.0.1:1234",
+      "model": "google_gemma-4-e4b-it"
+    },
+    "gemma4": {
+      "kind": "llama-server",
+      "base_url": "http://127.0.0.1:8082",
+      "model": "gemma4-opus-distill"
+    },
+    "vibethinker": {
+      "kind": "llama-server",
+      "base_url": "http://127.0.0.1:9292",
+      "model": "vibethinker-3b"
+    },
+    "e4b": {
+      "kind": "llama-server",
+      "base_url": "http://127.0.0.1:8083",
+      "model": "gemma4-e4b"
+    },
+    "litellm": {
+      "kind": "llama-server",
+      "base_url": "http://127.0.0.1:4000",
+      "model": "rewrite-fast",
+      "api_key": "os.environ/HYPRWHSPR_LITELLM_KEY"
+    },
+    "rewrite": {
+      "kind": "llama-server",
+      "base_url": "http://127.0.0.1:9292",
+      "model": "rewrite"
+    }
   }
- }
 }

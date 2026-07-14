@@ -1,0 +1,32 @@
+# Managed by chezmoi (dot_config/systemd/user/stack-up.service).
+# Brings the local LLM serving stack up at LOGIN via ~/bin/stack — the single
+# source of truth: llama-swap (:9292) + litellm-db (:5433) + litellm gateway
+# (:4000) + the always-on vLLM E4B slot (:8001).
+#
+# "At login", not pre-boot, is deliberate: litellm's secrets come from
+# `infisical run --path /litellm`, which reads the OS keyring, and the keyring
+# is only unlocked by PAM once you log in graphically. linger stays OFF, so this
+# fires when the Hyprland session reaches default.target — keyring unlocked →
+# infisical resolves → the gateway comes up with its master + provider keys.
+# (If you ever want true pre-login boot, that needs an Infisical machine
+# identity / INFISICAL_TOKEN so `infisical run` works headless, plus linger.)
+[Unit]
+Description=Local LLM stack (llama-swap + litellm gateway) via ~/bin/stack
+Documentation=file://%h/Programming/llm-stack/README.md
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# stack up waits up to ~15s for litellm-db (:5433) and warms the E4B slot; give
+# it headroom so a cold docker start doesn't trip the default 90s timeout.
+TimeoutStartSec=180
+WorkingDirectory=%h
+# stack calls: llama-swap, litellm (~/.local/bin), infisical + docker + curl
+# (/usr/bin), python3 (mise shim), agent-vault + stack itself (~/bin).
+Environment=PATH=%h/bin:%h/.local/bin:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/bin/stack up
+ExecStop=%h/bin/stack down
+
+[Install]
+WantedBy=default.target

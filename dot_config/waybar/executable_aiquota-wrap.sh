@@ -23,8 +23,13 @@ BIN="${AIQUOTA_BIN:-$(command -v aiquota 2>/dev/null || printf '%s' "$HOME/.loca
 # runs CONCURRENTLY with the codeburn refresh (≤4s), so 15s is comfortable.
 TIMEOUT="${AIQUOTA_TIMEOUT:-15}"
 
-# Subcommand passthrough for waybar on-click handlers (cycle / tui / …).
-if [ "$#" -gt 0 ]; then
+# Poll targets that emit hardened JSON go through the wrap-and-validate path
+# below. `llamaswap` is one (like the default `waybar`), NOT a raw passthrough.
+# Everything else with args (cycle / tui / …) forwards straight to the binary.
+POLL_CMD="waybar"
+if [ "${1:-}" = "llamaswap" ]; then
+  POLL_CMD="llamaswap"
+elif [ "$#" -gt 0 ]; then
   exec "$BIN" "$@"
 fi
 
@@ -61,7 +66,7 @@ stderr_file=$(mktemp -t aiquota-wrap.XXXXXX.err) || {
 }
 trap 'rm -f "$stderr_file"' EXIT
 
-out=$(timeout "$TIMEOUT" "$BIN" waybar 2>"$stderr_file")
+out=$(timeout "$TIMEOUT" "$BIN" "$POLL_CMD" 2>"$stderr_file")
 rc=$?
 err=$(cat "$stderr_file" 2>/dev/null || true)
 

@@ -1,5 +1,10 @@
 [edit]
     command = "nvim"
+    # Apply to the live target automatically when the editor exits, so
+    # `chezmoi edit <file>` never leaves source and target out of sync.
+    # For live-tuning loops use `chezmoi edit --watch <file>` (applies on
+    # every save). Revert an unwanted edit with `git checkout` in the source.
+    apply = true
 [diff]
     command = "delta"
 [data]

@@ -96,7 +96,11 @@ tt+="Util   ${UTIL}%     Temp  ${TEMP}°C     Power ${POWER}W\n"
 tt+="\n<b>Top VRAM</b>\n${top}\n"
 tt+="\n  L-click  nvtop      R-click  nvidia-smi"
 
-# JSON-escape: backslash first, then double-quotes, then newlines.
+# Normalize any literal "\n" (from double-quoted header strings) into REAL
+# newlines first — otherwise the backslash-doubling below turns them into
+# "\\n" and waybar renders a literal \n instead of a line break.
+tt=${tt//\\n/$'\n'}
+# JSON-escape: backslash first, then double-quotes, then newlines → \n.
 tt_json=${tt//\\/\\\\}
 tt_json=${tt_json//\"/\\\"}
 tt_json=${tt_json//$'\n'/\\n}

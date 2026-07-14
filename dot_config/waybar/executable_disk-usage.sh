@@ -93,6 +93,7 @@ tt+="used   <b>${usedh}</b> / ${sizeh}   (${pcent}%)\n"
 tt+="\n<b>Largest here</b>${staleness}\n${breakdown}\n"
 tt+="\n  L-click  ncdu      R-click  refresh now"
 
+tt=${tt//\\n/$'\n'}   # literal "\n" from double-quoted strings → real newline
 tt=${tt//\\/\\\\}; tt=${tt//\"/\\\"}; tt=${tt//$'\n'/\\n}
 
 printf '{"text":"%s  %s%%","tooltip":"%s","class":"%s","percentage":%s}\n' \

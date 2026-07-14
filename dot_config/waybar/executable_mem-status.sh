@@ -58,6 +58,7 @@ tt+="swap   ${swused_g}G / $(kb_g0 "$swtotal")G   (${swpct}%)\n"
 tt+="\n<b>Top memory</b>\n${top}\n"
 tt+="\n  L-click  btop"
 
+tt=${tt//\\n/$'\n'}   # literal "\n" from double-quoted strings → real newline
 tt=${tt//\\/\\\\}; tt=${tt//\"/\\\"}; tt=${tt//$'\n'/\\n}
 
 printf '{"text":"  %s/%sG%s","tooltip":"%s","class":"%s","percentage":%s}\n' \

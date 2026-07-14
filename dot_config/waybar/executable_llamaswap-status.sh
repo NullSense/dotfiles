@@ -65,5 +65,6 @@ else
 fi
 tt+="\n${avail} models available\n  L-click  open web UI"
 
+tt=${tt//\\n/$'\n'}   # literal "\n" from double-quoted strings → real newline
 tt=${tt//\\/\\\\}; tt=${tt//\"/\\\"}; tt=${tt//$'\n'/\\n}
 printf '{"text":"%s","tooltip":"%s","class":"%s"}\n' "$text" "$tt" "$cls"

@@ -10,21 +10,19 @@
 [data]
     user = "nullsense"
 
-# Auto-commit + auto-push for chezmoi-driven source changes.
+# Auto-commit (local) for chezmoi-driven source changes; push is MANUAL.
 #
-# Triggers ONLY when chezmoi itself modifies the source dir:
-#   • chezmoi add <path>
-#   • chezmoi re-add <path>
-#   • chezmoi forget <path>
-#   • chezmoi destroy <path>
-#   • chezmoi edit <path>      (commits the post-edit state)
+# autoCommit triggers ONLY when chezmoi itself modifies the source dir:
+#   • chezmoi add / re-add / forget / destroy / edit <path>
+# It does NOT trigger when you edit files under ~/.local/share/chezmoi/
+# directly with $EDITOR — commit those with `chezmoi git -- commit -am ...`.
 #
-# Does NOT trigger when you edit files under ~/.local/share/chezmoi/ directly
-# with $EDITOR — that path stays manual via `chezmoi git -- commit`.
-#
-# autoPush implies autoCommit. Repo is github.com/NullSense/dotfiles (public),
-# so anything chezmoi-tracked under non-template `private_*` paths becomes
-# public on next chezmoi-driven action. Permission-marker only — not encryption.
+# autoPush is OFF (2026-07-14). Repo github.com/NullSense/dotfiles is PUBLIC,
+# so instant-push-on-every-action exposed work publicly the moment any chezmoi
+# command ran, and bundled unrelated drift into surprise commits. Local commits
+# keep work safe in git; publishing is now a deliberate `chezmoi git -- push`.
+# `private_*` is a permission marker only — NOT encryption; treat pushes as
+# immediately public.
 [git]
     autoCommit = true
-    autoPush = true
+    autoPush = false

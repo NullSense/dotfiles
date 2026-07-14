@@ -1,26 +1,36 @@
 # Claude Instructions (Global)
 
 ## Dotfiles = chezmoi · source: `~/.local/share/chezmoi/` · public repo NullSense/dotfiles
-Files under `~/.config/`, `~/.zshrc`, `~/.gitconfig` are TARGETS. Editing a target without
-mirroring to source = silent data loss (next `chezmoi apply`/`update` overwrites it).
+Home files like `~/.zshrc`, `~/.config/**`, `~/.gitconfig` are chezmoi TARGETS rendered from SOURCE
+files under `~/.local/share/chezmoi/`. Source is authoritative — a bare `chezmoi apply` regenerates
+targets from source, so a target edited in place gets silently reverted.
 
-- **Never edit a target without mirroring to source in the same response** — either edit the
-  source then `chezmoi apply <target>` (preferred), or edit the target then `chezmoi re-add <target>`.
+**Canonical workflow — ONE rule: edit SOURCE, then apply that ONE target.**
+1. `chezmoi source-path <target>` → open that source file (they're normal files: `dot_zshrc`,
+   `dot_config/foo.tmpl`, …). Edit with your normal Edit/Write tools. For a `*.tmpl`, edit the
+   `.tmpl`, never the rendered target.
+2. `chezmoi apply <target>` — targeted. Avoid bare `chezmoi apply` (it reconciles the whole tree).
+3. Commit + push deliberately: `chezmoi git -- commit -am "…"` then `chezmoi git -- push`.
+   **autoPush is OFF** — nothing is public until you push; a push IS immediately public (repo is
+   public; `private_*` is a permission marker, not encryption). trufflehog gates the push.
+
 - Path map: `dot_<n>`→`~/.<n>` · `dot_config/<x>`→`~/.config/<x>` · `private_<n>`→0600 ·
   `executable_<n>`→+x · `*.tmpl`→Go-template · `symlink_<n>`→symlink.
-- `chezmoi apply` auto-commits AND pushes to the **public** repo — treat applied changes as
-  immediately public; never say "local/not pushed". It also bundles unrelated drift.
-- **Policy (2026-07-03): commit drift as you go.** Keep source synced — `re-add` modified targets
-  (target→source, captures live state) and commit + push, don't let drift accumulate. Still never
-  blind-`apply` over an `MM` target (that clobbers live target edits); resolve `MM` via `re-add`,
-  not `apply`. Only pause for secrets in the diff (trufflehog gates the push regardless).
-- Never restore files marked `D` (intentionally migrated). Untracked source = unbacked work.
-- Commands: `chezmoi status|diff|apply [p]|re-add [p]|edit [p]|cd|git -- <cmd>`.
+- Humans get a live loop: `chezmoi edit <target>` (auto-applies on exit) or `chezmoi edit --watch
+  <target>` (applies on every save). Agents: use step 1–2 above (your tools edit files, not $EDITOR).
+- Capturing an edit made OUTSIDE chezmoi (target changed directly): `chezmoi re-add <target>`
+  (target→source). This is the exception — prefer editing source. Never blind-`apply` over an `MM`
+  target; inspect `chezmoi status`/`diff` first. Never restore `D` files (intentionally migrated).
+- Works in the agent sandbox: source-tree secrets (`SECRETS.md`, `private_*`) are masked with empty
+  regular files so the tree-walk survives (fixed 2026-07-14; was `/dev/null`, which crashed every
+  chezmoi command → hand-cp workarounds). Targeted apply is the safe path there.
+- Commands: `chezmoi status|diff|apply <p>|re-add <p>|edit <p>|source-path <p>|cd|git -- <cmd>`.
 
 ## Git
-Commit finished, verified work without being asked; for chezmoi source, commit + push (autopush
-expected). Pause first ONLY if it would bundle unrelated drift, include secrets, rewrite pushed
-history, or land on a protected branch with no feature branch.
+Commit finished, verified work without being asked. For chezmoi source, `chezmoi git -- commit`
+then `chezmoi git -- push` (autoPush is OFF — push is a deliberate step, not automatic). Pause
+before pushing ONLY if it would bundle unrelated drift, include secrets, rewrite pushed history,
+or land on a protected branch with no feature branch.
 
 ## Keybindings
 Before binding any shortcut (Hyprland/app/shell), grep the config for the exact modifier+key and

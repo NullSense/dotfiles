@@ -414,12 +414,24 @@ mask_file() { [[ -e "$1" ]] && ARGS+=( --ro-bind /dev/null "$1" ); return 0; }
 
 # chezmoi source secrets. The source tree is RW-bound above (config surface),
 # so re-mask just the secret-bearing entries: SECRETS.md + every private_* /
-# encrypted_* at any depth (dirs → tmpfs, files → /dev/null). Replaces the old
-# wholesale-tmpfs mask that made agents' chezmoi edits silently vanish.
-mask_file "$CHEZMOI_ROOT/SECRETS.md"
+# encrypted_* at any depth. Replaces the old wholesale-tmpfs mask that made
+# agents' chezmoi edits silently vanish.
+#
+# CRITICAL: mask source FILES with an empty *regular* file, NOT /dev/null.
+# chezmoi reads its ENTIRE source tree on every command and aborts with
+# "unsupported file type" on any non-regular entry — a /dev/null (character
+# device) mask therefore crashed every in-sandbox `chezmoi apply|status|re-add`,
+# which is exactly what drove agents to bypass chezmoi and hand-cp. An empty
+# regular file lets the walk succeed, so targeted `chezmoi apply <file>` works
+# and touches only the named file. SECRETS.md is also .chezmoiignore'd so a
+# stray untargeted apply can't overwrite ~/SECRETS.md from the empty mask.
+# `cat` on the mask still yields nothing, so the self-test negatives still pass.
+EMPTY_MASK="$XRD/.agent-isolated-empty-mask"
+: > "$EMPTY_MASK" 2>/dev/null || EMPTY_MASK=/dev/null   # fallback: pre-fix behaviour
+[[ -e "$CHEZMOI_ROOT/SECRETS.md" ]] && ARGS+=( --ro-bind "$EMPTY_MASK" "$CHEZMOI_ROOT/SECRETS.md" )
 while IFS= read -r _p; do
     if [[ -d "$_p" ]]; then ARGS+=( --tmpfs "$_p" )
-    else ARGS+=( --ro-bind /dev/null "$_p" ); fi
+    else ARGS+=( --ro-bind "$EMPTY_MASK" "$_p" ); fi
 done < <(find "$CHEZMOI_ROOT" \( -name 'private_*' -o -name 'encrypted_*' \) -prune 2>/dev/null)
 unset _p
 

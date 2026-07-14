@@ -7,6 +7,13 @@
 arch-install
 arch-install/**
 
+# Secrets inventory doc — tracked in git, never deployed to ~/SECRETS.md.
+# Also load-bearing for the crash fix: agent-isolated masks the *source* copy
+# with an empty regular file so chezmoi's tree-walk survives in the sandbox;
+# ignoring it here guarantees an untargeted `chezmoi apply` can't push that
+# empty mask over the real ~/SECRETS.md.
+SECRETS.md
+
 # Omarchy generated state — `omarchy-theme-set` rewrites .config/omarchy/
 # current/ on every theme switch (rendered theme/, theme.name, next-theme/).
 # chezmoi mustn't track or revert these. The user-owned source-of-truth

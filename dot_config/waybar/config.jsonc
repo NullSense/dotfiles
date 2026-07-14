@@ -29,8 +29,11 @@
         "custom/xt3-status",
         "custom/notifications",
         "idle_inhibitor",
+        "custom/llamaswap",
+        "custom/gpu",
+        "custom/memory",
+        "group/storage",
         "group/display",
-        "group/system",
         "pulseaudio",
         "battery#mouse",
         "tray"
@@ -47,20 +50,86 @@
             "custom/colortemp"
         ]
     },
-    "group/system": {
+    // Storage drawer — the ~ pill is the always-visible handle; hovering
+    // slides the / pill in. Both fixed to the same physical filesystem here,
+    // so the % matches; the value is each pill's tooltip, which ranks the
+    // largest directories under that path (computed off the hot path — see
+    // disk-usage.sh). This is the ONLY hover-to-expand group on the right now
+    // (display is the other); GPU + RAM sit inline, always visible.
+    "group/storage": {
         "orientation": "horizontal",
         "drawer": {
             "transition-duration": 300,
-            "children-class": "sys-child",
+            "children-class": "storage-child",
             "transition-left-to-right": false
         },
         "modules": [
-            "cpu",
-            "memory",
-            "temperature",
-            "disk#home",
-            "disk#root"
+            "custom/disk-home",
+            "custom/disk-root"
         ]
+    },
+    "custom/gpu": {
+        // VRAM used/total (RTX 5090). Tooltip ranks the top VRAM consumers
+        // with REAL names — a bare "python" is resolved to the script it runs
+        // (e.g. the hyprwhspr dictation model), which is exactly what a raw
+        // process monitor can't tell you.
+        "exec": "$HOME/.config/waybar/gpu-status.sh",
+        "return-type": "json",
+        "interval": 5,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click": "$HOME/.config/waybar/gpu-status.sh nvtop",
+        "on-click-right": "$HOME/.config/waybar/gpu-status.sh smi"
+    },
+    "custom/memory": {
+        // RAM used/total in G, with a swap segment that only appears when swap
+        // is actually in use (zram-only box → usually hidden). Replaces the
+        // built-in `memory` module so swap can be conditional and the tooltip
+        // can rank top-RSS processes.
+        "exec": "$HOME/.config/waybar/mem-status.sh",
+        "return-type": "json",
+        "interval": 5,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click": "$HOME/.config/waybar/mem-status.sh btop"
+    },
+    "custom/llamaswap": {
+        // What the local LLM server (llama-swap :9292) currently has resident.
+        // Collapses out of the bar when the server is down. Click → web UI.
+        "exec": "$HOME/.config/waybar/llamaswap-status.sh",
+        "return-type": "json",
+        "interval": 5,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click": "$HOME/.config/waybar/llamaswap-status.sh ui"
+    },
+    "custom/disk-home": {
+        "exec": "$HOME/.config/waybar/disk-usage.sh pill $HOME home 󰋜",
+        "return-type": "json",
+        "interval": 30,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click": "$HOME/.config/waybar/disk-usage.sh ncdu $HOME",
+        "on-click-right": "$HOME/.config/waybar/disk-usage.sh refresh $HOME home"
+    },
+    "custom/disk-root": {
+        "exec": "$HOME/.config/waybar/disk-usage.sh pill / root 󰋊",
+        "return-type": "json",
+        "interval": 30,
+        "format": "{}",
+        "tooltip": true,
+        "escape": false,
+        "markup": "pango",
+        "on-click": "$HOME/.config/waybar/disk-usage.sh ncdu /",
+        "on-click-right": "$HOME/.config/waybar/disk-usage.sh refresh / root"
     },
     "custom/workspaces": {
         // Replaces `hyprland/workspaces` so each digit can be Pango-colored
@@ -245,43 +314,6 @@
         "on-click": "busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 6500",
         "on-click-right": "busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 4000",
         "on-click-middle": "$HOME/bin/color-neutral"
-    },
-    "cpu": {
-        "interval": 5,
-        "format": "   {usage}%",
-        "tooltip-format": "CPU  {usage}%   load {load}\n  L-click  btop\n  R-click  htop",
-        "on-click": "alacritty --class=com.local.floating-monitor -e btop",
-        "on-click-right": "alacritty --class=com.local.floating-monitor -e htop"
-    },
-    "memory": {
-        "interval": 10,
-        "format": "   {used:0.1f}G",
-        "tooltip-format": "RAM  {used:0.1f}G / {total:0.1f}G  ({percentage}%)\nswap {swapUsed:0.1f}G / {swapTotal:0.1f}G  ({swapPercentage}%)\n  L-click  btop\n  R-click  free -h",
-        "on-click": "alacritty --class=com.local.floating-monitor -e btop",
-        "on-click-right": "alacritty --class=com.local.floating-monitor -e sh -c 'free -h; echo; read -r _'"
-    },
-    "temperature": {
-        "critical-threshold": 85,
-        "format": "   {temperatureC}°",
-        "format-critical": "   {temperatureC}°",
-        "tooltip-format": "Temp  {temperatureC}°C  ({temperatureF}°F)\n  L-click  btop (sensors)",
-        "on-click": "alacritty --class=com.local.floating-monitor -e btop"
-    },
-    "disk#home": {
-        "interval": 30,
-        "format": "   {percentage_used}%",
-        "tooltip-format": "~  used {used} of {total}  ({percentage_used}%)\n  L-click  thunar ~\n  R-click  btop (disk view)",
-        "path": "/home/",
-        "on-click": "thunar $HOME",
-        "on-click-right": "alacritty --class=com.local.floating-monitor -e btop"
-    },
-    "disk#root": {
-        "interval": 30,
-        "format": "   {percentage_used}%",
-        "tooltip-format": "/  used {used} of {total}  ({percentage_used}%)\n  L-click  thunar /\n  R-click  df -h",
-        "path": "/",
-        "on-click": "thunar /",
-        "on-click-right": "alacritty --class=com.local.floating-monitor -e sh -c 'df -hT -x tmpfs -x devtmpfs -x squashfs; echo; read -r _'"
     },
     "pulseaudio": {
         "format": "{icon}  {volume}%",

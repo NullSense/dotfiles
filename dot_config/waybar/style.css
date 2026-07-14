@@ -72,10 +72,11 @@ window#waybar.hidden { opacity: 0; }
  * Pills
  * ============================================================ */
 #submap,
-#cpu,
-#memory,
-#temperature,
-#disk,
+#custom-gpu,
+#custom-memory,
+#custom-llamaswap,
+#custom-disk-home,
+#custom-disk-root,
 #battery,
 #idle_inhibitor,
 #pulseaudio,
@@ -230,28 +231,56 @@ window#waybar.hidden { opacity: 0; }
  * The pill family's own border supplies the visual separator line.
  * ============================================================ */
 .disp-child,
-.sys-child { margin: 3px 0; }
+.storage-child { margin: 3px 0; }
 
 /* Leading drawer pill keeps its outer (left) margin and fuses on the
  * right with its sibling children. Trailing children sit flush both sides. */
-#cpu, #custom-brightness                  { margin-right: 0; }
-#memory, #temperature, #disk.home, #disk.root, #custom-colortemp {
+#custom-disk-home, #custom-brightness     { margin-right: 0; }
+#custom-disk-root, #custom-colortemp {
     margin: 3px 0;
 }
 
 /* ============================================================
- * Per-module accents
+ * Per-module accents — GPU, RAM, llama-swap, storage
  * ============================================================ */
-#cpu          { color: @blue; }
-#memory       { color: @purple; }
-#temperature  { color: @orange; }
-#temperature.critical {
+/* GPU (VRAM) — aqua at rest, warms as VRAM fills. */
+#custom-gpu        { color: @aqua; }
+#custom-gpu.warn   { color: @yellow; }
+#custom-gpu.crit {
     background: @red;
     color: @bg0;
     border-color: @red;
     animation: blink 1s linear infinite alternate;
 }
-#disk         { color: @aqua; }
+
+/* RAM — purple; warns then goes critical as it fills. */
+#custom-memory      { color: @purple; }
+#custom-memory.warn { color: @yellow; }
+#custom-memory.crit {
+    background: @red;
+    color: @bg0;
+    border-color: @red;
+    animation: blink 1s linear infinite alternate;
+}
+
+/* llama-swap — green when a model is resident, amber while loading, dim when
+ * idle. `.down` emits empty text so the pill collapses out of the bar. */
+#custom-llamaswap.loaded  { color: @green; border-color: @green_dim; }
+#custom-llamaswap.loading {
+    color: @yellow;
+    animation: blink 0.9s ease-in-out infinite alternate;
+}
+#custom-llamaswap.idle    { color: @gray; opacity: 0.55; }
+#custom-llamaswap.down    { opacity: 0; }
+
+/* Storage pills — aqua, warm/critical as the filesystem fills. */
+#custom-disk-home, #custom-disk-root      { color: @aqua; }
+#custom-disk-home.warn, #custom-disk-root.warn { color: @yellow; }
+#custom-disk-home.crit, #custom-disk-root.crit {
+    background: @red;
+    color: @bg0;
+    border-color: @red;
+}
 
 #battery.mouse              { color: @purple; }
 #battery.mouse.charging     { color: @green; }
@@ -366,10 +395,11 @@ window#waybar.hidden { opacity: 0; }
 /* ============================================================
  * Hover affordance
  * ============================================================ */
-#cpu:hover,
-#memory:hover,
-#temperature:hover,
-#disk:hover,
+#custom-gpu:hover,
+#custom-memory:hover,
+#custom-llamaswap:hover,
+#custom-disk-home:hover,
+#custom-disk-root:hover,
 #battery:hover,
 #pulseaudio:hover,
 #custom-colortemp:hover,

@@ -262,12 +262,23 @@ ARGS+=(
     --cap-drop ALL
 )
 
+# NOTE: the disk-backed Claude scratchpad tree (CLAUDE_CODE_TMPDIR =
+# ~/.cache/claude-tmp) has NO automatic cleanup — Claude Code's
+# cleanupPeriodDays only covers ~/.claude. Prune it manually or via a user
+# tmpfiles.d rule when it grows.
+
 # Empty filesystem, layered from here.
+# /tmp is capped: it's RAM (tmpfs), and an uncapped one let a sandboxed
+# cargo build grow a 25G target/ tree invisibly (2026-07-16, near-OOM +
+# swap-full). Big artifacts belong on disk — Claude Code's scratchpad is
+# steered there via CLAUDE_CODE_TMPDIR (~/.cache/claude-tmp, RW through the
+# $HOME bind). Anything else writing /tmp now fails loudly at 4G instead of
+# silently eating RAM.
 ARGS+=(
     --tmpfs /
     --proc /proc
     --dev /dev
-    --tmpfs /tmp
+    --size $((4 << 30)) --tmpfs /tmp
     --tmpfs /var/tmp
     --tmpfs /run
     --dir "/run/user/$UID_NUM"

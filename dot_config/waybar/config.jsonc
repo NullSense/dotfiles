@@ -29,7 +29,6 @@
         "custom/xt3-status",
         "custom/notifications",
         "idle_inhibitor",
-        "custom/llamaswap",
         "custom/gpu",
         "custom/memory",
         "group/storage",
@@ -96,20 +95,6 @@
         "escape": false,
         "markup": "pango",
         "on-click": "$HOME/.config/waybar/mem-status.sh btop"
-    },
-    "custom/llamaswap": {
-        // What the local LLM server (llama-swap :9292) currently has resident.
-        // Backed by the aiquota Rust binary (native `llamaswap` subcommand) via
-        // the shared hardened wrapper — same error-pill safety as the aiquota
-        // module. Collapses out of the bar when the server is down. Click → UI.
-        "exec": "$HOME/.config/waybar/aiquota-wrap.sh llamaswap",
-        "return-type": "json",
-        "interval": 5,
-        "format": "{}",
-        "tooltip": true,
-        "escape": false,
-        "markup": "pango",
-        "on-click": "xdg-open http://localhost:9292/"
     },
     "custom/disk-home": {
         "exec": "$HOME/.config/waybar/disk-usage.sh pill $HOME home 󰋜",

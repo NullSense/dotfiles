@@ -74,7 +74,6 @@ window#waybar.hidden { opacity: 0; }
 #submap,
 #custom-gpu,
 #custom-memory,
-#custom-llamaswap,
 #custom-disk-home,
 #custom-disk-root,
 #battery,
@@ -263,15 +262,8 @@ window#waybar.hidden { opacity: 0; }
     animation: blink 1s linear infinite alternate;
 }
 
-/* llama-swap — green when a model is resident, amber while loading, dim when
- * idle. `.down` emits empty text so the pill collapses out of the bar. */
-#custom-llamaswap.loaded  { color: @green; border-color: @green_dim; }
-#custom-llamaswap.loading {
-    color: @yellow;
-    animation: blink 0.9s ease-in-out infinite alternate;
-}
-#custom-llamaswap.idle    { color: @gray; opacity: 0.55; }
-#custom-llamaswap.down    { opacity: 0; }
+/* (llama-swap resident-model state is now folded INTO the aiquota pill —
+ * see aiquota's `llamaswap` segment — so it no longer has its own module.) */
 
 /* Storage pills — aqua, warm/critical as the filesystem fills. */
 #custom-disk-home, #custom-disk-root      { color: @aqua; }
@@ -397,7 +389,6 @@ window#waybar.hidden { opacity: 0; }
  * ============================================================ */
 #custom-gpu:hover,
 #custom-memory:hover,
-#custom-llamaswap:hover,
 #custom-disk-home:hover,
 #custom-disk-root:hover,
 #battery:hover,

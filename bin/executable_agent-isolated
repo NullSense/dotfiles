@@ -142,7 +142,11 @@ if [[ -z "${AGENT_VAULT_WRAPPED:-}" && -z "${HTTPS_PROXY:-}" && -z "${AGENT_UNSA
     done
     if (( _want_vault )) && command -v agent-vault >/dev/null 2>&1; then
         export AGENT_VAULT_WRAPPED=1
-        exec agent-vault vault run --vault "${AGENT_VAULT_VAULT:-default}" -- "$0" "$@"
+        # --ttl 604800 (7d, the max): the default 24h TTL let a 25h claude
+        # session outlive its token mid-flight — every proxied call started
+        # 407ing with no in-place recovery (env is baked at bwrap launch).
+        # A vault-server restart also invalidates live sessions the same way.
+        exec agent-vault vault run --vault "${AGENT_VAULT_VAULT:-default}" --ttl 604800 -- "$0" "$@"
     fi
 fi
 

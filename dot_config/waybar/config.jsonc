@@ -300,13 +300,13 @@
     },
     "custom/colortemp": {
         "format": "  {}",
-        "exec": "wl-gammarelay-rs watch {t}K",
-        "tooltip-format": "Color temperature  (synced across all monitors)\n   scroll      ±100K\n   left-click   6500K  day\n   right-click  4000K  warm\n   middle-click 6500K  +  reset brightness/gamma  (true-color / editing)",
-        "on-scroll-up": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n +100",
-        "on-scroll-down": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n -100",
-        "on-click": "busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 6500",
-        "on-click-right": "busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 4000",
-        "on-click-middle": "$HOME/bin/color-neutral"
+        "exec": "if [ \"$(hyprshade current 2>/dev/null)\" = blue-light-filter ]; then echo '4000K'; else echo 'day'; fi",
+        "interval": 5,
+        "signal": 13,
+        "tooltip-format": "Blue-light filter — screen shader (hyprshade)\nwl-gammarelay/gammastep gamma is DEAD on nvidia-open 610 (GAMMA_LUT commit rejected);\nthis shader runs in the compositor render pass, so it actually shifts color.\n   left-click    toggle warm 4000K / day\n   right-click   force warm on\n   middle-click  force day (off)\nAuto 19:00→06:00 via ~/.config/hypr/hyprshade.toml",
+        "on-click": "hyprshade toggle blue-light-filter; pkill -RTMIN+13 waybar",
+        "on-click-right": "hyprshade on blue-light-filter; pkill -RTMIN+13 waybar",
+        "on-click-middle": "hyprshade off; pkill -RTMIN+13 waybar"
     },
     "pulseaudio": {
         "format": "{icon}  {volume}%",

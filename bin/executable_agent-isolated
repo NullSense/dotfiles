@@ -104,11 +104,13 @@ ALLOW_RBW=0
 # agent can escape the sandbox via `docker run -v /:/host`. Opt out per-run with
 # --no-docker for untrusted/unsupervised sessions.
 ALLOW_DOCKER=1
-# Default-on: every agent runs under agent-vault so outbound HTTPS gets
-# credential injection (agent talks to APIs, never sees upstream tokens).
-# Opt out per-invocation with --no-agent-vault; bypass all isolation with
-# AGENT_UNSANDBOX=1 or the *-raw aliases.
-ALLOW_AGENT_VAULT=1
+# Default-OFF (flipped 2026-07-19, per user request: no egress proxying at
+# all). The MITM proxy broke real traffic — killed the native auto-updater's
+# downloads.claude.ai fetch (install_failed on every update), and previously
+# node-fetch SNI issues — so agents get direct egress by default. Opt in
+# per-invocation with --agent-vault when credential injection is wanted
+# (agent talks to APIs, never sees upstream tokens).
+ALLOW_AGENT_VAULT=0
 ALLOW_DOTFILES=0
 # Default-on: plannotator's binds are narrow (3 dirs under $HOME, no
 # secrets), broadly useful (review / annotate flows), and harmless when
@@ -124,18 +126,19 @@ SELF_TEST=0
 AGENT=""
 
 # ─────────────────────── Auto-vault (self-acquire) ─────────────────────────
-# agent-vault is default-on, so if we are not already inside a vault session
-# (no ambient HTTPS_PROXY) and not opted out, re-exec the whole shim under
+# agent-vault is default-OFF (no egress proxying by default). Only when the
+# caller passes --agent-vault do we re-exec the whole shim under
 # `agent-vault vault run` to ACQUIRE a session — then the second pass sees the
 # proxy env and forwards it across bwrap's --clearenv (see the --agent-vault
-# block below). Without this, `claude` alone could only forward an ambient
-# session that a plain shell never has. The AGENT_VAULT_WRAPPED sentinel breaks
-# the loop if vault run can't provide a proxy; --no-agent-vault / AGENT_UNSANDBOX
-# skip it; a missing agent-vault binary falls through (no hard dependency).
+# block below). Without this, `claude --agent-vault` alone could only forward
+# an ambient session that a plain shell never has. The AGENT_VAULT_WRAPPED
+# sentinel breaks the loop if vault run can't provide a proxy; AGENT_UNSANDBOX
+# skips it; a missing agent-vault binary falls through (no hard dependency).
 if [[ -z "${AGENT_VAULT_WRAPPED:-}" && -z "${HTTPS_PROXY:-}" && -z "${AGENT_UNSANDBOX:-}" ]]; then
-    _want_vault=1
+    _want_vault=0
     for _a in "$@"; do
         case "$_a" in
+            --agent-vault) _want_vault=1 ;;
             --no-agent-vault) _want_vault=0 ;;
             --) break ;;
         esac

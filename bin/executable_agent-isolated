@@ -632,7 +632,9 @@ if (( ALLOW_AGENT_VAULT )); then
         ARGS+=(
             --setenv HTTPS_PROXY "$_proxy"
             --setenv HTTP_PROXY  "$_proxy"
-            --setenv NO_PROXY    "${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost,api.anthropic.com"
+            # downloads.claude.ai: the native auto-updater's version fetch; the
+            # MITM proxy closes its socket (install_failed on every update).
+            --setenv NO_PROXY    "${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost,api.anthropic.com,downloads.claude.ai"
             --setenv NODE_USE_ENV_PROXY "1"
         )
     fi

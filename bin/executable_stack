@@ -37,8 +37,10 @@ kill_port() {  # kill whatever LISTENS on a TCP port — reliable, no fuser/patt
 sweep_swap_children() {  # llama-swap spawns llama-server backends as its OWN children; `down`
   # kills only the :9292 listener (llama-swap itself), orphaning those children — they reparent
   # to systemd, keep pinning VRAM, and the next llama-swap can't see them (/running lies). Kill
-  # the subtree FIRST, while llama-swap is alive so we can find them. Does NOT touch the dictation
-  # rewriter (hyprwhspr-rewrite-e4b.service) — that llama-server's parent is systemd, not llama-swap.
+  # the subtree FIRST, while llama-swap is alive so we can find them. This now includes the dictation
+  # rewriter (the `rewrite` E4B model) — as of 2026-07-20 it's a llama-swap-managed vLLM container
+  # (name vllm-gemma4b), not a standalone systemd service; the `down` case also `docker stop`s it
+  # explicitly since a --rm container can outlive the reaped `docker run` client.
   local swap_pids p kids
   swap_pids=$(ss -tlnpH "sport = :9292" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u)
   [ -n "$swap_pids" ] || swap_pids=$(pgrep -x llama-swap 2>/dev/null || true)
@@ -151,43 +153,30 @@ case "${1:-status}" in
       [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2
       start_one litellm http://127.0.0.1:4000/health "${LITELLM_CMD[@]}"
     fi
-    # Dictation rewrite backend — RETIRED 2026-07-09. Dictation now shares the always-on
-    # vLLM E4B slot (:8001, serves "rewrite" — NVFP4 W4A16 + MTP, chat_template_kwargs via
-    # --default-chat-template-kwargs). The old standalone :8083 llama.cpp service is off to
-    # avoid a duplicate 6GB E4B. Opt back in with STACK_DICT_8083=1.
-    if [ "${STACK_DICT_8083:-0}" = "1" ] && systemctl --user start hyprwhspr-rewrite-e4b.service 2>/dev/null; then
-      echo "  • dictation rewriter → :8083 (E4B + MTP, systemd)"
-    fi
-    # vLLM E4B (:8001, NVFP4+MTP, serves "summarize"+"rewrite") is now llama-swap-MANAGED
-    # (moved 2026-07-14 — see the `rewrite` model entry in llama-swap/config.yaml for the
-    # full rationale: fixed :8001 so oracle's summarize-cheap + hyprwhspr keep working
-    # unchanged, ttl:0 so it stays always-resident, but llama-swap now owns start/stop so
-    # any agent can unload/reload it via the standard API instead of bare docker commands).
-    # Fire one warm request THROUGH llama-swap so it's hot immediately after `stack up`
-    # (ttl:0 models are lazy-load-on-first-request, not eager — this replaces the old
-    # eager `docker run` here). Backgrounded + non-blocking (cold start ~30-50s).
-    if curl -s -o /dev/null --max-time 3 http://127.0.0.1:8001/health 2>/dev/null; then
-      echo "  • vllm-gemma4b already up (:8001)"
-    else
-      ( curl -s -o /dev/null --max-time 90 http://127.0.0.1:9292/v1/chat/completions \
-          -H 'Content-Type: application/json' \
-          -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
-          && echo "  ▶ vllm-gemma4b warmed via llama-swap → :8001 (E4B NVFP4 + MTP · summarize+rewrite)" \
-          || echo "  ⚠ vllm-gemma4b warm request failed — check llama-swap logs" ) &
-      echo "  ▶ vllm-gemma4b warming via llama-swap (:8001, background, ~30-50s cold start)…"
-    fi
+    # Dictation rewrite backend is llama-swap `rewrite` (vLLM E4B NVFP4 + MTP, thinking off) — the
+    # STANDALONE fixed-:8001 vLLM container was retired 2026-07-20 (its boot race dropped dictation;
+    # the :8083 hyprwhspr-rewrite-e4b.service dupe also removed). The SAME vLLM engine is now a normal
+    # llama-swap-managed model on a dynamic port; everything flows through llama-swap: hyprwhspr-ai
+    # dictation, litellm summarize-cheap + rewrite-fast. `rewrite` is ttl:0 (resident) but lazy-load-
+    # on-first-request, so fire one warm request THROUGH llama-swap right after `stack up`. Non-blocking.
+    ( curl -s -o /dev/null --max-time 120 http://127.0.0.1:9292/v1/chat/completions \
+        -H 'Content-Type: application/json' \
+        -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
+        && echo "  ▶ rewrite warmed via llama-swap → :9292 (vLLM E4B NVFP4+MTP · dictation/summarize-cheap)" \
+        || echo "  ⚠ rewrite warm request failed — check llama-swap logs" ) &
+    echo "  ▶ rewrite warming via llama-swap (:9292, background, vLLM cold start ~40s)…"
     # Dashboards (glance :8088 + uptime-kuma :3009) are monitoring, not serving → opt-in.
     # `STACK_DASH=1 stack up` (or run `stack dash`) brings them up. Keeps `stack up` minimal:
     # just the gateway + always-on light models; heavy/monitoring bits load on demand.
     if [ "${STACK_DASH:-0}" = 1 ]; then ensure_dashboards; fi
-    echo "  stack up (minimal). gateway → :4000 · vllm E4B → :8001  (obs off: 'stack obs' · dashboards off: 'stack dash')"
+    echo "  stack up (minimal). gateway → :4000 · rewrite/E4B → llama-swap :9292  (obs off: 'stack obs' · dashboards off: 'stack dash')"
     ;;
   dash) ensure_dashboards; echo "  dashboards up → glance :8088 · uptime-kuma :3009"; ;;
   gateway)  # JUST the litellm router (:4000) — NO models, 0 GB VRAM. It's a pure OpenAI proxy:
     # cloud routes (code→OpenRouter, and everything under LITELLM_ENVIRONMENT=production) + virtual-
-    # key/config mgmt work immediately. Local logical names (summarize→:8001, reason→llama-swap) 5xx
+    # key/config mgmt work immediately. Local logical names (summarize/rewrite→llama-swap :9292) 5xx
     # until you `stack up` their backends. Handy for config testing or cloud-only use. `stack down`
-    # stops it. Shares the up) launch logic — just omits llama-swap + the vLLM E4B container.
+    # stops it. Shares the up) launch logic — just omits llama-swap + its local models.
     if [ "${STACK_OBS:-0}" = 1 ]; then ensure_obs; else ensure_gateway_db; fi
     wait_tcp 127.0.0.1:5433 15 && echo "  • gateway DB ready :5433" \
       || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
@@ -222,11 +211,11 @@ case "${1:-status}" in
       on|start)
         command -v docker >/dev/null 2>&1 || { echo "  ⚠ docker not found"; exit 1; }
         echo "  ▶ premium window: freeing VRAM (evicting E4B + parakeet STT) for diffusiongemma…"
-        # vllm-gemma4b is llama-swap-managed now (rewrite, fixed :8001) — unload it through
-        # llama-swap's own API instead of a bare docker rm, so llama-swap's internal state
-        # (loaded/unloaded) stays truthful for anyone else querying /running or /v1/models.
+        # `rewrite` (E4B) is a llama-swap-managed model — unload it through llama-swap's own
+        # API instead of killing a process, so llama-swap's internal state (loaded/unloaded)
+        # stays truthful for anyone else querying /running or /v1/models.
         curl -s --max-time 5 'http://127.0.0.1:9292/unload?model=rewrite' >/dev/null 2>&1 \
-          && echo "  ■ vllm-gemma4b unloaded via llama-swap — summarize-cheap DOWN until 'stack pro off'"
+          && echo "  ■ rewrite (E4B) unloaded via llama-swap — summarize-cheap DOWN until 'stack pro off'"
         systemctl --user stop hyprwhspr.service 2>/dev/null && echo "  ■ hyprwhspr STT stopped — dictation DOWN until 'stack pro off'"
         docker rm -f vllm-diffusiongemma >/dev/null 2>&1
         ( PORT=8002 setsid /home/nullsense/bin/llm-servers/vllm-diffusiongemma >/tmp/vllm-diffusiongemma.log 2>&1 < /dev/null & )
@@ -236,14 +225,14 @@ case "${1:-status}" in
         echo "  ▶ closing premium window: diffusiongemma → E4B + parakeet…"
         docker rm -f vllm-diffusiongemma >/dev/null 2>&1 && echo "  ■ vllm-diffusiongemma stopped (:8002)"
         systemctl --user start hyprwhspr.service 2>/dev/null && echo "  ▶ hyprwhspr STT restored (dictation back up)"
-        # Reload through llama-swap (fixed :8001 `rewrite`) instead of a bare docker run —
+        # Reload through llama-swap (`rewrite` model) instead of a bare process start —
         # same reasoning as `pro on` above.
         ( curl -s -o /dev/null --max-time 90 http://127.0.0.1:9292/v1/chat/completions \
             -H 'Content-Type: application/json' \
             -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
-            && echo "  ▶ vllm-gemma4b restored via llama-swap → :8001 (summarize-cheap + dictation back up)" \
-            || echo "  ⚠ vllm-gemma4b warm request failed — check llama-swap logs" ) &
-        echo "  ▶ vllm-gemma4b reloading via llama-swap (:8001, background)…"
+            && echo "  ▶ rewrite restored via llama-swap → :9292 (summarize-cheap + dictation back up)" \
+            || echo "  ⚠ rewrite warm request failed — check llama-swap logs" ) &
+        echo "  ▶ rewrite reloading via llama-swap (:9292, background)…"
         ;;
       *) echo "usage: stack pro [on|off]"; exit 1 ;;
     esac
@@ -256,10 +245,11 @@ case "${1:-status}" in
       kill_port "$port" && echo "  ■ stopped $name (:$port)" || echo "  • $name not running"
       rm -f "$RUN/$name.pid"
     done
-    # vllm-gemma4b is now a llama-swap child (see `rewrite` model, fixed :8001) — sweep_swap_children
-    # above already reaped it as llama-swap's own subprocess. vllm-diffusiongemma stays a separate,
-    # non-llama-swap-managed on-demand container (stack pro), so it's still stopped explicitly here.
+    # `rewrite` (E4B) is a llama-swap-managed vLLM CONTAINER (dynamic port, name vllm-gemma4b).
+    # sweep_swap_children reaps llama-swap's `docker run` client, but a --rm container can outlive
+    # that, so stop it explicitly here (same as vllm-diffusiongemma, the stack-pro premium container).
     if command -v docker >/dev/null 2>&1; then
+      docker ps -q --filter name=vllm-gemma4b | grep -q . && docker rm -f vllm-gemma4b >/dev/null 2>&1 && echo "  ■ stopped vllm-gemma4b (rewrite)"
       docker ps -q --filter name=vllm-diffusiongemma | grep -q . && docker rm -f vllm-diffusiongemma >/dev/null 2>&1 && echo "  ■ stopped vllm-diffusiongemma (:8002)"
     fi
     echo "  (observability + dashboards left running — 'stack mon-down' to stop those too)"
@@ -284,7 +274,7 @@ case "${1:-status}" in
     for n in "glance:8088" "uptime-kuma:3009" "grafana:3000" "langfuse:3002" "collector:4318" "open-webui:8090"; do
       printf "  %-12s HTTP %s\n" "${n%%:*}" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${n##*:}/ 2>/dev/null || echo down)"
     done
-    printf "  %-12s HTTP %s\n" "rewriter" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:8083/health 2>/dev/null || echo down)"
+    printf "  %-12s %s\n" "rewrite" "$(curl -s --max-time 2 http://127.0.0.1:9292/running 2>/dev/null | grep -q rewrite && echo 'loaded (llama-swap)' || echo 'idle — llama-swap loads on demand')"
     ;;
   db-init)  # one-time per machine (or after a litellm upgrade): prisma client + LiteLLM_* tables.
             # litellm virtual keys (/key/generate, llm-vkey) need these. Install prep — ALL extras

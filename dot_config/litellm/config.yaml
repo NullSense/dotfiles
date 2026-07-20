@@ -72,6 +72,86 @@ model_list:
       tags: ["embedding", "local", "shared", "qwen3-embedding"]
       source_url: https://huggingface.co/Qwen/Qwen3-Embedding-4B
 
+  # ── Infinity models (via llama-swap :9292/v1 — see llama-swap config, f2llm-embed/bge-rerank) ──
+- model_name: embed-legal
+  litellm_params:
+    model: openai/embed-legal               # → llama-swap f2llm-embed (Infinity, /v1/embeddings)
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["embedding", "local", "legal", "infinity"]
+  model_info:
+    mode: embedding
+    max_input_tokens: 8192
+    metadata:
+      display_name: "Embed-Legal · F2LLM-v2-1.7B (Infinity, 2048-dim)"
+      backend: "Infinity (native uv, RTX 5090 CUDA) via llama-swap · fp16, batch 128 (254 texts/s benchmarked)"
+      role: "legalkb embedder; future sift legalkb-tenant embedding (2048-dim ⇒ separate sift vector-config, never interchangeable with 2560-dim `embed`)"
+      source_url: https://huggingface.co/codefuse-ai/F2LLM-v2-1.7B
+- model_name: rerank-legal
+  litellm_params:
+    model: infinity/bge-rerank              # litellm infinity provider → POST {api_base}/rerank
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["rerank", "local", "legal", "infinity"]
+  model_info:
+    mode: rerank
+    metadata:
+      display_name: "Rerank · bge-reranker-v2-m3 (Infinity)"
+      backend: "Infinity via llama-swap (/v1/rerank, sigmoid scores)"
+      role: "legalkb reranker (default tier); local rerank candidate for sift's RerankerService"
+      source_url: https://huggingface.co/BAAI/bge-reranker-v2-m3
+
+  # ── Reranker tiers (all speak /v1/rerank behind llama-swap; see llama-swap config) ──
+- model_name: rerank-strong
+  litellm_params:
+    model: infinity/qwen3-reranker-4b       # llama.cpp native rerank behind llama-swap
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["rerank", "local", "qwen"]
+  model_info:
+    mode: rerank
+    metadata:
+      display_name: "Rerank-Strong · Qwen3-Reranker-4B (llama.cpp Q8_0)"
+      backend: "llama.cpp --reranking via llama-swap · the 2026-07-02 legalkb merit pick, unblocked"
+      role: "strong multilingual rerank tier (MTEB-R 69.76); legalkb A/B candidate"
+      source_url: https://huggingface.co/Qwen/Qwen3-Reranker-4B
+- model_name: rerank-fast
+  litellm_params:
+    model: infinity/jina-reranker-v3        # transformers sidecar behind llama-swap
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["rerank", "local", "jina", "listwise"]
+  model_info:
+    mode: rerank
+    metadata:
+      display_name: "Rerank-Fast · jina-reranker-v3 (listwise sidecar)"
+      backend: "transformers sidecar (~/Programming/llm-stack/jina-reranker-v3) via llama-swap · ≤64 docs in one pass"
+      role: "low-latency SOTA-at-size tier (BEIR 61.94, 0.6B)"
+      source_url: https://huggingface.co/jinaai/jina-reranker-v3
+- model_name: rerank-max
+  litellm_params:
+    model: infinity/zerank-2                # rerank sidecar (modern ST 5.x) behind llama-swap
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["rerank", "local", "zerank", "nc-license"]
+  model_info:
+    mode: rerank
+    metadata:
+      display_name: "Rerank-Max · zerank-2 (sidecar, CC-BY-NC)"
+      backend: "rerank sidecar (ST 5.x CrossEncoder, ~/Programming/llm-stack/jina-reranker-v3) via llama-swap · zELO-trained, tops rerank ELO boards. NOT infinity-servable (ST<4.0 pin)"
+      role: "max-accuracy eval tier (legal/finance strength) — ⚠ non-commercial license, personal/eval use only"
+      source_url: https://huggingface.co/zeroentropy/zerank-2-reranker
+
   # ── INTENT ROUTES: summarize-cheap / summarize-strong / oracle-llm ─────────────
   # These are load-bearing contract names for oracle (apps/ingest/summarize.py) + sift.
   # DO NOT rename or merge their dual deployments — prod is DeepSeek, not the local model.
@@ -79,7 +159,7 @@ model_list:
 
   # ── summarize-cheap: bulk summaries (oracle cheap-first) ───────────────────────
 - model_name: summarize-cheap
-  litellm_params:                      # DEV → VRAM-adaptive llama-swap (:9292 'summarize'): diffusiongemma-26B when GPU free, else E4B, else this route errors → fallback chain (→ cloud)
+  litellm_params:                      # DEV → llama-swap :9292 'summarize' (VRAM-adaptive: diffusiongemma-26B when GPU free, else llama.cpp E4B). vLLM NVFP4 :8001 slot retired 2026-07-20. diffusiongemma is the opt-in summarize-pro premium tier.
     model: openai/summarize
     api_base: http://127.0.0.1:9292/v1
     api_key: "EMPTY"
@@ -225,6 +305,42 @@ model_list:
       vram: "0 (hosted)"
       tags: ["summarization", "cloud", "deepseek", "strong"]
       source_url: https://openrouter.ai/deepseek/deepseek-v4-pro
+
+  # ── summarize-pro: PREMIUM on-demand tier — diffusiongemma, opened via `stack pro` ──
+  #    Discrete text-DIFFUSION LM (nvidia/diffusiongemma-26B-A4B-it-NVFP4, MoE 3.8B-active).
+  #    Serves on :8002 ONLY while the premium window is open (`stack pro on`), which EVICTS
+  #    the always-on E4B (:8001) — they can't coexist (~19GB + ~15GB > 32GB). `stack pro off`
+  #    restores E4B. Returns a connection error when the window is closed — deliberate: this is
+  #    an explicit, human-opened tier, not an auto-swap (evicting the summariser+dictation slot
+  #    per request would be too disruptive). Apps still just hit the gateway with `summarize-pro`.
+- model_name: summarize-pro
+  litellm_params:
+    model: openai/diffusiongemma                # → vLLM diffusiongemma served-name (on-demand :8002)
+    api_base: http://127.0.0.1:8002/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "diffusion"
+    - "premium"
+  model_info:
+    supported_environments: ["development"]
+    mode: chat
+    supports_function_calling: true
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 131072
+    max_output_tokens: 8192
+    metadata:
+      display_name: "Summarize-pro · DiffusionGemma-26B-A4B (local, on-demand via `stack pro`)"
+      backend: "vLLM 0.24 · nvidia/diffusiongemma-26B-A4B-it-NVFP4 (block-diffusion · V2 runner · TRITON attn · thinking-off)"
+      quant: "NVFP4 (modelopt_fp4)"
+      vram: "~19GB @ util 0.60 — EVICTS the E4B slot (:8001) while the window is open"
+      note: "On-demand premium: `stack pro on` opens the window (summarize-cheap + dictation go down), `stack pro off` restores E4B"
+      tags: ["summarization", "local", "diffusion", "premium"]
+      source_url: https://huggingface.co/nvidia/diffusiongemma-26B-A4B-it-NVFP4
 
   # ── oracle-llm: NER arbitration / span-refine / local reasoning ───────────────
 - model_name: oracle-llm
@@ -649,17 +765,15 @@ model_list:
       tags: ["summarization", "local", "gemma", "faithful"]
       source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
 
-  # ── hyprwhspr dictation rewrite → DEDICATED MTP llama-swap `rewrite` (on-demand) ──
-  #    Dictation routes through the gateway to llama-swap's dedicated `rewrite` model
-  #    (Gemma-4 E4B + MTP draft, NP=1 SPEC=on — the optimized single-stream dictation config).
-  #    llama-swap loads it ON DEMAND and TTL-evicts (900s) → no always-on :8083 server.
-  #    It's SEPARATE from gemma-4-e4b (summarize, NP=4 SPEC=off) because MTP wins for dictation
-  #    but fights NP=4 batch summarize; llama-swap swaps between them on demand (alternating
-  #    dictation↔summarize reloads ~10 s). Thinking-off per-request via extra_body kwargs.
-  #    Revert to the old always-on path: re-enable hyprwhspr-rewrite-e4b.service + `hyprwhspr-ai backend e4b`.
+  # ── hyprwhspr dictation rewrite → llama-swap `rewrite` (vLLM E4B NVFP4+MTP, :9292) ──
+  #    Dictation hits the gateway with the logical name `rewrite-fast`, which routes to
+  #    llama-swap's `rewrite` model — Gemma-4 E4B NVFP4 W4A16 + MTP n=3 on vLLM, thinking off.
+  #    The STANDALONE fixed-:8001 vLLM container was retired 2026-07-20 (its boot race dropped
+  #    dictation); the SAME vLLM engine is now a normal llama-swap-managed model on a dynamic
+  #    port, so everything flows app → litellm :4000 → llama-swap :9292 → vLLM, never a direct port.
 - model_name: rewrite-fast
   litellm_params:
-    model: llamafile/rewrite                  # → dedicated MTP-optimized llama-swap `rewrite` (on-demand)
+    model: openai/rewrite                     # → llama-swap served-name `rewrite` (vLLM E4B NVFP4+MTP, :9292)
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0
@@ -678,13 +792,13 @@ model_list:
     max_input_tokens: 131072
     max_output_tokens: 2048
     metadata:
-      display_name: "Rewrite-fast · Gemma-4 E4B + MTP (dictation, on-demand via llama-swap)"
-      backend: "llama.cpp CUDA · gemma-4-E4B-it Q5_K_M + MTP draft (llama-swap `rewrite`, NP=1 SPEC=on, on-demand)"
-      vram: "5.1 GB (on-demand; evicts on 900s TTL)"
-      tokens_per_second: "MTP ≈40% faster than plain (p50 ≈136 vs 227 ms; ~80% draft accept)"
-      role: "hyprwhspr-ai dictation rewrite — gateway → dedicated MTP llama-swap model"
-      tags: ["dictation", "rewrite", "local", "gemma", "mtp"]
-      source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
+      display_name: "Rewrite-fast · Gemma-4 E4B + MTP (dictation, llama-swap vLLM)"
+      backend: "vLLM 0.24 · gemma-4-E4B NVFP4 W4A16 + MTP n=3 via llama-swap `rewrite` (:9292, dynamic port), fp8 KV, thinking off"
+      vram: "~11 GB E4B NVFP4 (llama-swap dynamic slot, ttl:0 resident; shares served names summarize+rewrite)"
+      tokens_per_second: "~410 tok/s (MTP n=3, 2.0x)"
+      role: "hyprwhspr-ai dictation rewrite — gateway → always-on vLLM E4B slot"
+      tags: ["dictation", "rewrite", "local", "gemma", "mtp", "vllm"]
+      source_url: https://huggingface.co/principled-intelligence/gemma-4-E4B-it-text-only
 
   # ── too big for 12 GB → cloud in both environments ─────────────────────────────
 - model_name: anthropic/claude-3.5-sonnet
@@ -823,7 +937,6 @@ mcp_servers:
       EXA_API_KEY: "injected-by-agent-vault"          # placeholder — vault overrides
       HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
       HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
-      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
       NODE_USE_ENV_PROXY: "1"
   context7:
     description: "Context7 — current library and framework documentation (dev, research)."
@@ -841,7 +954,6 @@ mcp_servers:
       CONTEXT7_API_KEY: "injected-by-agent-vault"     # placeholder; vault overrides the Bearer header
       HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
       HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
-      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
       NODE_USE_ENV_PROXY: "1"
   github:
     description: "GitHub — repos, issues, PRs, and code search (dev)."
@@ -854,7 +966,6 @@ mcp_servers:
       GITHUB_PERSONAL_ACCESS_TOKEN: "injected-by-agent-vault"
       HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
       HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
-      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
       NODE_USE_ENV_PROXY: "1"
   huggingface:
     description: "Hugging Face — models, datasets, and Spaces search (research)."
@@ -873,7 +984,6 @@ mcp_servers:
       HF_TOKEN: "injected-by-agent-vault"
       HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
       HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
-      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
       NODE_USE_ENV_PROXY: "1"
   wikipedia:
     description: "Wikipedia — MediaWiki article search and fetch (research)."
@@ -899,7 +1009,6 @@ mcp_servers:
       VERCEL_TOKEN: "injected-by-agent-vault"
       HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
       HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
-      NODE_EXTRA_CA_CERTS: "os.environ/AV_CA"
       NODE_USE_ENV_PROXY: "1"
   wikidata:
     description: "Wikidata — SPARQL plus entity and vector search, hosted public (research)."
@@ -925,8 +1034,6 @@ mcp_servers:
       API_ACCESS_TOKEN: "injected-by-agent-vault"
       HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
       HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
-      SSL_CERT_FILE: "os.environ/AV_CA"
-      REQUESTS_CA_BUNDLE: "os.environ/AV_CA"
   mdn:
     description: "MDN — web-platform docs and browser-compat/baseline data (dev, research)."
     # MDN (Mozilla) MCP — HOSTED, HTTP, public (no auth → nothing to shield). Up-to-date

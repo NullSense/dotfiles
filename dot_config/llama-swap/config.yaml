@@ -185,6 +185,9 @@ models:
         "nanbeige4.2-3b:fast":
           chat_template_kwargs:
             enable_thinking: false
+            # card: preserve_thinking False for general chat/QA (template default is
+            # KEEP prior-turn reasoning — right for the agentic default, not for chat)
+            preserve_thinking: false
 
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
   # Each reasoning-capable model exposes two extra aliases:

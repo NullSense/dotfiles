@@ -170,15 +170,19 @@ models:
   #    MAXLEN=131072 GPU_UTIL=0.66. Sampling ships in generation_config (T=0.6 top_p .95
   #    top_k 20); the :agent alias forces the card's agentic T=1.0.
   nanbeige4.2-3b:
-    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-nanbeige
+    # FP8-dynamic quant is the DEFAULT since 2026-07-22 (llmcompressor local checkpoint):
+    # blind-judge gate passed (summ 4.55-vs-4.61 same judge, taxonomy 18/20 both) at +60%
+    # decode (154 vs 96 tok/s freeform; 206 tok/s summarize with ngram spec) and 3 GB
+    # less VRAM. Drop the MODEL env to fall back to the bf16 original.
+    cmd: env PORT=${PORT} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic GPU_UTIL=0.40 /home/nullsense/bin/llm-servers/vllm-nanbeige
     cmdStop: docker stop vllm-nanbeige
     proxy: http://127.0.0.1:${PORT}
     useModelName: nanbeige4.2-3b
     ttl: 300
-    name: "Nanbeige4.2-3B (vLLM bf16, looped)"
+    name: "Nanbeige4.2-3B (vLLM FP8-dynamic, looped)"
     aliases: [nanbeige, "Nanbeige/Nanbeige4.2-3B", "nanbeige4.2-3b:agent", "nanbeige4.2-3b:think", "nanbeige4.2-3b:fast"]
-    description: "reason·agent · Nanbeige4.2-3B looped transformer (22L×2 loops) via vendored vLLM plugin. Best-in-class 3B reasoning; slow decode (~96 tok/s bf16). 32k ctx, ~14.7 GB reserved. Thinking default ON."
-    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", class: "reason·agent", thinking: "toggle (default on)", best_for: "RAG answer generation / agentic reasoning experiments; NOT rewrite (too slow vs E4B)", tags: [reason, agent, local, nanbeige, vllm] }
+    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + ngram spec on vLLM. Blind-judged summ winner vs E4B (4.77 vs 4.02); 154 tok/s freeform / 206 summarize. 64k fp8-KV, ~12.6 GB reserved. Thinking default ON — :fast for summ."
+    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "fp8-dynamic (local llmcompressor)", class: "reason·agent·summarize", thinking: "toggle (default on)", best_for: "RAG answer generation, agentic reasoning, high-coverage summarization (:fast); NOT rewrite (E4B faster+more robust)", tags: [reason, agent, summarize, local, nanbeige, vllm, fp8] }
     # Three card-mapped invocation profiles (card scenario table + preserve_thinking recs):
     #   :agent → tools/RAG/multi-turn agent — thinking ON, keep prior-turn reasoning,
     #            forced T=1.0 (card "Agentic and tool-use tasks")
@@ -433,7 +437,7 @@ matrix:
     z: zerank-2                # Infinity fp16 (~8 GB) — heavy
     n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
     m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
-    a: nanbeige4.2-3b          # vLLM bf16 looped reasoner, 64k fp8-KV (~15 GB reserved) — RAG/agent experiments
+    a: nanbeige4.2-3b          # vLLM FP8 looped reasoner, 64k fp8-KV (~12.6 GB reserved) — RAG/agent/summ
   evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4 }
   sets:
     # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident

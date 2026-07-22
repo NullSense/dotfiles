@@ -66,6 +66,19 @@ start_one() { # name  health-url  command...
   echo "  ▶ $name started (pid $(cat "$RUN/$name.pid")) → log: $RUN/$name.log"
 }
 
+ensure_gateway_env() {  # THE SWITCH, systemd edition. litellm.service reads
+  # ~/.config/litellm/gateway.env (EnvironmentFile) because a systemd unit can't see this
+  # shell's exports. development=LOCAL (llama-swap, default) · production=CLOUD (OpenRouter).
+  # Flip:  LITELLM_ENVIRONMENT=production stack restart
+  local envf="$HOME/.config/litellm/gateway.env" want="${LITELLM_ENVIRONMENT:-development}" have=""
+  [ -f "$envf" ] && have="$(sed -n 's/^LITELLM_ENVIRONMENT=//p' "$envf")"
+  printf 'LITELLM_ENVIRONMENT=%s\n' "$want" > "$envf"
+  echo "  • litellm environment: $want ($([ "$want" = production ] && echo 'CLOUD/OpenRouter' || echo 'LOCAL/llama-swap'))"
+  if [ -n "$have" ] && [ "$have" != "$want" ] && systemctl --user is-active -q litellm; then
+    systemctl --user restart litellm && echo "  ↻ litellm restarted (environment $have → $want)"
+  fi
+}
+
 ensure_gateway_db() {  # ONLY litellm-db — the always-on bit the gateway needs. The rest of
   # observability (otel-lgtm + Langfuse + collector) is ~6 GB of RAM only needed while you're
   # actually inspecting traces, so it's off by default. Bring it up on demand with `stack obs`.
@@ -122,47 +135,29 @@ case "${1:-status}" in
     # obs is ~6 GB and only needed to VIEW traces → off by default. `stack obs` (or STACK_OBS=1
     # stack up) brings up otel-lgtm + Langfuse + collector; otherwise just the gateway DB.
     if [ "${STACK_OBS:-0}" = 1 ]; then ensure_obs; else ensure_gateway_db; fi
-    start_one llama-swap http://127.0.0.1:9292/health llama-swap --config "$LSWAP_CFG" --watch-config --listen 127.0.0.1:9292
+    # llama-swap + litellm are SYSTEMD user units now (2026-07-22): enabled at login,
+    # Restart=on-failure, cgroup kill = no orphans. The old nohup+pidfile scheme tracked
+    # the `infisical run` wrapper PID — when it died, orphaned litellm children kept
+    # :4000 and restarts raced "address already in use". Env (OTEL, Infisical,
+    # agent-vault) lives in the ~/bin/llm-servers/litellm-* wrappers, not here.
+    systemctl --user start llama-swap && echo "  ▶ llama-swap → :9292 (systemd)"
     wait_tcp 127.0.0.1:5433 15 && echo "  • gateway DB ready :5433" \
       || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
-    # local LLM-call tracing → otel-lgtm collector. House standard is gRPC :4317 (matches
-    # sift/oracle); collector accepts 4317/4318 either way. gRPC needs grpcio in litellm's
-    # venv — fall back to OTEL_EXPORTER=otlp_http + :4318 if it's missing.
-    export LITELLM_OTEL_V2=true OTEL_EXPORTER="${OTEL_EXPORTER:-otlp_grpc}" \
-      OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4317}" \
-      OTEL_SERVICE_NAME=litellm OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
-    # THE SWITCH: which deployment each switchable name (summarize-cheap/strong, oracle-llm)
-    # resolves to. development=LOCAL (llama-swap, default), production=CLOUD (OpenRouter).
-    # Flip the whole gateway to cloud:  LITELLM_ENVIRONMENT=production stack restart
-    export LITELLM_ENVIRONMENT="${LITELLM_ENVIRONMENT:-development}"
-    echo "  • litellm environment: $LITELLM_ENVIRONMENT ($([ "$LITELLM_ENVIRONMENT" = production ] && echo 'CLOUD/OpenRouter' || echo 'LOCAL/llama-swap'))"
-    LITELLM_CMD=(litellm --config "$LITELLM_CFG" --port 4000)
-    # agent-vault proxy for the MCP subprocesses litellm spawns (NOT litellm core egress).
-    # Surgical: only the stdio MCP env blocks reference AV_HTTPS_PROXY (see docs/SECRETS-AND-MCP.md).
-    if command -v agent-vault >/dev/null 2>&1 && _AVT="$(agent-vault vault token --vault default 2>/dev/null)" && [ -n "$_AVT" ]; then
-      export AV_HTTPS_PROXY="https://${_AVT}:default@127.0.0.1:14322"
-      export AV_CA="$HOME/.agent-vault/mitm-ca.pem"
-      unset _AVT
-    fi
-    if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
-      echo "  • litellm secrets ← Infisical (${INFISICAL_ENV:-dev}:${INFISICAL_PATH:-/litellm})"
-      start_one litellm http://127.0.0.1:4000/health \
-        infisical run --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "${LITELLM_CMD[@]}"
-    else
-      [ -n "${OPENROUTER_API_KEY:-}" ] || echo "  ⚠ OPENROUTER_API_KEY unset — cloud routes will 401" >&2
-      [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2
-      start_one litellm http://127.0.0.1:4000/health "${LITELLM_CMD[@]}"
-    fi
+    ensure_gateway_env   # THE SWITCH → gateway.env (systemd can't see caller exports)
+    systemctl --user start litellm && echo "  ▶ litellm gateway → :4000 (systemd · MCP-free profile, binds in seconds)"
     # Dictation rewrite backend is llama-swap `rewrite` (vLLM E4B NVFP4 + MTP, thinking off) — the
     # STANDALONE fixed-:8001 vLLM container was retired 2026-07-20 (its boot race dropped dictation;
     # the :8083 hyprwhspr-rewrite-e4b.service dupe also removed). The SAME vLLM engine is now a normal
     # llama-swap-managed model on a dynamic port; everything flows through llama-swap: hyprwhspr-ai
-    # dictation, litellm summarize-cheap + rewrite-fast. `rewrite` is ttl:0 (resident) but lazy-load-
-    # on-first-request, so fire one warm request THROUGH llama-swap right after `stack up`. Non-blocking.
-    ( curl -s -o /dev/null --max-time 120 http://127.0.0.1:9292/v1/chat/completions \
+    # dictation, litellm summarize-cheap + rewrite-fast, and Sift's decompose/agent routes. `rewrite`
+    # is ttl:0 (resident) but lazy-load-on-first-request, so fire one warm request THROUGH
+    # llama-swap right after `stack up`. Non-blocking. Wait for :9292 to bind first —
+    # systemd start returns before llama-swap listens, and a refused connection here
+    # used to false-fail the warm.
+    ( wait_tcp 127.0.0.1:9292 20 && curl -s -o /dev/null --max-time 120 http://127.0.0.1:9292/v1/chat/completions \
         -H 'Content-Type: application/json' \
         -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
-        && echo "  ▶ rewrite warmed via llama-swap → :9292 (vLLM E4B NVFP4+MTP · dictation/summarize-cheap)" \
+        && echo "  ▶ rewrite warmed via llama-swap → :9292 (vLLM E4B NVFP4+MTP · dictation/Sift RAG)" \
         || echo "  ⚠ rewrite warm request failed — check llama-swap logs" ) &
     echo "  ▶ rewrite warming via llama-swap (:9292, background, vLLM cold start ~40s)…"
     # Dashboards (glance :8088 + uptime-kuma :3009) are monitoring, not serving → opt-in.
@@ -176,31 +171,27 @@ case "${1:-status}" in
     # cloud routes (code→OpenRouter, and everything under LITELLM_ENVIRONMENT=production) + virtual-
     # key/config mgmt work immediately. Local logical names (summarize/rewrite→llama-swap :9292) 5xx
     # until you `stack up` their backends. Handy for config testing or cloud-only use. `stack down`
-    # stops it. Shares the up) launch logic — just omits llama-swap + its local models.
+    # stops it. systemd-owned (litellm.service) — env in ~/bin/llm-servers/litellm-gateway.
     if [ "${STACK_OBS:-0}" = 1 ]; then ensure_obs; else ensure_gateway_db; fi
     wait_tcp 127.0.0.1:5433 15 && echo "  • gateway DB ready :5433" \
       || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
-    export LITELLM_OTEL_V2=true OTEL_EXPORTER="${OTEL_EXPORTER:-otlp_grpc}" \
-      OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4317}" \
-      OTEL_SERVICE_NAME=litellm OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
-    export LITELLM_ENVIRONMENT="${LITELLM_ENVIRONMENT:-development}"
-    echo "  • litellm environment: $LITELLM_ENVIRONMENT ($([ "$LITELLM_ENVIRONMENT" = production ] && echo 'CLOUD/OpenRouter' || echo 'LOCAL/llama-swap'))"
-    LITELLM_CMD=(litellm --config "$LITELLM_CFG" --port 4000)
-    if command -v agent-vault >/dev/null 2>&1 && _AVT="$(agent-vault vault token --vault default 2>/dev/null)" && [ -n "$_AVT" ]; then
-      export AV_HTTPS_PROXY="https://${_AVT}:default@127.0.0.1:14322"
-      export AV_CA="$HOME/.agent-vault/mitm-ca.pem"
-      unset _AVT
-    fi
-    if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
-      echo "  • litellm secrets ← Infisical (${INFISICAL_ENV:-dev}:${INFISICAL_PATH:-/litellm})"
-      start_one litellm http://127.0.0.1:4000/health \
-        infisical run --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "${LITELLM_CMD[@]}"
-    else
-      [ -n "${OPENROUTER_API_KEY:-}" ] || echo "  ⚠ OPENROUTER_API_KEY unset — cloud routes will 401" >&2
-      [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "  ⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2
-      start_one litellm http://127.0.0.1:4000/health "${LITELLM_CMD[@]}"
-    fi
+    ensure_gateway_env
+    systemctl --user start litellm && echo "  ▶ litellm gateway → :4000 (systemd)"
     echo "  gateway up → :4000 (no models · 'stack up' adds llama-swap + vLLM E4B)"
+    ;;
+  mcp)  # OPTIONAL MCP-aggregation litellm instance (:4001, config-mcp.yaml). Slow to boot BY
+    # NATURE (tool discovery across every MCP server before uvicorn binds) — which is exactly
+    # why it's split from the always-on gateway. Consumers: claude-code `litellm` MCP client
+    # → http://127.0.0.1:4001/mcp/ (trailing slash). `stack mcp off` stops it.
+    case "${2:-on}" in
+      on|start)
+        systemctl --user start litellm-mcp \
+          && echo "  ▶ litellm-mcp → :4001 (systemd · MCP aggregation; discovery takes a while — watch: journalctl --user -fu litellm-mcp)" \
+          || echo "  ⚠ litellm-mcp failed to start"
+        ;;
+      off|stop) systemctl --user stop litellm-mcp && echo "  ■ litellm-mcp stopped (:4001)" ;;
+      *) echo "usage: stack mcp [on|off]"; exit 1 ;;
+    esac
     ;;
   pro)  # PREMIUM summary window: diffusiongemma (:8002, summarize-pro). Measured: the 26B MoE
         # NVFP4 needs ~24GB, which does NOT fit alongside BOTH the E4B slot (~15GB) AND the
@@ -238,11 +229,14 @@ case "${1:-status}" in
     esac
     ;;
   down)  # stops the LLM serving stack only — leaves observability + dashboards monitoring
-    sweep_swap_children   # reap llama-server backends BEFORE killing llama-swap (else they orphan + pin VRAM)
-    for entry in litellm:4000 llama-swap:9292; do
+    sweep_swap_children   # reap llama-server backends BEFORE stopping llama-swap (else they orphan + pin VRAM)
+    for u in litellm-mcp litellm llama-swap; do
+      systemctl --user is-active -q "$u" && systemctl --user stop "$u" && echo "  ■ stopped $u (systemd)" || true
+    done
+    # stray/legacy listeners (pre-systemd nohup instances, manual runs): port-kill as fallback
+    for entry in litellm:4000 litellm-mcp:4001 llama-swap:9292; do
       name="${entry%%:*}"; port="${entry##*:}"
-      # kill the actual port listener via ss (the infisical-run litellm child IS the listener).
-      kill_port "$port" && echo "  ■ stopped $name (:$port)" || echo "  • $name not running"
+      kill_port "$port" && echo "  ■ killed stray $name listener (:$port)" || true
       rm -f "$RUN/$name.pid"
     done
     # `rewrite` (E4B) is a llama-swap-managed vLLM CONTAINER (dynamic port, name vllm-gemma4b).
@@ -268,9 +262,30 @@ case "${1:-status}" in
     ensure_obs
     echo "  observability up · Grafana → :3000 · Langfuse → :3002  (stop with: stack mon-down)"
     ;;
-  restart) "$0" down; sleep 1; "$0" up ;;
+  restart)  # restart WHAT'S RUNNING, nothing else: try-restart is a no-op for inactive
+    # units, so a gateway-only setup stays gateway-only and mcp/obs are never dragged in.
+    any=0
+    for u in llama-swap litellm litellm-mcp; do
+      if systemctl --user is-active -q "$u"; then
+        systemctl --user try-restart "$u" && echo "  ↻ $u restarted" || echo "  ⚠ $u restart failed"
+        any=1
+      fi
+    done
+    [ "$any" = 1 ] || { echo "  • nothing running — start with: stack up"; exit 0; }
+    # llama-swap restart drops resident models; re-warm the ttl:0 rewrite slot (dictation
+    # + Sift share it) the same way `up` does. Non-blocking.
+    if systemctl --user is-active -q llama-swap; then
+      ( curl -s -o /dev/null --max-time 120 http://127.0.0.1:9292/v1/chat/completions \
+          -H 'Content-Type: application/json' \
+          -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
+          && echo "  ▶ rewrite re-warmed via llama-swap" || true ) &
+    fi
+    ;;
   status)
     command -v llms >/dev/null && llms
+    for u in llama-swap litellm litellm-mcp; do
+      printf "  %-12s %s\n" "$u" "$(systemctl --user is-active "$u" 2>/dev/null || echo inactive) (systemd$(systemctl --user is-enabled -q "$u" 2>/dev/null && echo ', enabled at login'))"
+    done
     for n in "glance:8088" "uptime-kuma:3009" "grafana:3000" "langfuse:3002" "collector:4318" "open-webui:8090"; do
       printf "  %-12s HTTP %s\n" "${n%%:*}" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${n##*:}/ 2>/dev/null || echo down)"
     done
@@ -291,6 +306,6 @@ case "${1:-status}" in
       PATH="$TB:$PATH" "$TB/prisma" db push --schema "$SCHEMA" --skip-generate --accept-data-loss 2>&1 | tail -2
     echo "  ✓ prisma generated + LiteLLM_* tables ready — 'stack restart' then llm-vkey works"
     ;;
-  logs) tail -n 40 -F "$RUN"/*.log ;;
-  *) echo "usage: stack {up|gateway|dash|pro|obs|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;
+  logs) journalctl --user -f -u litellm -u llama-swap -u litellm-mcp ;;  # systemd-owned now; old nohup logs remain in $RUN/*.log
+  *) echo "usage: stack {up|gateway|mcp [on|off]|dash|pro|obs|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;
 esac

@@ -1,0 +1,179 @@
+# litellm MCP-ENABLED instance (:4001) — OPTIONAL profile, started by `stack mcp`.
+# Everything the gateway (config.yaml :4000) has, PLUS mcp_servers aggregation and the
+# (deliberately disabled — see comment) semantic tool filter. Startup is SLOW here by
+# nature: litellm discovers tools from every server before uvicorn binds; that is WHY
+# this is a separate instance and not part of the always-on gateway.
+# Consumers: claude-code `litellm` MCP client → http://127.0.0.1:4001/mcp/ (trailing /).
+# Shares litellm-db (same virtual keys / master key) — but MCP servers live in THIS
+# FILE only; the DB mcp_servers row was purged 2026-07-22 (it was a stale duplicate
+# that made even the plain gateway run tool discovery at boot).
+
+include:
+  - models.yaml
+
+mcp_servers:
+  exa:
+    description: "Exa — neural web and code search (research)."
+    allow_all_keys: true          # any litellm key may use it (single-user homelab) — required so the team-less open-webui key can list/call tools
+    transport: stdio
+    command: npx
+    args: ["-y", "exa-mcp-server"]
+    access_groups: ["research"]
+    env:
+      EXA_API_KEY: "injected-by-agent-vault"          # placeholder — vault overrides
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_USE_ENV_PROXY: "1"
+      NODE_EXTRA_CA_CERTS: "/home/nullsense/.agent-vault/mitm-ca.pem"  # MCP SDK strips parent env on spawn — CA trust must be HERE, not the wrapper
+  context7:
+    description: "Context7 — current library and framework documentation (dev, research)."
+    # stdio + agent-vault (same shielded pattern as exa/github — key never an env var).
+    # The npx authenticates with `Authorization: Bearer <key>` against context7.com/api
+    # (CONTEXT7_API_BASE_URL), per the package's encryption.js. So the vault rule is
+    # host=context7.com, auth-type=bearer, token-key=CONTEXT7_API_KEY (NOT the
+    # mcp.context7.com / CONTEXT7_API_KEY-header form — that's only the hosted remote).
+    allow_all_keys: true
+    transport: stdio
+    command: npx
+    args: ["-y", "@upstash/context7-mcp"]
+    access_groups: ["dev", "research"]
+    env:
+      CONTEXT7_API_KEY: "injected-by-agent-vault"     # placeholder; vault overrides the Bearer header
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_USE_ENV_PROXY: "1"
+      NODE_EXTRA_CA_CERTS: "/home/nullsense/.agent-vault/mitm-ca.pem"  # MCP SDK strips parent env on spawn — CA trust must be HERE, not the wrapper
+  github:
+    description: "GitHub — repos, issues, PRs, and code search (dev)."
+    allow_all_keys: true
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]   # npx (not docker) so it inherits the proxy env
+    access_groups: ["dev"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "injected-by-agent-vault"
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_USE_ENV_PROXY: "1"
+      NODE_EXTRA_CA_CERTS: "/home/nullsense/.agent-vault/mitm-ca.pem"  # MCP SDK strips parent env on spawn — CA trust must be HERE, not the wrapper
+  huggingface:
+    description: "Hugging Face — models, datasets, and Spaces search (research)."
+    # Official HF MCP (stdio). Calls huggingface.co / api.huggingface.co / *.hf.space with
+    # `Authorization: Bearer <HF_TOKEN>`. Node fetch + NODE_USE_ENV_PROXY=1 → vault-proxied.
+    # GOTCHA: it ALSO starts a management web UI; default WEB_APP_PORT=3000 collides with
+    # Grafana → EADDRINUSE → crash. Pin it to a free port. TRANSPORT=stdio forced explicitly.
+    allow_all_keys: true
+    transport: stdio
+    command: npx
+    args: ["-y", "@llmindset/hf-mcp-server"]
+    access_groups: ["research"]
+    env:
+      TRANSPORT: "stdio"
+      WEB_APP_PORT: "3055"
+      HF_TOKEN: "injected-by-agent-vault"
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_USE_ENV_PROXY: "1"
+      NODE_EXTRA_CA_CERTS: "/home/nullsense/.agent-vault/mitm-ca.pem"  # MCP SDK strips parent env on spawn — CA trust must be HERE, not the wrapper
+  wikipedia:
+    description: "Wikipedia — MediaWiki article search and fetch (research)."
+    # Public MediaWiki API (en.wikipedia.org/w/api.php) — NO auth, so NOT proxied (nothing
+    # to shield) and no vault rule needed. uvx fetches the package on first run.
+    allow_all_keys: true
+    transport: stdio
+    command: uvx
+    args: ["wikipedia-mcp"]
+    access_groups: ["research"]
+  vercel:
+    description: "Vercel — projects, deployments, and logs via PAT (dev)."
+    # Community stdio package (pulsemcp) — the OFFICIAL Vercel MCP is OAuth-only/hosted and
+    # can't take a PAT. Calls api.vercel.com with `Authorization: Bearer <VERCEL_TOKEN>`.
+    # Node fetch + NODE_USE_ENV_PROXY=1 → vault-proxied. NOTE: third-party code runs with
+    # your Vercel PAT — review before trusting; scope the token to read-only if possible.
+    allow_all_keys: true
+    transport: stdio
+    command: npx
+    args: ["-y", "vercel-platform-mcp-server"]
+    access_groups: ["dev"]
+    env:
+      VERCEL_TOKEN: "injected-by-agent-vault"
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+      NODE_USE_ENV_PROXY: "1"
+      NODE_EXTRA_CA_CERTS: "/home/nullsense/.agent-vault/mitm-ca.pem"  # MCP SDK strips parent env on spawn — CA trust must be HERE, not the wrapper
+  wikidata:
+    description: "Wikidata — SPARQL plus entity and vector search, hosted public (research)."
+    # Official WMDE Wikidata MCP — HOSTED, HTTP, fully public (no auth → nothing to shield),
+    # so litellm connects directly. Backs onto query.wikidata.org SPARQL + wikidata API +
+    # WMDE vector search (all server-side). Self-host later via github.com/wmde/WikidataMCP.
+    url: "https://wd-mcp.wmcloud.org/mcp/"
+    access_groups: ["research"]
+    transport: "http"
+    allow_all_keys: true
+  homeassistant:
+    description: "Home Assistant — query and control the smart home via HA MCP (home)."
+    # HA built-in MCP Server (Streamable HTTP at <ha>/api/mcp) bridged to stdio by mcp-proxy
+    # so the HASS long-lived token stays vault-shielded: mcp-proxy sends Authorization:
+    # Bearer <API_ACCESS_TOKEN placeholder>; agent-vault overrides it with HASS_TOKEN for the
+    # ha.tailb921b9.ts.net host. Requires the HA "Model Context Protocol Server" integration.
+    allow_all_keys: true
+    transport: stdio
+    command: uvx
+    args: ["mcp-proxy", "--transport=streamablehttp", "--stateless", "https://ha.tailb921b9.ts.net/api/mcp"]
+    access_groups: ["home"]
+    env:
+      API_ACCESS_TOKEN: "injected-by-agent-vault"
+      HTTPS_PROXY: "os.environ/AV_HTTPS_PROXY"
+      HTTP_PROXY: "os.environ/AV_HTTPS_PROXY"
+  mdn:
+    description: "MDN — web-platform docs and browser-compat/baseline data (dev, research)."
+    # MDN (Mozilla) MCP — HOSTED, HTTP, public (no auth → nothing to shield). Up-to-date
+    # web-platform docs + browser-compat/baseline data. litellm connects directly. Experimental.
+    url: "https://mcp.mdn.mozilla.net/"
+    access_groups: ["dev", "research"]
+    transport: "http"
+    allow_all_keys: true
+
+litellm_settings:
+  # Task prompts (dotprompt): summarize/rewrite/extract → config/prompts/<id>.prompt.
+  # Global dir form (NOT per-prompt prompt_directory, which crashes boot). Reference via prompt_id.
+  global_prompt_directory: "/home/nullsense/Programming/llm-stack/config/prompts"
+  callbacks: ["otel"]           # emit OTLP traces of every LLM call → the OTEL_ENDPOINT
+                                # collector (local: otel-lgtm :4318 / langfuse via fan-out).
+                                # Env set by `stack`: LITELLM_OTEL_V2/OTEL_EXPORTER/OTEL_ENDPOINT.
+  num_retries: 2
+  request_timeout: 600          # local models + cold-swap loads can be slow
+  drop_params: true             # tolerate clients sending params a backend doesn't support
+  # Failure-fallback at the gateway (oracle also gates in-app): a failed/unreachable
+  # summarize-cheap (local Gemma E4B in dev) fails over FIRST to DeepSeek-v4-flash
+  # cloud (env-independent), then to summarize-strong as a last resort.
+  fallbacks: ["summarize-cheap": ["summarize-fallback", "summarize-strong"]]
+
+  # ── EXACT response cache (safe: byte-identical request → identical answer). NOT
+  #    semantic — semantic carries a 3-8% wrong-answer false-hit rate, unacceptable for
+  #    unique-article summaries. disk backend = zero new service. mode default_off =
+  #    opt-in: a request caches only when it sends `cache: {"no-cache": false}`. ──────
+  cache: true
+  cache_params:
+    type: disk
+    disk_cache_dir: "/home/nullsense/.cache/llm-stack/litellm-cache"  # FIXED path — default is CWD-relative (./.litellm_cache), which leaks into whatever dir launched the proxy
+    mode: default_off
+
+  # ── Model Hub (/ui/model_hub_table) — advertise HF-identity names publicly ──────
+  #    Intent routes (summarize-cheap/strong, oracle-llm) kept for backwards compat.
+  #    Bench-only quant variants (e4b-q4/q8) intentionally omitted.
+  public_model_groups: ["embed", "summarize-cheap", "summarize-strong", "oracle-llm", "google/gemma-4-E4B-it", "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF", "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-2.6B", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored", "ibm-granite/granite-vision-3.3-2b", "datalab-to/chandra-ocr-2", "anthropic/claude-3.5-sonnet", "rewrite-fast", "sift-decompose", "sift-agent", "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF:think", "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF:fast", "google/gemma-4-E4B-it:think", "google/gemma-4-E4B-it:fast", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:think", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:fast"]
+  # Disabled: LiteLLM <=1.93 applies this global MCP index to ordinary client-defined
+  # OpenAI tools too. A match against an unrelated MCP name then replaces an app's tools
+  # with an empty array (observed with Sift's six search tools), so this is not fail-open.
+  # Keep all caller-provided tools until request-time tool indexing lands in a release.
+  mcp_semantic_tool_filter:
+    enabled: false
+    embedding_model: "embed-lfm"      # CPU-only LFM2.5-Embedding-350M (0 VRAM); alias tool-embed; was "embed" (Octen 4.4 GB)
+    top_k: 5
+    similarity_threshold: 0.3
+
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"   # in Infisical /litellm; mint per-app virtual keys from it
+  database_url: "os.environ/DATABASE_URL"       # litellm-db (:5433) — /key/generate + spend tracking
+  store_model_in_db: true                       # persist model groups → Model Hub can list them

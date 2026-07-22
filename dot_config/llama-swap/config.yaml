@@ -35,7 +35,11 @@ models:
   #    arch (update llama.cpp if it errors "unknown architecture lfm2-bidir"; if the Vulkan
   #    backend lacks it, fall back to -ngl 0). Filter fails-open (all tools) if it can't load.
   lfm2-embed-350m:
-    cmd: env PORT=${PORT} llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0 --embeddings --pooling cls --ctx-size 512 --ubatch-size 512 --device CUDA0 -ngl 99 --host 127.0.0.1 --port ${PORT} --metrics
+    # ctx 8192 ≫ ubatch 512: -ub is the PER-INPUT token cap (pooled embeddings must fit one
+    # ubatch); -c bounds the TOTAL tokens of a batched /v1/embeddings request. At -c 512 a
+    # multi-input batch overflowed instantly ("Context size has been exceeded" — sift bulk
+    # indexing, 2026-07-20). KV for 8k ctx on a 350M model is negligible VRAM.
+    cmd: env PORT=${PORT} llama-server -hf LiquidAI/LFM2.5-Embedding-350M-GGUF:Q8_0 --embeddings --pooling cls --ctx-size 8192 --ubatch-size 512 --device CUDA0 -ngl 99 --host 127.0.0.1 --port ${PORT} --metrics
     proxy: http://127.0.0.1:${PORT}
     ttl: 3600
     name: "LFM2.5-Embedding-350M (tool search, CUDA GPU)"
@@ -129,6 +133,32 @@ models:
     description: "rerank · zerank-2 4B (Qwen3-4B base, zELO-trained — tops rerank ELO boards; strong on legal/finance). ⚠ CC-BY-NC: personal/eval only. ~8 GB fp16."
     metadata: { class: rerank, thinking: na, best_for: "max-accuracy reranking eval (legal/finance); non-commercial", tags: [rerank, local, zerank, infinity, nc-license] }
 
+  # ── NVIDIA Nemotron retrieval pair (2026-07-22) — sift embed+rerank candidates on vLLM ──
+  #    Both run on the v0.25.0 image (⚠ the NVFP4 embed checkpoint is BROKEN on v0.23.x/0.24.x
+  #    per its card — do not downgrade the image). Wrappers own all tuning (CUDA-graph capture
+  #    sizes, GPU_UTIL, trust-remote-code, the mandatory rerank score template).
+  nemotron-embed-1b:
+    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-nemotron-embed
+    cmdStop: docker stop vllm-nemotron-embed
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: nemotron-embed-1b
+    ttl: 300
+    name: "Nemotron-3-Embed-1B (vLLM NVFP4, 2048-dim)"
+    aliases: [embed-nemotron, "nvidia/Nemotron-3-Embed-1B-NVFP4"]
+    description: "embedding · Nemotron-3-Embed-1B NVFP4 (Ministral-3-3B pruned, avg pooling, 2048-dim Matryoshka) via vLLM. ⚠ /v1/embeddings callers MUST prefix 'query: '/'passage: '. 2048 ≠ octen's 2560 ⇒ separate sift collection. ~3.8 GB reserved."
+    metadata: { class: embedding, thinking: na, best_for: "sift embed candidate (MTEB-strong, NVFP4-fast on Blackwell)", tags: [embedding, local, nvidia, vllm, nvfp4] }
+
+  nemotron-rerank-1b:
+    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-nemotron-rerank
+    cmdStop: docker stop vllm-nemotron-rerank
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: nemotron-rerank-1b
+    ttl: 300
+    name: "llama-nemotron-rerank-1b-v2 (vLLM bf16)"
+    aliases: [rerank-nemotron, "nvidia/llama-nemotron-rerank-1b-v2"]
+    description: "rerank · llama-nemotron-rerank-1b-v2 (Llama-3.2-1B bidirectional cross-encoder, avg pooling) via vLLM /v1/rerank. Score template + trust-remote-code enforced by the wrapper. 8k pairs. ~4.7 GB reserved."
+    metadata: { class: rerank, thinking: na, best_for: "sift rerank candidate (NVIDIA retrieval pair with nemotron-embed-1b)", tags: [rerank, local, nvidia, vllm] }
+
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
   # Each reasoning-capable model exposes two extra aliases:
   #   <model-id>:think  →  forces thinking ON  (chat_template_kwargs.enable_thinking: true)
@@ -190,27 +220,32 @@ models:
           chat_template_kwargs:
             enable_thinking: false
 
-  # ── dictation rewrite + summarize-cheap — vLLM E4B (NVFP4 W4A16 + MTP n=3) ──────────────
+  # ── shared rewrite + Sift RAG — vLLM E4B (NVFP4 W4A16 + MTP n=3) ────────────────────────
   #    llama-swap-managed on a DYNAMIC port (no more standalone fixed-:8001 container — that
   #    boot-racing service was retired 2026-07-20: it bound :8001 directly and the first
   #    dictation after boot raced its model load → "port 8001 has no rewrite model"). Now it's
-  #    a normal on-demand llama-swap model: Gemma-4 E4B text-only NVFP4, serves BOTH `summarize`
-  #    (oracle summarize-cheap) and `rewrite` (dictation) from one warm process, thinking off,
-  #    MTP speculative decode (~410 tok/s). Contract name hyprwhspr-ai dictation (backends.json)
-  #    + litellm rewrite-fast/summarize-cheap resolve to — all through llama-swap (:9292) /
+  #    a normal llama-swap model: Gemma-4 E4B text-only NVFP4, serves `rewrite`, Sift's
+  #    structured decomposition, and Sift's tool-using agent from one warm process. The
+  #    64K limit does not create a second weight copy: vLLM's fixed GPU_UTIL reservation
+  #    already owns the KV pool, and short rewrite calls use only the cache they need.
+  #    Contract names hyprwhspr-ai dictation (backends.json), LiteLLM rewrite-fast,
+  #    sift-decompose, and sift-agent all resolve here through llama-swap (:9292) /
   #    litellm (:4000), never a direct port. ttl:0 keeps it resident (dictation is latency-
   #    critical); the first request after boot loads it (~40s, and llama-swap queues the request
   #    through the load instead of erroring — which is what fixes the boot race).
   rewrite:
-    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-gemma4b
+    # Use the checkpoint's own chat_template.jinja: it is Gemma-4 tool-capable and
+    # preserves the text-only checkpoint's trained rewrite behavior. vLLM's generic
+    # example tool template leaks planning text on ordinary no-tool requests here.
+    cmd: env PORT=${PORT} MAXLEN=65536 MAX_SEQS=2 /home/nullsense/bin/llm-servers/vllm-gemma4b --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4
     cmdStop: docker stop vllm-gemma4b
     proxy: http://127.0.0.1:${PORT}
     useModelName: rewrite
     ttl: 0
-    name: "Rewrite · Gemma-4 E4B (vLLM NVFP4 + MTP, llama-swap-managed, dynamic port)"
-    description: "rewrite · Gemma-4 E4B NVFP4 W4A16 + MTP n=3 on vLLM — low-latency dictation/transcript cleanup, same warm process oracle's summarize-cheap hits. llama-swap-managed on a dynamic port (ttl:0, resident); replaced the retired standalone fixed-:8001 container 2026-07-20."
-    metadata: { class: rewrite, thinking: "off (server default)", best_for: "dictation/transcript rewrite, short low-latency cleanups", tags: [rewrite, dictation, local, vllm, gemma, mtp, nvfp4] }
-
+    aliases: [sift-rag-e4b, sift-decompose, sift-agent]
+    name: "Shared E4B · Rewrite + Sift RAG (vLLM NVFP4 + MTP, 64K tools)"
+    description: "rewrite·agent·rag · Gemma-4 E4B NVFP4 W4A16 + MTP n=3 on vLLM — resident 64K context, native Gemma-4 automatic tool calling and separated reasoning with the checkpoint template, structured output, and low-latency dictation cleanup from one physical slot."
+    metadata: { class: "rewrite·agent·rag", thinking: "dynamic per request (default off; Sift agent on)", best_for: "dictation rewrite, Sift decomposition, and Sift agentic RAG", tags: [rewrite, dictation, agent, rag, tools, local, vllm, gemma, mtp, nvfp4] }
 
   # (Retired 2026-07-09: LFM2-2.6B + LFM2-1.2B-Extract generative bench entries removed —
   #  unused, not in the matrix. The LFM2.5-Embedding-350M *embedding* entry above stays.)
@@ -345,7 +380,7 @@ matrix:
   vars:
     e: octen-embedding-4b      # embeddings (sift + oracle) — keep warm
     s: gemma-4-e4b             # summarize  · NP=4 SPEC=off
-    d: rewrite                 # dictation · vLLM E4B NVFP4+MTP, fixed :8001, ttl:0 (moved off llama.cpp 2026-07-14)
+    d: rewrite                 # shared E4B · rewrite + Sift RAG, 64K tools, ttl:0 (~11 GB)
     t: lfm2-embed-350m         # MCP tool-search embedder (~0.4 GB) — keep warm, never evict chat
     b: gemma-4-12b-opus        # strong summarizer/reasoner (~10 GB w/ MTP + 131k f16 KV)
     f: f2llm-embed             # Infinity F2LLM 2048-dim (legalkb / future sift legal tenant)
@@ -353,7 +388,9 @@ matrix:
     q: qwen3-reranker-4b       # llama.cpp Q8_0 (~4.3 GB)
     j: jina-reranker-v3        # transformers sidecar (~1.5 GB bf16)
     z: zerank-2                # Infinity fp16 (~8 GB) — heavy
-  evict_costs: { e: 10, s: 5, d: 5, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7 }
+    n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
+    m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
+  evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6 }
   sets:
     # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident
     # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(vLLM E4B
@@ -374,6 +411,12 @@ matrix:
     legal: "f & r & j & d & t"
     legal-q: "f & q & d & t"
     legal-z: "f & z & d & t"
+    # sift Nemotron working set: embed→rerank in one query path, plus dictation (d) +
+    # tool-embed (t). n 3.8 + m 4.7 + d 11 + t 0.4 ≈ 20 GB. Octen (e) deliberately
+    # excluded — a sift cutover to nemotron means a NEW 2048-dim collection; during
+    # re-index keep an eye on nvidia-smi (vLLM reservations are fixed, so no surprise
+    # growth like infinity's batch-scaled peaks).
+    sift-nemotron: "n & m & d & t"
 #
 # Why matrix over legacy `groups`: groups force all-or-nothing exclusive unloads; the
 # matrix solver evicts the FEWEST/cheapest models to satisfy a request. (groups still

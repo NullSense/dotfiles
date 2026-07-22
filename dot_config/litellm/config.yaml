@@ -89,6 +89,39 @@ model_list:
       backend: "Infinity (native uv, RTX 5090 CUDA) via llama-swap · fp16, batch 128 (254 texts/s benchmarked)"
       role: "legalkb embedder; future sift legalkb-tenant embedding (2048-dim ⇒ separate sift vector-config, never interchangeable with 2560-dim `embed`)"
       source_url: https://huggingface.co/codefuse-ai/F2LLM-v2-1.7B
+# ── NVIDIA Nemotron retrieval pair (2026-07-22) — sift embed+rerank candidates, vLLM v0.25 ──
+- model_name: embed-nemotron
+  litellm_params:
+    model: openai/nemotron-embed-1b         # → llama-swap nemotron-embed-1b (vLLM /v1/embeddings)
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["embedding", "local", "nvidia", "nvfp4"]
+  model_info:
+    mode: embedding
+    max_input_tokens: 4096
+    metadata:
+      display_name: "Embed · Nemotron-3-Embed-1B NVFP4 (vLLM, 2048-dim)"
+      backend: "vLLM v0.25.0 CUDA (RTX 5090, NVFP4-native on Blackwell) via llama-swap"
+      role: "sift embed candidate. ⚠ /v1/embeddings needs 'query: '/'passage: ' prefixes client-side; 2048-dim ⇒ separate sift vector-config, never a drop-in for 2560-dim `embed`"
+      source_url: https://huggingface.co/nvidia/Nemotron-3-Embed-1B-NVFP4
+- model_name: rerank-nemotron
+  litellm_params:
+    model: hosted_vllm/nemotron-rerank-1b   # hosted_vllm rerank provider — parses vLLM's document-OBJECT results (infinity/ chokes on them: "document.text should be a valid string", verified 2026-07-22); URL: {api_base}/rerank → llama-swap → vLLM
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["rerank", "local", "nvidia"]
+  model_info:
+    mode: rerank
+    metadata:
+      display_name: "Rerank · llama-nemotron-rerank-1b-v2 (vLLM)"
+      backend: "vLLM v0.25.0 CUDA (RTX 5090) via llama-swap · Llama-3.2-1B bidirectional cross-encoder, 8k pairs"
+      role: "sift rerank candidate (pairs with embed-nemotron); A/B against rerank-legal/bge before any registry switch"
+      source_url: https://huggingface.co/nvidia/llama-nemotron-rerank-1b-v2
+
 - model_name: rerank-legal
   litellm_params:
     model: infinity/bge-rerank              # litellm infinity provider → POST {api_base}/rerank
@@ -460,11 +493,11 @@ model_list:
       tags: ["summarization", "local", "gemma", "faithful", "bench"]
       source_url: https://huggingface.co/bartowski/google_gemma-4-E4B-it-GGUF
 
-  # google/gemma-4-12B-it-Opus-distill — always-local explicit identity
+  # yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF — always-local explicit identity
 # ── Thinking-toggle variants (selectable in Open WebUI = real on/off, not just hiding
 #    <think>). Each maps to the llama-swap :think/:fast alias (filter injects
 #    chat_template_kwargs.enable_thinking). BINARY only — no low/med/high for these.
-- model_name: google/gemma-4-12B-it-Opus-distill:think
+- model_name: yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF:think
   litellm_params:
     model: llamafile/gemma-4-12b-opus:think
     api_base: http://127.0.0.1:9292/v1
@@ -477,7 +510,7 @@ model_list:
     max_input_tokens: 131072
     max_output_tokens: 8192
     metadata: { display_name: "Gemma-4 12B Opus-distill · thinking ON" }
-- model_name: google/gemma-4-12B-it-Opus-distill:fast
+- model_name: yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF:fast
   litellm_params:
     model: llamafile/gemma-4-12b-opus:fast
     api_base: http://127.0.0.1:9292/v1
@@ -490,7 +523,7 @@ model_list:
     max_input_tokens: 131072
     max_output_tokens: 8192
     metadata: { display_name: "Gemma-4 12B Opus-distill · thinking OFF (fast)" }
-- model_name: google/gemma-4-12B-it-Opus-distill
+- model_name: yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF
   litellm_params:
     model: llamafile/gemma-4-12b-opus         # llama-swap new identity name (old alias: summarize-strong still works)
     api_base: http://127.0.0.1:9292/v1
@@ -511,7 +544,7 @@ model_list:
     max_input_tokens: 131072
     max_output_tokens: 8192
     metadata:
-      display_name: "Gemma-4 12B Opus-distill · google/gemma-4-12B-it-Opus-distill (local, Q4_K_M)"
+      display_name: "Gemma-4 12B Opus-distill · yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF (local, Q4_K_M)"
       backend: "llama.cpp CUDA (RTX 5090) · gemma-4-12B-it Claude-Opus-distill + MTP"
       quant: "Q4_K_M"
       vram: "7.4 GB"
@@ -584,6 +617,10 @@ model_list:
       source_url: https://huggingface.co/LiquidAI/LFM2-1.2B-Extract-GGUF
 
   # LuffyTheFox/Qwen3.6-35B-A3B-Uncensored — abliterated local chat
+  # ⚠ HF PROVENANCE DEAD (verified 2026-07-22): the upstream …-Harmony-GGUF repo returns 401
+  #   and is gone from the author's listing (only Genesis-Hermes-V3-GGUF — a DIFFERENT
+  #   finetune — survives; do NOT rename to it). The local MXFP4_MOE gguf on disk is the
+  #   only copy; identity name kept as the historical repo lineage.
 - model_name: LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:think
   litellm_params:
     model: llamafile/qwen3.6-35b-uncensored:think
@@ -634,7 +671,7 @@ model_list:
       vram: "partial — ~6-8 GB GPU + experts in RAM; slow (offload)"
       quant: "MXFP4_MOE"
       role: "uncensored/unaligned chat + reasoning"
-      source_url: https://huggingface.co/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF
+      source_url: https://huggingface.co/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF  # ⚠ 401/removed from HF (2026-07-22) — local gguf is the only copy
       tags: ["chat", "local", "qwen", "uncensored", "abliterated", "moe"]
 
   # ibm-granite/granite-vision-3.3-2b — vision/OCR (on-demand, evicts <1s)
@@ -668,8 +705,8 @@ model_list:
       tags: ["vision", "ocr", "local", "granite", "multimodal"]
       source_url: https://huggingface.co/ibm-granite/granite-vision-3.3-2b-GGUF
 
-  # prithivMLmods/chandra-ocr-2 — sharper fine-grained OCR (Phase B). on-demand.
-- model_name: prithivMLmods/chandra-ocr-2
+  # datalab-to/chandra-ocr-2 — sharper fine-grained OCR (Phase B). on-demand.
+- model_name: datalab-to/chandra-ocr-2
   litellm_params:
     model: openai/chandra-ocr-2
     api_base: http://127.0.0.1:9292/v1
@@ -690,13 +727,13 @@ model_list:
     max_input_tokens: 16384
     supports_vision: true
     metadata:
-      display_name: "Chandra-OCR-2 · prithivMLmods/chandra-ocr-2 (local, fine-grained OCR)"
+      display_name: "Chandra-OCR-2 · datalab-to/chandra-ocr-2 (local, fine-grained OCR)"
       backend: "llama.cpp CUDA (RTX 5090) · chandra-ocr-2 Q5_K_M + f16 mmproj"
       quant: "Q5_K_M (LLM) + F16 (mmproj)"
       vram: "~3.9 GB"
       role: "high-fidelity OCR (tables, forms, small digits) — sharper than granite"
       tags: ["vision", "ocr", "local", "chandra", "multimodal"]
-      source_url: https://huggingface.co/prithivMLmods/chandra-ocr-2-GGUF
+      source_url: https://huggingface.co/mradermacher/chandra-ocr-2-GGUF
 
   # ── E4B quant ladder — bench-only (hidden from hub, available for ablations) ──
   #    Findings in docs/leaderboard.md: E4B faithfulness is quant-robust (Q4≈Q5≈Q8,
@@ -789,16 +826,62 @@ model_list:
     supports_function_calling: true
     input_cost_per_token: 0
     output_cost_per_token: 0
-    max_input_tokens: 131072
+    max_input_tokens: 65536
     max_output_tokens: 2048
     metadata:
       display_name: "Rewrite-fast · Gemma-4 E4B + MTP (dictation, llama-swap vLLM)"
-      backend: "vLLM 0.24 · gemma-4-E4B NVFP4 W4A16 + MTP n=3 via llama-swap `rewrite` (:9292, dynamic port), fp8 KV, thinking off"
-      vram: "~11 GB E4B NVFP4 (llama-swap dynamic slot, ttl:0 resident; shares served names summarize+rewrite)"
+      backend: "vLLM 0.24 · gemma-4-E4B NVFP4 W4A16 + MTP n=3 via llama-swap `rewrite` (:9292, dynamic port), 64K fp8 KV, checkpoint-native Gemma-4 tool template, thinking off"
+      vram: "~11 GB E4B NVFP4 (one llama-swap slot, ttl:0 resident; shared by rewrite + Sift)"
       tokens_per_second: "~410 tok/s (MTP n=3, 2.0x)"
       role: "hyprwhspr-ai dictation rewrite — gateway → always-on vLLM E4B slot"
       tags: ["dictation", "rewrite", "local", "gemma", "mtp", "vllm"]
       source_url: https://huggingface.co/principled-intelligence/gemma-4-E4B-it-text-only
+
+  # ── Sift local LLM intents → llama-swap (:9292) ─────────────────────────────
+  # Both intents and rewrite-fast share one physical 64K process. Separate logical names
+  # preserve capability/observability boundaries without duplicating weights or swapping
+  # the model mid-agent-turn. Sift sends enable_thinking=false-by-default for decomposition
+  # and enable_thinking=true per agent request; vLLM applies the template flag without reload.
+- model_name: sift-decompose
+  litellm_params:
+    model: openai/rewrite
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    max_tokens: 1024
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["sift", "decompose", "structured-output", "local", "gemma"]
+  model_info:
+    mode: chat
+    supports_function_calling: true
+    supports_response_schema: true
+    max_input_tokens: 4096
+    max_output_tokens: 1024
+    metadata:
+      display_name: "Sift Decompose · Gemma-4 E4B (64K RAG vLLM)"
+      backend: "vLLM 0.24 · shared rewrite + Sift profile via llama-swap"
+      role: "Sift structured query decomposition (thinking off, required schema-derived submit tool only)"
+      tags: ["sift", "decompose", "structured-output", "local", "gemma", "vllm"]
+
+- model_name: sift-agent
+  litellm_params:
+    model: openai/rewrite
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["sift", "agent", "rag", "tools", "local", "gemma"]
+  model_info:
+    mode: chat
+    supports_function_calling: true
+    supports_response_schema: true
+    max_input_tokens: 65536
+    max_output_tokens: 8192
+    metadata:
+      display_name: "Sift Agent · Gemma-4 E4B (64K vLLM tools)"
+      backend: "vLLM 0.24 · E4B NVFP4+MTP, Gemma-4 tool/reasoning parsers + checkpoint-native template via llama-swap"
+      role: "Sift agentic RAG and tool use (thinking enabled per request, no reload)"
+      tags: ["sift", "agent", "rag", "tools", "local", "gemma", "vllm", "64k"]
 
   # ── too big for 12 GB → cloud in both environments ─────────────────────────────
 - model_name: anthropic/claude-3.5-sonnet
@@ -838,7 +921,7 @@ router_settings:
       model: "google/gemma-4-E4B-it"
       hidden: true
     "gemma-12b":
-      model: "google/gemma-4-12B-it-Opus-distill"
+      model: "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF"
       hidden: true
     "qwen-uncensored":
       model: "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored"
@@ -858,6 +941,13 @@ router_settings:
     # embed alias (optional identity name for discoverability; sift contract stays "embed")
     "Octen/Octen-Embedding-4B":
       model: "embed"
+      hidden: true
+    # HF identity names for the Nemotron retrieval pair (discoverability)
+    "nvidia/Nemotron-3-Embed-1B-NVFP4":
+      model: "embed-nemotron"
+      hidden: true
+    "nvidia/llama-nemotron-rerank-1b-v2":
+      model: "rerank-nemotron"
       hidden: true
     "tool-embed":
       model: "embed-lfm"           # back-compat alias for the MCP tool-search embedder
@@ -884,7 +974,7 @@ router_settings:
       model: "google/gemma-4-E4B-it"
       hidden: true
     "summarize-pro":
-      model: "google/gemma-4-12B-it-Opus-distill"
+      model: "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF"
       hidden: true
     "rewrite":
       model: "rewrite-fast"
@@ -1080,7 +1170,7 @@ litellm_settings:
   # ── Model Hub (/ui/model_hub_table) — advertise HF-identity names publicly ──────
   #    Intent routes (summarize-cheap/strong, oracle-llm) kept for backwards compat.
   #    Bench-only quant variants (e4b-q4/q8) intentionally omitted.
-  public_model_groups: ["embed", "summarize-cheap", "summarize-strong", "oracle-llm", "google/gemma-4-E4B-it", "google/gemma-4-12B-it-Opus-distill", "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-2.6B", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored", "ibm-granite/granite-vision-3.3-2b", "prithivMLmods/chandra-ocr-2", "anthropic/claude-3.5-sonnet", "rewrite-fast", "google/gemma-4-12B-it-Opus-distill:think", "google/gemma-4-12B-it-Opus-distill:fast", "google/gemma-4-E4B-it:think", "google/gemma-4-E4B-it:fast", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:think", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:fast"]
+  public_model_groups: ["embed", "summarize-cheap", "summarize-strong", "oracle-llm", "google/gemma-4-E4B-it", "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF", "LiquidAI/LFM2-1.2B-Extract", "LiquidAI/LFM2-2.6B", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored", "ibm-granite/granite-vision-3.3-2b", "datalab-to/chandra-ocr-2", "anthropic/claude-3.5-sonnet", "rewrite-fast", "sift-decompose", "sift-agent", "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF:think", "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF:fast", "google/gemma-4-E4B-it:think", "google/gemma-4-E4B-it:fast", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:think", "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:fast"]
 
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"   # in Infisical /litellm; mint per-app virtual keys from it

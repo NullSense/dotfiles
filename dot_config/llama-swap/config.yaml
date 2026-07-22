@@ -26,7 +26,7 @@ models:
     name: "Octen-Embedding-4B (Q8_0)"
     aliases: [embed, octen-embed, qwen3-embedding-4b]
     description: "embedding · Octen-Embedding-4B (Qwen3-Embedding finetune), 2560-dim, last-token pooling. Shared embedder for sift + oracle."
-    metadata: { class: embedding, thinking: na, best_for: "semantic search / RAG / retrieval", tags: [embedding, local, shared] }
+    metadata: { engine: "llama.cpp", hf: "Octen/Octen-Embedding-4B", class: embedding, thinking: na, best_for: "semantic search / RAG / retrieval", tags: [embedding, local, shared] }
 
   # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), Vulkan GPU (~0.4 GB VRAM).
   #    Used by litellm mcp_semantic_tool_filter. Co-resident with the small models via the
@@ -45,7 +45,7 @@ models:
     name: "LFM2.5-Embedding-350M (tool search, CUDA GPU)"
     aliases: [embed-lfm, tool-embed, lfm2-embed]
     description: "embed·tools · LFM2.5-Embedding-350M 1024-dim CLS, CUDA GPU (~0.4 GB VRAM) — semantic MCP tool filter. Asymmetric query:/document: prefixes recommended."
-    metadata: { class: embed, thinking: na, best_for: "MCP tool semantic search (litellm mcp_semantic_tool_filter)", tags: [embed, tools, local, lfm2, gpu, cuda] }
+    metadata: { engine: "llama.cpp", hf: "LiquidAI/LFM2.5-Embedding-350M-GGUF", class: embed, thinking: na, best_for: "MCP tool semantic search (litellm mcp_semantic_tool_filter)", tags: [embed, tools, local, lfm2, gpu, cuda] }
 
   # ── Infinity models (michaelfeil/infinity — native uv project, ~/Programming/llm-stack/infinity) ──
   #    One llama-swap entry per model = independent on-demand load/evict. All API routes live under
@@ -70,7 +70,7 @@ models:
     name: "F2LLM-v2-1.7B (Infinity, 2048-dim)"
     aliases: [embed-legal, f2llm, "codefuse-ai/F2LLM-v2-1.7B"]
     description: "embedding · F2LLM-v2-1.7B fp16 2048-dim via Infinity — wins German legal retrieval (GerDaLIR/LeCaRDv2, see legalkb 2026-07-02 reeval). legalkb embedder now; sift legalkb-tenant embedding later. Batch 128 (5090: 254 texts/s)."
-    metadata: { class: embedding, thinking: na, best_for: "German legal retrieval (legalkb; future sift legalkb tenant)", tags: [embedding, local, legal, infinity] }
+    metadata: { engine: "infinity", hf: "codefuse-ai/F2LLM-v2-1.7B", class: embedding, thinking: na, best_for: "German legal retrieval (legalkb; future sift legalkb tenant)", tags: [embedding, local, legal, infinity] }
 
   bge-rerank:
     cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-bge --init --gpus all -p 127.0.0.1:${PORT}:7997 -v /home/nullsense/.cache/huggingface:/hf infinity-serving:local --engine torch --device cuda --dtype float16 --no-bettertransformer --model-id BAAI/bge-reranker-v2-m3 --served-model-name bge-rerank --batch-size 16 --url-prefix /v1
@@ -81,7 +81,7 @@ models:
     name: "bge-reranker-v2-m3 (Infinity)"
     aliases: [rerank, rerank-legal, "BAAI/bge-reranker-v2-m3"]
     description: "rerank · bge-reranker-v2-m3 cross-encoder via Infinity (/v1/rerank, sigmoid scores). legalkb reranker now; local reranker candidate for sift's RerankerService. ~1.3 GB."
-    metadata: { class: rerank, thinking: na, best_for: "cross-encoder reranking (legalkb; sift local rerank later)", tags: [rerank, local, legal, infinity] }
+    metadata: { engine: "infinity", hf: "BAAI/bge-reranker-v2-m3", class: rerank, thinking: na, best_for: "cross-encoder reranking (legalkb; sift local rerank later)", tags: [rerank, local, legal, infinity] }
 
   # ── Reranker fleet (2026-07-18) — four models, three backends, one contract (/v1/rerank) ──
   #    Default `rerank` alias stays on bge-rerank (cheapest, MIRACL-strongest). The others are
@@ -102,7 +102,7 @@ models:
     name: "Qwen3-Reranker-4B (llama.cpp Q8_0)"
     aliases: [rerank-strong, "Qwen/Qwen3-Reranker-4B"]
     description: "rerank · Qwen3-Reranker-4B Q8_0 via llama.cpp native rerank (yes/no head). The legalkb 2026-07-02 merit pick, unblocked from infinity's ST pin. MTEB-R 69.76, MIRACL 67.52. ~4.3 GB."
-    metadata: { class: rerank, thinking: na, best_for: "strong multilingual reranking (legalkb candidate; sift later)", tags: [rerank, local, qwen, llamacpp] }
+    metadata: { engine: "llama.cpp", hf: "Qwen/Qwen3-Reranker-4B", class: rerank, thinking: na, best_for: "strong multilingual reranking (legalkb candidate; sift later)", tags: [rerank, local, qwen, llamacpp] }
 
   jina-reranker-v3:
     # Custom listwise arch (last-but-not-late, trust_remote_code) — not servable by infinity or
@@ -115,7 +115,7 @@ models:
     name: "jina-reranker-v3 (listwise sidecar, bf16)"
     aliases: [rerank-fast, "jinaai/jina-reranker-v3"]
     description: "rerank · jina-reranker-v3 0.6B listwise (BEIR 61.94 — SOTA at size; 93 languages). Own sidecar (~/Programming/llm-stack/jina-reranker-v3). ~1.5 GB."
-    metadata: { class: rerank, thinking: na, best_for: "low-latency SOTA reranking, ≤64 docs/pass", tags: [rerank, local, jina, listwise, sidecar] }
+    metadata: { engine: "transformers-sidecar", hf: "jinaai/jina-reranker-v3", class: rerank, thinking: na, best_for: "low-latency SOTA reranking, ≤64 docs/pass", tags: [rerank, local, jina, listwise, sidecar] }
 
   zerank-2:
     # NOT servable by infinity after all (verified 2026-07-18): its ST config uses the
@@ -131,7 +131,7 @@ models:
     name: "zerank-2 (Infinity, CC-BY-NC)"
     aliases: [rerank-max, "zeroentropy/zerank-2-reranker"]
     description: "rerank · zerank-2 4B (Qwen3-4B base, zELO-trained — tops rerank ELO boards; strong on legal/finance). ⚠ CC-BY-NC: personal/eval only. ~8 GB fp16."
-    metadata: { class: rerank, thinking: na, best_for: "max-accuracy reranking eval (legal/finance); non-commercial", tags: [rerank, local, zerank, infinity, nc-license] }
+    metadata: { engine: "transformers-sidecar", hf: "zeroentropy/zerank-2-reranker", class: rerank, thinking: na, best_for: "max-accuracy reranking eval (legal/finance); non-commercial", tags: [rerank, local, zerank, infinity, nc-license] }
 
   # ── NVIDIA Nemotron retrieval pair (2026-07-22) — sift embed+rerank candidates on vLLM ──
   #    Both run on the v0.25.0 image (⚠ the NVFP4 embed checkpoint is BROKEN on v0.23.x/0.24.x
@@ -146,7 +146,7 @@ models:
     name: "Nemotron-3-Embed-1B (vLLM NVFP4, 2048-dim)"
     aliases: [embed-nemotron, "nvidia/Nemotron-3-Embed-1B-NVFP4"]
     description: "embedding · Nemotron-3-Embed-1B NVFP4 (Ministral-3-3B pruned, avg pooling, 2048-dim Matryoshka) via vLLM. ⚠ /v1/embeddings callers MUST prefix 'query: '/'passage: '. 2048 ≠ octen's 2560 ⇒ separate sift collection. ~3.8 GB reserved."
-    metadata: { class: embedding, thinking: na, best_for: "sift embed candidate (MTEB-strong, NVFP4-fast on Blackwell)", tags: [embedding, local, nvidia, vllm, nvfp4] }
+    metadata: { engine: "vllm", hf: "nvidia/Nemotron-3-Embed-1B-NVFP4", class: embedding, thinking: na, best_for: "sift embed candidate (MTEB-strong, NVFP4-fast on Blackwell)", tags: [embedding, local, nvidia, vllm, nvfp4] }
 
   nemotron-rerank-1b:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-nemotron-rerank
@@ -157,7 +157,7 @@ models:
     name: "llama-nemotron-rerank-1b-v2 (vLLM bf16)"
     aliases: [rerank-nemotron, "nvidia/llama-nemotron-rerank-1b-v2"]
     description: "rerank · llama-nemotron-rerank-1b-v2 (Llama-3.2-1B bidirectional cross-encoder, avg pooling) via vLLM /v1/rerank. Score template + trust-remote-code enforced by the wrapper. 8k pairs. ~4.7 GB reserved."
-    metadata: { class: rerank, thinking: na, best_for: "sift rerank candidate (NVIDIA retrieval pair with nemotron-embed-1b)", tags: [rerank, local, nvidia, vllm] }
+    metadata: { engine: "vllm", hf: "nvidia/llama-nemotron-rerank-1b-v2", class: rerank, thinking: na, best_for: "sift rerank candidate (NVIDIA retrieval pair with nemotron-embed-1b)", tags: [rerank, local, nvidia, vllm] }
 
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
   # Each reasoning-capable model exposes two extra aliases:
@@ -183,7 +183,7 @@ models:
     name: "Summarize (VRAM-adaptive: diffusiongemma ⟂ E4B)"
     aliases: [summarize-cheap]
     description: "summarize · picks diffusiongemma-26B (vLLM NVFP4, ~22GB, best quality+speed) when VRAM is free, else gemma-4-E4B (llama.cpp, ~6GB, game-friendly); fails so the caller falls back to cloud if neither fits. Thresholds env-overridable (SUMMARIZE_DIFF_MIN_MB / _E4B_MIN_MB); diffusion gpu-util derived from free VRAM."
-    metadata: { class: summarize, thinking: "off", best_for: "VRAM-adaptive bulk summaries alongside gaming", tags: [summarize, adaptive, local, vllm, diffusion, gemma] }
+    metadata: { engine: "vllm⟂llama.cpp", hf: "nvidia/diffusiongemma-26B-A4B-it-NVFP4 ⟂ google/gemma-4-E4B-it", class: summarize, thinking: "off", best_for: "VRAM-adaptive bulk summaries alongside gaming", tags: [summarize, adaptive, local, vllm, diffusion, gemma] }
 
   # ── summarization: cheap bulk model (direct E4B; also dictation rewrite / escalation) ──
   gemma-4-e4b:
@@ -193,7 +193,7 @@ models:
     name: "Gemma-4 E4B-it (QAT UD-Q4_K_XL)"
     aliases: [gemma4-e4b, gemma-e4b, "gemma-4-e4b:think", "gemma-4-e4b:fast"]
     description: "summarize · Gemma-4 E4B QAT UD-Q4_K_XL — fast, faithful bulk summaries (0% fabrication on the oracle set), near-BF16 quality at 4.0GB. Thinking toggleable (default off). oracle's cheap-first summariser."
-    metadata: { class: summarize, thinking: "toggle (default off)", best_for: "faithful extractive summaries, instruction-following, dictation rewrite", tags: [summarize, instruct, local, gemma, faithful] }
+    metadata: { engine: "llama.cpp", hf: "google/gemma-4-E4B-it", class: summarize, thinking: "toggle (default off)", best_for: "faithful extractive summaries, instruction-following, dictation rewrite", tags: [summarize, instruct, local, gemma, faithful] }
     filters:
       setParamsByID:
         "gemma-4-e4b:think":
@@ -210,7 +210,7 @@ models:
     name: "Gemma-4 12B-it Claude-Opus-distill (Q4_K_M) + MTP"
     aliases: [summarize-strong, gemma4-12b, gemma-12b, gemma4-opus-distill, "gemma-4-12b-opus:think", "gemma-4-12b-opus:fast"]
     description: "summarize·reason · Gemma-4 12B Claude-Opus-distill + MTP — richer/analytical summaries, escalation target. Thinking toggleable (default on)."
-    metadata: { class: "summarize·reason", thinking: "toggle (default on)", best_for: "analytical summaries needing reasoning; escalation from summarize", tags: [summarize, reason, local, gemma, analytical] }
+    metadata: { engine: "llama.cpp", hf: "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF", class: "summarize·reason", thinking: "toggle (default on)", best_for: "analytical summaries needing reasoning; escalation from summarize", tags: [summarize, reason, local, gemma, analytical] }
     filters:
       setParamsByID:
         "gemma-4-12b-opus:think":
@@ -245,7 +245,7 @@ models:
     aliases: [sift-rag-e4b, sift-decompose, sift-agent]
     name: "Shared E4B · Rewrite + Sift RAG (vLLM NVFP4 + MTP, 64K tools)"
     description: "rewrite·agent·rag · Gemma-4 E4B NVFP4 W4A16 + MTP n=3 on vLLM — resident 64K context, native Gemma-4 automatic tool calling and separated reasoning with the checkpoint template, structured output, and low-latency dictation cleanup from one physical slot."
-    metadata: { class: "rewrite·agent·rag", thinking: "dynamic per request (default off; Sift agent on)", best_for: "dictation rewrite, Sift decomposition, and Sift agentic RAG", tags: [rewrite, dictation, agent, rag, tools, local, vllm, gemma, mtp, nvfp4] }
+    metadata: { engine: "vllm", hf: "principled-intelligence/gemma-4-E4B-it-text-only", class: "rewrite·agent·rag", thinking: "dynamic per request (default off; Sift agent on)", best_for: "dictation rewrite, Sift decomposition, and Sift agentic RAG", tags: [rewrite, dictation, agent, rag, tools, local, vllm, gemma, mtp, nvfp4] }
 
   # (Retired 2026-07-09: LFM2-2.6B + LFM2-1.2B-Extract generative bench entries removed —
   #  unused, not in the matrix. The LFM2.5-Embedding-350M *embedding* entry above stays.)
@@ -268,7 +268,7 @@ models:
     name: "Qwen3.6-35B-A3B Uncensored Harmony (MXFP4_MOE, RTX 5090 tuned)"
     aliases: [qwen-uncensored, "qwen3.6-35b-uncensored:think", "qwen3.6-35b-uncensored:fast"]
     description: "chat·agent·uncensored · Qwen3.6-35B-A3B Uncensored/Harmony MXFP4_MOE — Blackwell/RTX 5090 tuned, fully GPU-resident, 262K ctx, q4_0 KV, llama.cpp Jinja template, thinking toggleable."
-    metadata: { class: "chat·agent·uncensored", thinking: "toggle (default on; use :fast for off)", best_for: "Hermes Agent local reasoning/chat/tool use on RTX 5090", tags: [chat, agent, uncensored, abliterated, local, qwen, moe, rtx5090] }
+    metadata: { engine: "llama.cpp", hf: "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF", class: "chat·agent·uncensored", thinking: "toggle (default on; use :fast for off)", best_for: "Hermes Agent local reasoning/chat/tool use on RTX 5090", tags: [chat, agent, uncensored, abliterated, local, qwen, moe, rtx5090] }
     filters:
       setParamsByID:
         "qwen3.6-35b-uncensored:think":
@@ -286,7 +286,7 @@ models:
     name: "Qwen3.6-35B-A3B MoE + MTP (reason/chat)"
     aliases: [oracle-llm, qwen3.6-a3b, qwen3.6-35b-a3b-apex, "qwen3.6-35b-a3b:think", "qwen3.6-35b-a3b:fast"]
     description: "reason·chat·instruct · Qwen3.6 35B-A3B (MoE, ~3B active) + MTP — strongest local reasoning + conversation. Thinking toggleable (MODE code/chat/fast → reasoning on/off)."
-    metadata: { class: "reason·chat·instruct", thinking: "toggle (code/chat=on, fast=off)", best_for: "reasoning, NER arbitration, multi-turn chat, agentic", tags: [reason, chat, instruct, local, qwen, moe] }
+    metadata: { engine: "llama.cpp", hf: "Qwen/Qwen3.6-35B-A3B", class: "reason·chat·instruct", thinking: "toggle (code/chat=on, fast=off)", best_for: "reasoning, NER arbitration, multi-turn chat, agentic", tags: [reason, chat, instruct, local, qwen, moe] }
     filters:
       setParamsByID:
         "qwen3.6-35b-a3b:think":
@@ -307,7 +307,7 @@ models:
     name: "Granite-Vision 3.3-2b (IBM, VLM/OCR)"
     aliases: [granite-vision]
     description: "vision · Granite-Vision 3.3-2b VLM/OCR ~2.36GB (Q4_K_M + f16 mmproj). Image understanding / OCR. Evicts in <1s."
-    metadata: { class: vision, thinking: na, best_for: "OCR, document/image understanding (tables, forms, charts)", tags: [vision, ocr, local, granite, multimodal] }
+    metadata: { engine: "llama.cpp", hf: "ibm-granite/granite-vision-3.3-2b", class: vision, thinking: na, best_for: "OCR, document/image understanding (tables, forms, charts)", tags: [vision, ocr, local, granite, multimodal] }
 
   # ── OCR — chandra-ocr-2 Q5_K_M (Phase B download). Vision is KV-quant + flash-attn
   #    sensitive, so default f16 KV and NO flash-attn (sharper fine-grained OCR). On-demand.
@@ -318,7 +318,7 @@ models:
     name: "Chandra-OCR-2 (Q5_K_M, fine-grained OCR)"
     aliases: [chandra]
     description: "vision·ocr · Chandra-OCR-2 Q5_K_M ~3.9GB (LM + f16 mmproj). Sharper OCR on tables/forms/small digits than granite. On-demand."
-    metadata: { class: vision, thinking: na, best_for: "high-fidelity OCR — tables, forms, license plates, small text", tags: [vision, ocr, local, chandra, multimodal] }
+    metadata: { engine: "llama.cpp", hf: "datalab-to/chandra-ocr-2", class: vision, thinking: na, best_for: "high-fidelity OCR — tables, forms, license plates, small text", tags: [vision, ocr, local, chandra, multimodal] }
 
   # ── Documents-pipeline OCR cascade (3 GGUF VLMs on CUDA) ─────────────────────────────────────
   #    Served on-demand for ~/Documents/pipeline engines.route_scanned (best-first → escalate to High
@@ -334,7 +334,7 @@ models:
     name: "PaddleOCR-VL-1.6 (SOTA doc OCR, CUDA)"
     aliases: [paddleocr-vl]
     description: "ocr · PaddleOCR-VL-1.6 ~1.73GB (ERNIE-4.5-0.3B + SigLIP). SOTA OmniDocBench 96.33. Documents pipeline PRIMARY OCR (HTTP). Prompt 'OCR:'. On-demand."
-    metadata: { class: ocr, thinking: na, best_for: "document OCR — text/tables/formulas, primary cascade engine", tags: [ocr, vision, local, paddleocr, multimodal] }
+    metadata: { engine: "llama.cpp", hf: "PaddlePaddle/PaddleOCR-VL-1.6-GGUF", class: ocr, thinking: na, best_for: "document OCR — text/tables/formulas, primary cascade engine", tags: [ocr, vision, local, paddleocr, multimodal] }
 
   mineru:
     cmd: env PORT=${PORT} llama-server --model /home/nullsense/.cache/huggingface/hub/models--JamePeng2023--MinerU2.5-Pro-2605-1.2B-GGUF/snapshots/930f9067342afd5a1dbbefdc920a1b0deaba6f53/MinerU2.5-Pro-2605-1.2b-Q8_0.gguf --mmproj /home/nullsense/.cache/huggingface/hub/models--JamePeng2023--MinerU2.5-Pro-2605-1.2B-GGUF/snapshots/930f9067342afd5a1dbbefdc920a1b0deaba6f53/mmproj-MinerU2.5-Pro-2605-Q8_0.gguf --device CUDA0 --n-gpu-layers 99 --ctx-size 20480 --temp 0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
@@ -343,7 +343,7 @@ models:
     name: "MinerU2.5-Pro-2605 (German doc OCR, CUDA)"
     aliases: [mineru]
     description: "ocr · MinerU2.5-Pro-2605-1.2B Q8_0 ~1.18GB (Qwen2.5-VL). OmniDocBench 95.69, native German (best umlaut fidelity). Documents pipeline 2nd consensus. Prompt '\\nText Recognition:' + sys. On-demand."
-    metadata: { class: ocr, thinking: na, best_for: "German document OCR — end-to-end page parse, cross-check engine", tags: [ocr, vision, local, mineru, multimodal] }
+    metadata: { engine: "llama.cpp", hf: "JamePeng2023/MinerU2.5-Pro-2605-1.2B-GGUF", class: ocr, thinking: na, best_for: "German document OCR — end-to-end page parse, cross-check engine", tags: [ocr, vision, local, mineru, multimodal] }
 
   glm-ocr:
     cmd: env PORT=${PORT} llama-server --model /home/nullsense/.cache/huggingface/hub/models--ggml-org--GLM-OCR-GGUF/snapshots/65a42de1148dbed2297e922b5dbc7d9b70c36578/GLM-OCR-Q8_0.gguf --mmproj /home/nullsense/.cache/huggingface/hub/models--ggml-org--GLM-OCR-GGUF/snapshots/65a42de1148dbed2297e922b5dbc7d9b70c36578/mmproj-GLM-OCR-Q8_0.gguf --device CUDA0 --n-gpu-layers 99 --flash-attn off --fit off --ctx-size 12000 --temp 0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
@@ -352,7 +352,7 @@ models:
     name: "GLM-OCR (3rd consensus, CUDA)"
     aliases: [glm-ocr]
     description: "ocr · GLM-OCR Q8_0 (official ggml-org GGUF). OmniDocBench ~95.15. Documents pipeline 3rd consensus (rarely reached). Prompt 'OCR'. needs --flash-attn off. On-demand."
-    metadata: { class: ocr, thinking: na, best_for: "document OCR — third independent consensus engine", tags: [ocr, vision, local, glm, multimodal] }
+    metadata: { engine: "llama.cpp", hf: "ggml-org/GLM-OCR-GGUF", class: ocr, thinking: na, best_for: "document OCR — third independent consensus engine", tags: [ocr, vision, local, glm, multimodal] }
 
   # ── GLiNER2 NER is ORACLE-OWNED, not in this stack (decided 2026-06-18). Oracle runs it
   #     in-process/sidecar with GLINER2_DEVICE=auto (GPU when a card is present, CPU fallback).

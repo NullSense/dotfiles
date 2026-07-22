@@ -31,6 +31,11 @@
       "kind": "llama-server",
       "base_url": "http://127.0.0.1:9292",
       "model": "rewrite"
+    },
+    "nanbeige": {
+      "kind": "llama-server",
+      "base_url": "http://127.0.0.1:9292",
+      "model": "nanbeige4.2-3b:fast"
     }
   }
 }

@@ -194,10 +194,14 @@ models:
       setParamsByID:
         "nanbeige4.2-3b:agent":
           temperature: 1.0
+          # 32k output ceiling: long CoTs routinely blow past 4-8k (measured: summ bench
+          # 34/48 still mid-think at 4k). 32k out + 32k prompt fits the 64k slot.
+          max_tokens: 32768
           chat_template_kwargs:
             enable_thinking: true
             preserve_thinking: true
         "nanbeige4.2-3b:think":
+          max_tokens: 32768
           chat_template_kwargs:
             enable_thinking: true
             preserve_thinking: false

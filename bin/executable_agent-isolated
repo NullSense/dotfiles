@@ -2,7 +2,7 @@
 # agent-isolated — bubblewrap sandbox for AI coding agents (claude, codex, opencode).
 #
 # Usage:
-#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--no-docker] [--agent-vault] [--dotfiles] [--no-gpu] [--dry-run] [-- <agent args>]
+#   agent-isolated <agent> [--ssh] [--gpg] [--rbw] [--no-docker] [--agent-vault] [--dotfiles] [--no-gpu] [--no-github] [--dry-run] [-- <agent args>]
 #   agent-isolated sh                            # interactive shell inside the sandbox
 #   agent-isolated --self-test                   # run negative + positive verifications
 #   AGENT_UNSANDBOX=1 agent-isolated <agent> …   # bypass the sandbox entirely (escape hatch)
@@ -45,6 +45,13 @@
 #                   `docker run -v /:/host …` and escape the sandbox entirely.
 #                   Opt out with --no-docker for untrusted/unsupervised runs.
 #                   Rootless Docker or a throwaway VM is the safer path.
+#   github          Resolve the host `gh` OAuth token (masked keyring, so
+#                   otherwise unreachable in-sandbox) and inject it as
+#                   GH_TOKEN + GITHUB_PERSONAL_ACCESS_TOKEN. Makes the `gh`
+#                   CLI authenticated AND lets the remote GitHub MCP server
+#                   (api.githubcopilot.com/mcp/) get a real Bearer instead of
+#                   400ing on an empty one. DANGER: the agent can read a live
+#                   token (repo/workflow/read:org/gist). Opt out --no-github.
 #
 # Default-on (low-risk, broadly useful):
 #   plannotator     Bind ~/.{local/share,config,cache}/plannotator so the
@@ -121,6 +128,15 @@ ALLOW_PLANNOTATOR=1
 # (0666) and credential-free, so exposing them is harmless and broadly
 # useful for local LLM / ROCm inference work. Opt out with --no-gpu.
 ALLOW_GPU=1
+# Default-on (per user request — a deliberate grant, NOT low-risk): resolve the
+# host `gh` OAuth token (which lives in the masked ~/.local/share/keyrings, so
+# it is otherwise UNreachable in-sandbox) and inject it as GH_TOKEN +
+# GITHUB_PERSONAL_ACCESS_TOKEN. Without this the `gh` CLI is authless inside the
+# sandbox (config dir is visible but the keyring token is masked) AND the remote
+# GitHub MCP server (api.githubcopilot.com/mcp/) 400s on the empty Bearer that
+# `${GITHUB_PERSONAL_ACCESS_TOKEN}` expands to. Trade-off: the agent can read a
+# live token (repo/workflow/read:org/gist scope). Opt out with --no-github.
+ALLOW_GITHUB=1
 DRY_RUN=0
 SELF_TEST=0
 AGENT=""
@@ -167,6 +183,8 @@ while [[ $# -gt 0 ]]; do
         --no-plannotator) ALLOW_PLANNOTATOR=0; shift ;;
         --gpu)            ALLOW_GPU=1; shift ;;  # accepted for symmetry
         --no-gpu)         ALLOW_GPU=0; shift ;;
+        --github)         ALLOW_GITHUB=1; shift ;;  # accepted for symmetry
+        --no-github)      ALLOW_GITHUB=0; shift ;;
         --dry-run)        DRY_RUN=1; shift ;;
         --self-test)      SELF_TEST=1; AGENT="sh"; shift; break ;;
         -h|--help)
@@ -536,6 +554,30 @@ esac
 # in Infisical (Personal project root), injected by the shim's `infisical run`.
 [[ -n "${LLM_MCP_KEY:-}" ]] && ARGS+=( --setenv LLM_MCP_KEY "$LLM_MCP_KEY" )
 
+# GitHub token: the `gh` OAuth token lives in the host keyring
+# (~/.local/share/keyrings), which is masked inside the sandbox — so `gh auth
+# token` and the github MCP server's ${GITHUB_PERSONAL_ACCESS_TOKEN} both come
+# up EMPTY in-sandbox (gh CLI runs authless; the remote GitHub MCP server 400s
+# on `Authorization: Bearer ` with no token). Resolve it HERE, host-side, where
+# the keyring is still reachable, and forward it under both names: GH_TOKEN for
+# the CLI, GITHUB_PERSONAL_ACCESS_TOKEN for the MCP header. Prefer an explicit
+# env token if the launching shell already exported one; else ask gh. Empty
+# result (locked keyring / headless / logged out) → skip silently, no worse than
+# before. Opt out with --no-github.
+if (( ALLOW_GITHUB )); then
+    _gh_tok="${GITHUB_PERSONAL_ACCESS_TOKEN:-${GH_TOKEN:-}}"
+    if [[ -z "$_gh_tok" ]] && command -v gh >/dev/null 2>&1; then
+        _gh_tok="$(gh auth token 2>/dev/null || true)"
+    fi
+    if [[ -n "$_gh_tok" ]]; then
+        ARGS+=(
+            --setenv GH_TOKEN                      "$_gh_tok"
+            --setenv GITHUB_PERSONAL_ACCESS_TOKEN  "$_gh_tok"
+        )
+    fi
+    unset _gh_tok
+fi
+
 # Default SSH: bind the FULL Bitwarden auth agent so agents push/auth with the
 # REGULAR key — SSH_AUTH_SOCK points at it, so `git push` / `ssh git@github.com`
 # just work with no flag. Deliberate grant: agents use the key through the agent
@@ -841,6 +883,13 @@ if (( SELF_TEST )); then
     run pos "agent state dir writable"         "touch $HOME/.claude/.sandbox-test && rm $HOME/.claude/.sandbox-test && echo ok"
     run pos "chezmoi source writable"          "touch $CHEZMOI_ROOT/.sandbox-test && rm $CHEZMOI_ROOT/.sandbox-test && echo ok"
     run pos "~/.local/bin writable"            "touch $HOME/.local/bin/.sandbox-test && rm $HOME/.local/bin/.sandbox-test && echo ok"
+    # GitHub token injected — only assert when the HOST can resolve one, so the
+    # self-test stays green on logged-out / headless machines. Verifies both the
+    # gh CLI env token and the MCP header var arrive inside the sandbox.
+    if [[ -n "${GH_TOKEN:-}" ]] || { command -v gh >/dev/null 2>&1 && gh auth token >/dev/null 2>&1; }; then
+      run pos "GH_TOKEN injected (gh CLI)"      'test -n "$GH_TOKEN" && echo ok'
+      run pos "GITHUB_PAT injected (MCP hdr)"   'test -n "$GITHUB_PERSONAL_ACCESS_TOKEN" && echo ok'
+    fi
     # GPU passthrough — only assert on hosts that actually have the device,
     # so the self-test stays green on GPU-less machines.
     [[ -e /dev/kfd ]] && \

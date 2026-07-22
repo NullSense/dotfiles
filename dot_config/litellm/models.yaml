@@ -341,6 +341,42 @@ model_list:
       tags: ["summarization", "cloud", "deepseek", "strong"]
       source_url: https://openrouter.ai/deepseek/deepseek-v4-pro
 
+  # ── nanbeige: local 3B looped-transformer reasoner (RAG/agent experiments) ────────────
+  #    Eval 2026-07-22: best-in-class 3B reasoning (GPQA 87.4, SWE-bench 63.6) but ~96 tok/s
+  #    bf16 (looped arch = 2× compute/token) → NOT the rewrite/summarize backend (E4B ~342).
+  #    llama-swap loads it on demand (evicts per matrix set rag-nanbeige). Thinking default
+  #    ON; request `nanbeige4.2-3b:fast` through llama-swap aliases for non-thinking.
+- model_name: nanbeige
+  litellm_params:
+    model: openai/nanbeige4.2-3b
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "reasoning"
+    - "agent"
+    - "local"
+  model_info:
+    engine: "vllm"
+    hf_repo: "Nanbeige/Nanbeige4.2-3B"
+    supported_environments: ["development"]
+    mode: chat
+    supports_function_calling: true
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 32768
+    max_output_tokens: 32768
+    metadata:
+      display_name: "Nanbeige4.2-3B · looped reasoner (local, dev)"
+      backend: "vLLM (RTX 5090) · vendored plugin until vllm-project/vllm#49433 merges"
+      quant: "bf16"
+      vram: "~14.7 GB reserved (32k ctx)"
+      tokens_per_second: "≈96 (bf16 batch-1; looped 22L×2)"
+      note: "reasoning/agentic specialist — thinking mode default ON (T=0.6 top_p=0.95; agentic T=1.0); slow decode, not for rewrite/summ"
+      tags: ["reasoning", "agent", "local", "nanbeige"]
+      source_url: https://huggingface.co/Nanbeige/Nanbeige4.2-3B
+
   # ── summarize-pro: PREMIUM on-demand tier — diffusiongemma, opened via `stack pro` ──
   #    Discrete text-DIFFUSION LM (nvidia/diffusiongemma-26B-A4B-it-NVFP4, MoE 3.8B-active).
   #    Serves on :8002 ONLY while the premium window is open (`stack pro on`), which EVICTS

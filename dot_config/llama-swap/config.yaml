@@ -159,6 +159,33 @@ models:
     description: "rerank · llama-nemotron-rerank-1b-v2 (Llama-3.2-1B bidirectional cross-encoder, avg pooling) via vLLM /v1/rerank. Score template + trust-remote-code enforced by the wrapper. 8k pairs. ~4.7 GB reserved."
     metadata: { engine: "vllm", hf: "nvidia/llama-nemotron-rerank-1b-v2", class: rerank, thinking: na, best_for: "sift rerank candidate (NVIDIA retrieval pair with nemotron-embed-1b)", tags: [rerank, local, nvidia, vllm] }
 
+  # ── nanbeige4.2-3b: looped-transformer reasoner/agent (eval 2026-07-22) ────────────────
+  #    NOT an E4B replacement for rewrite/summ: 96 tok/s BF16 batch-1 vs rewrite-E4B's 342
+  #    (looped arch = 2× compute + 2× KV per token). Kept for RAG answer-gen / agentic
+  #    experiments where its reasoning (GPQA 87.4, SWE-bench 63.6 @3B, thinking mode) wins.
+  #    Arch is NOT upstream vLLM yet (PR #49433) — wrapper injects the vendored plugin
+  #    (~/bin/llm-servers/vllm-plugins/nanbeige). Wrapper defaults: 32k ctx, GPU_UTIL 0.45
+  #    (~14.7 GB: 7.9 weights + 5.5 KV@32k + graphs). Thinking ON by default (card: think
+  #    T=0.6 top_p 0.95; agentic T=1.0) — use :fast alias for non-thinking.
+  nanbeige4.2-3b:
+    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-nanbeige
+    cmdStop: docker stop vllm-nanbeige
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: nanbeige4.2-3b
+    ttl: 300
+    name: "Nanbeige4.2-3B (vLLM bf16, looped)"
+    aliases: [nanbeige, "Nanbeige/Nanbeige4.2-3B", "nanbeige4.2-3b:think", "nanbeige4.2-3b:fast"]
+    description: "reason·agent · Nanbeige4.2-3B looped transformer (22L×2 loops) via vendored vLLM plugin. Best-in-class 3B reasoning; slow decode (~96 tok/s bf16). 32k ctx, ~14.7 GB reserved. Thinking default ON."
+    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", class: "reason·agent", thinking: "toggle (default on)", best_for: "RAG answer generation / agentic reasoning experiments; NOT rewrite (too slow vs E4B)", tags: [reason, agent, local, nanbeige, vllm] }
+    filters:
+      setParamsByID:
+        "nanbeige4.2-3b:think":
+          chat_template_kwargs:
+            enable_thinking: true
+        "nanbeige4.2-3b:fast":
+          chat_template_kwargs:
+            enable_thinking: false
+
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
   # Each reasoning-capable model exposes two extra aliases:
   #   <model-id>:think  →  forces thinking ON  (chat_template_kwargs.enable_thinking: true)
@@ -390,7 +417,8 @@ matrix:
     z: zerank-2                # Infinity fp16 (~8 GB) — heavy
     n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
     m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
-  evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6 }
+    a: nanbeige4.2-3b          # vLLM bf16 looped reasoner (~14.7 GB reserved) — RAG/agent experiments
+  evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4 }
   sets:
     # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident
     # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(vLLM E4B
@@ -417,6 +445,10 @@ matrix:
     # re-index keep an eye on nvidia-smi (vLLM reservations are fixed, so no surprise
     # growth like infinity's batch-scaled peaks).
     sift-nemotron: "n & m & d & t"
+    # nanbeige RAG/agent experiments: reasoner + nemotron retrieval pair + tool-embed.
+    # a 14.7 + n 3.8 + m 4.7 + t 0.4 ≈ 23.6 GB — solver evicts the summarizers + octen
+    # + rewrite(d) when this loads; dictation E4B reloads on next use (~10 s, ttl:0 spawns).
+    rag-nanbeige: "a & n & m & t"
 #
 # Why matrix over legacy `groups`: groups force all-or-nothing exclusive unloads; the
 # matrix solver evicts the FEWEST/cheapest models to satisfy a request. (groups still

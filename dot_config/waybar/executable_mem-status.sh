@@ -64,7 +64,12 @@ fi
 #     live in the page cache, not in any process — ps/btop/PSS are blind to
 #     them, and sandbox (bwrap) namespaces hide even the mount. statvfs each
 #     namespace's tmpfs mounts via /proc/<pid>/root, dedupe by superblock.
-out=$(python3 - <<'PY' 2>/dev/null
+# Time-boxed: one process stuck in a D-state (its smaps_rollup read blocks on
+# mmap_lock — routine during model loads / memory pressure) would otherwise
+# wedge this poll forever, and waybar's run→wait→sleep loop freezes the pill
+# on the stale value until the script exits. On timeout `out` comes back
+# empty and the cheap ps-RSS fallback below fills the tooltip instead.
+out=$(timeout -k 1 3 python3 - <<'PY' 2>/dev/null
 import glob, os
 agg = {}
 for f in glob.glob('/proc/[0-9]*/smaps_rollup'):

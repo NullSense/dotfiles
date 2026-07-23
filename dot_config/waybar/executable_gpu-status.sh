@@ -17,9 +17,12 @@ SMI=$(command -v nvidia-smi) || { printf '{"text":"󰢮 n/a","tooltip":"nvidia-s
 # Every data-path nvidia-smi call is time-boxed. During a large VRAM allocation
 # (a model loading — e.g. vLLM grabbing 15G) the driver can block for seconds;
 # an unbounded call here would wedge the whole waybar module, freezing the value
-# AND stalling click dispatch until waybar is killed. `timeout` keeps the 5s
-# poll honest and self-recovering. (Click actions below exec directly, no smi.)
-smi() { timeout 4 "$SMI" "$@"; }
+# AND stalling click dispatch until waybar is killed. waybar runs interval
+# scripts as run→wait-for-exit→sleep, so the pill shows a STALE value for as
+# long as any call blocks: two calls must fit inside the 5s poll (2×2s=4s),
+# and -k hard-kills an nvidia-smi that ignores TERM while stuck in an ioctl.
+# (Click actions below exec directly, no smi.)
+smi() { timeout -k 1 2 "$SMI" "$@"; }
 
 # --- Handle click actions --------------------------------------------------
 case "${1:-}" in

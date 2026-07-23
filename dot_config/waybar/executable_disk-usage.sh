@@ -52,7 +52,11 @@ case "${1:-}" in
     exit 0
     ;;
   ncdu)
-    exec alacritty --class=com.local.floating-monitor -e ncdu -x "$2"
+    # Detached (setsid -f): waybar waitpid()s the click handler and pauses
+    # this module's polling until it exits — an exec'd terminal froze the
+    # pill while the ncdu window stayed open. See gpu-status.sh.
+    setsid -f alacritty --class=com.local.floating-monitor -e ncdu -x "$2" </dev/null &>/dev/null
+    exit 0
     ;;
   pill) : ;;   # fall through
   *) echo '{"text":"?","tooltip":"usage: disk-usage.sh pill <path> <label> <glyph>"}'; exit 0 ;;

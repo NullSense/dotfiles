@@ -14,8 +14,14 @@
 # (O(1) per mount, deduped by superblock) — no du, safe at the 5s poll.
 set -u
 
+# Detached (setsid -f): waybar waitpid()s the click handler and pauses this
+# module's polling until it exits — an exec'd terminal froze the pill for as
+# long as the btop window stayed open. See gpu-status.sh for the full story.
 case "${1:-}" in
-  btop) exec alacritty --class=com.local.floating-monitor -e btop ;;
+  btop)
+    setsid -f alacritty --class=com.local.floating-monitor -e btop </dev/null &>/dev/null
+    exit 0
+    ;;
 esac
 
 # --- /proc/meminfo (values in kB) ------------------------------------------

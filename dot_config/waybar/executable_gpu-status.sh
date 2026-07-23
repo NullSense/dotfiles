@@ -25,12 +25,20 @@ SMI=$(command -v nvidia-smi) || { printf '{"text":"󰢮 n/a","tooltip":"nvidia-s
 smi() { timeout -k 1 2 "$SMI" "$@"; }
 
 # --- Handle click actions --------------------------------------------------
+# Click spawns MUST detach (setsid -f + closed stdio): waybar serializes a
+# custom module's poll loop with its on-click handler and waitpid()s the
+# handler — an `exec alacritty` here kept the handler alive as the terminal,
+# freezing this module's pill until that window closed (nvtop stayed open
+# 13h once → VRAM stuck at a 13h-old value). Detached, the handler exits
+# instantly and polling never pauses.
 case "${1:-}" in
   nvtop)
-    exec alacritty --class=com.local.floating-monitor -e nvtop
+    setsid -f alacritty --class=com.local.floating-monitor -e nvtop </dev/null &>/dev/null
+    exit 0
     ;;
   smi)
-    exec alacritty --class=com.local.floating-monitor -e sh -c 'nvidia-smi; echo; read -r _'
+    setsid -f alacritty --class=com.local.floating-monitor -e sh -c 'nvidia-smi; echo; read -r _' </dev/null &>/dev/null
+    exit 0
     ;;
 esac
 

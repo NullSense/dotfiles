@@ -19,6 +19,19 @@ mkdir -p "$OUTPUT_DIR"
 # Cancel an in-flight screenshot by re-pressing the bind (slurp running)
 pkill slurp && exit 0
 
+# hyprshade's warm shader (nvidia gamma workaround) runs in Hyprland's final
+# render pass, so every screencopy is tinted — and DOUBLY so here: the
+# hyprpicker freeze layer captures tinted pixels, then the compositor shades
+# them again before grim grabs the frame. Capture with the shader off and
+# restore it on exit (any exit — cancel included, via the EXIT trap below).
+SHADER=$(hyprshade current 2>/dev/null)
+restore_shader() { [[ -n $SHADER ]] && hyprshade on "$SHADER" 2>/dev/null; }
+trap restore_shader EXIT   # re-trapped later to also kill the freeze overlay
+if [[ -n $SHADER ]]; then
+    hyprshade off 2>/dev/null
+    sleep 0.15   # one untinted frame must land before the freeze/grab
+fi
+
 EDITOR_BIN="${OMARCHY_SCREENSHOT_EDITOR:-satty}"
 
 ARGS=()
@@ -63,7 +76,7 @@ get_rectangles() {
 # Freeze the screen during selection (otherwise live updates leak in)
 PID=
 cleanup_freeze() { [[ -n $PID ]] && kill $PID 2>/dev/null; }
-trap cleanup_freeze EXIT
+trap 'cleanup_freeze; restore_shader' EXIT
 
 freeze_for_pick() {
     hyprpicker -r -z >/dev/null 2>&1 &

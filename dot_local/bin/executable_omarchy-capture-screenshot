@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# PATH shim over omarchy's stock omarchy-capture-screenshot (~/.local/bin
+# precedes ~/.local/share/omarchy/bin in the session PATH, so the PRINT bind
+# and omarchy-menu both land here; the stock script stays pristine for
+# omarchy updates).
+#
+# Why: hyprshade's warm screen shader (nvidia gamma workaround) runs in
+# Hyprland's final render pass, so every screencopy is tinted — DOUBLY here,
+# because the hyprpicker freeze layer captures warm pixels and the compositor
+# shades them again before grim grabs the frame → deep-red screenshots.
+# Capture with the shader off; restore it on any exit, cancel included.
+# Same fix as ~/bin/screenshot.
+#
+# Re-press-to-cancel stays correct: the second invocation sees no active
+# shader (we turned it off), skips the toggle, and the first invocation's
+# EXIT trap does the restore when stock's `pkill slurp` unwinds it.
+
+SHADER=$(hyprshade current 2>/dev/null)
+if [[ -n $SHADER ]]; then
+  trap 'hyprshade on "$SHADER" 2>/dev/null' EXIT
+  hyprshade off 2>/dev/null
+  sleep 0.15 # one untinted frame must land before the freeze/grab
+fi
+
+"$HOME/.local/share/omarchy/bin/omarchy-capture-screenshot" "$@"

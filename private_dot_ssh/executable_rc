@@ -1,0 +1,7 @@
+#!/bin/sh
+# Runs on every sshd login. Pin the per-connection forwarded agent socket to a
+# stable path so tmux sessions reattached from a LATER ssh -A connection still
+# reach a live agent (the original $SSH_AUTH_SOCK dies with its connection).
+# NOTE: defining ~/.ssh/rc disables sshd's automatic xauth handling — fine here,
+# this is a Wayland box with no X11 forwarding.
+[ -n "$SSH_AUTH_SOCK" ] && ln -sf "$SSH_AUTH_SOCK" "$HOME/.ssh/agent.sock"

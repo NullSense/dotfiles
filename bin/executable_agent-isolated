@@ -588,8 +588,18 @@ fi
 # agent is down, fall back to the sign socket so signing still works.
 _sign_sock="$XRD/git-sign-agent.sock"
 _bw_sock="$HOME/.bitwarden-ssh-agent.sock"
+_fwd_sock="${SSH_AUTH_SOCK:-}"
 [[ -S "$_sign_sock" ]] && ARGS+=( --ro-bind "$_sign_sock" "$_sign_sock" )
-if [[ -S "$_bw_sock" ]]; then
+if [[ -n "$_fwd_sock" && "$_fwd_sock" != "$_bw_sock" && -S "$_fwd_sock" ]]; then
+    # Forwarded agent from `ssh -A` (working remotely — Bitwarden Desktop has no
+    # GUI session to unlock, and its socket file lingers dead after the app
+    # exits, so it must NOT take priority). /tmp is a fresh tmpfs in here, so the
+    # host socket path needs an explicit bind, same as known_hosts below.
+    ARGS+=(
+        --bind   "$_fwd_sock" "$_fwd_sock"
+        --setenv SSH_AUTH_SOCK "$_fwd_sock"
+    )
+elif [[ -S "$_bw_sock" ]]; then
     ARGS+=(
         --bind   "$_bw_sock" "$_bw_sock"
         --setenv SSH_AUTH_SOCK "$_bw_sock"
@@ -597,7 +607,7 @@ if [[ -S "$_bw_sock" ]]; then
 elif [[ -S "$_sign_sock" ]]; then
     ARGS+=( --setenv SSH_AUTH_SOCK "$_sign_sock" )
 fi
-unset _sign_sock _bw_sock
+unset _sign_sock _bw_sock _fwd_sock
 
 # Expose ~/.ssh/known_hosts (public host keys — NOT secret) so ssh can verify
 # github.com etc. without prompting. ~/.ssh itself stays tmpfs-masked above, so

@@ -6,7 +6,16 @@
 # means git operations launched from non-interactive contexts (IDEs, cron,
 # systemd user services) also use the agent, not whatever stale ssh-agent
 # happens to be running.
-[ -S "$HOME/.bitwarden-ssh-agent.sock" ] && export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
+# An inherited socket (`ssh -A` agent forwarding, or the ~/.ssh/agent.sock
+# symlink tmux points at) wins when it's live — that's the remote-work path,
+# where Bitwarden Desktop has no GUI to unlock. Note the Bitwarden socket FILE
+# survives the app exiting, so testing `-S` on it alone would happily select a
+# dead agent. Local logins have SSH_AUTH_SOCK unset and fall straight through.
+if [ -n "$SSH_AUTH_SOCK" ] && [ "$SSH_AUTH_SOCK" != "$HOME/.bitwarden-ssh-agent.sock" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+    : # keep the inherited/forwarded agent
+elif [ -S "$HOME/.bitwarden-ssh-agent.sock" ]; then
+    export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
+fi
 
 # Suppress zoxide's "init me last" doctor warning.
 # zoxide IS init'd last in zshrc, but mise's hook-env runs on every chpwd

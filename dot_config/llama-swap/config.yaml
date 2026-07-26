@@ -174,14 +174,28 @@ models:
     # blind-judge gate passed (summ 4.55-vs-4.61 same judge, taxonomy 18/20 both) at +60%
     # decode (154 vs 96 tok/s freeform; 206 tok/s summarize with ngram spec) and 3 GB
     # less VRAM. Drop the MODEL env to fall back to the bf16 original.
-    cmd: env PORT=${PORT} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic GPU_UTIL=0.40 /home/nullsense/bin/llm-servers/vllm-nanbeige
+    # EAGLE-3 draft head is the DEFAULT spec since 2026-07-23. THINKING-AWARE retrain
+    # 2026-07-24 (28.6k corpus, 45% thinking traces, 4 epochs; val cond_acc 0.685/0.697/
+    # 0.715, up from 0.622): thinking-mode acceptance 0.33->0.41 (+23%), thinking tok/s
+    # 244->272; non-thinking gains too. Head lives at the same path (overwritten in place;
+    # prior head backed up at ...EAGLE3.champion-bak). ONE config, keeps async+MRV2+full
+    # graphs. TRITON_ATTN is mandatory with eagle3 on SM120 (FlashInfer+spec drops
+    # cudagraphs to PIECEWISE, slower than spec-off). SPEC_TOKENS=3 (pos-2 accepts ~0.25).
+    # Fall back: drop SPEC/SPEC_MODEL/ATTN envs → wrapper's ngram default.
+    # Measured exception (2026-07-23 real-data sweep): LONG-document summarize
+    # favors ngram (231 vs 160 output tok/s) — for bulk long-doc jobs run the
+    # ngram config; eagle3 stays default for agent/RAG/chat/code traffic.
+    # MAXLEN=131072 (128k) since 2026-07-26: Hermes requests max_tokens≈context_length,
+    # so a 64k serve left 0 input room (max_tokens 65536 == full ctx). At 128k a 65536
+    # hermes context_length leaves ~64k for input. GPU_UTIL 0.66 ≈ 21 GB reserved.
+    cmd: env PORT=${PORT} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic MAXLEN=131072 GPU_UTIL=0.66 SPEC=eagle3 SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3 SPEC_TOKENS=3 ATTN=TRITON_ATTN /home/nullsense/bin/llm-servers/vllm-nanbeige
     cmdStop: docker stop vllm-nanbeige
     proxy: http://127.0.0.1:${PORT}
     useModelName: nanbeige4.2-3b
     ttl: 300
     name: "Nanbeige4.2-3B (vLLM FP8-dynamic, looped)"
     aliases: [nanbeige, "Nanbeige/Nanbeige4.2-3B", "nanbeige4.2-3b:agent", "nanbeige4.2-3b:think", "nanbeige4.2-3b:fast"]
-    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + ngram spec on vLLM. Blind-judged summ winner vs E4B (4.77 vs 4.02); 154 tok/s freeform / 206 summarize. 64k fp8-KV, ~12.6 GB reserved. Thinking default ON — :fast for summ."
+    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + ngram spec on vLLM. Blind-judged summ winner vs E4B (see summ-eval-v2 caveat). 154 tok/s freeform. 128k fp8-KV, ~21 GB reserved. Thinking default ON — :fast for summ."
     metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "fp8-dynamic (local llmcompressor)", class: "reason·agent·summarize", thinking: "toggle (default on)", best_for: "RAG answer generation, agentic reasoning, high-coverage summarization (:fast); NOT rewrite (E4B faster+more robust)", tags: [reason, agent, summarize, local, nanbeige, vllm, fp8] }
     # Three card-mapped invocation profiles (card scenario table + preserve_thinking recs):
     #   :agent → tools/RAG/multi-turn agent — thinking ON, keep prior-turn reasoning,

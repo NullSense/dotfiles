@@ -1,0 +1,42 @@
+[Unit]
+# Templated per-workspace Zedra daemon. Instance name is a systemd-escaped path:
+#   systemctl --user enable --now zedra@$(systemd-escape -p /home/nullsense/Programming/sift)
+# %I unescapes WITHOUT a leading slash (that is `systemd-escape -u`, not `-up`),
+# so every path below is written as /%I.
+Description=Zedra desktop daemon (workspace /%I)
+Documentation=https://zedra.dev
+After=network-online.target
+Wants=network-online.target
+
+# Deliberately anchored to default.target, NOT graphical-session.target.
+# On 2026-07-30 02:56 a kernel OOM reaped wayland-wm@hyprland.desktop.service;
+# every compositor-parented process (zedra pid 834362 + both claude sessions)
+# died in the session teardown even though none of them was the OOM victim.
+# user@1000.service itself survived, so a default.target unit under a lingering
+# user manager outlives both a compositor death and an SSH logout.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/%I
+# No --detach: systemd supervises the process directly. `-d` would fork away
+# and make systemd think the daemon exited immediately.
+ExecStart=/home/nullsense/.local/bin/zedra start --workdir /%I
+ExecStop=/home/nullsense/.local/bin/zedra stop --workdir /%I --grace 10
+Restart=always
+RestartSec=5
+
+# OOM hardening. Bias the kernel killer away from this tree (children —
+# including claude — inherit the score), and do not tear the unit down just
+# because some child got reaped.
+OOMPolicy=continue
+OOMScoreAdjust=-400
+
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -565,6 +565,15 @@ matrix:
     # Sparse peak is activation, not weights, so it scales with --max-batch-tokens; if you
     # raise that, re-check this number rather than trusting the 2.5.
     sift-hybrid: "e & x & d & t"
+    # sift SERVING working set (2026-07-31): the QUERY path needs the sparse
+    # leg and the reranker co-resident. Dense runs on a standalone vLLM
+    # (:8100), not llama-swap, so it is not a var here. Without this set,
+    # `sift-hybrid` (x, no m) and `sift-nemotron` (m, no x) each evict the
+    # other's model and EVERY search pays a full model load — measured at 26 s
+    # for a two-document rerank, which blows sift's own request timeout and
+    # turns every query into a 408.
+    #   x 2.5 + m 4.7 + d 11 + t 0.4 ~= 18.6 GB
+    sift-serve: "x & m & d & t"
     # sift Nemotron working set: embed→rerank in one query path, plus dictation (d) +
     # tool-embed (t). n 3.8 + m 4.7 + d 11 + t 0.4 ≈ 20 GB. Octen (e) deliberately
     # excluded — a sift cutover to nemotron means a NEW 2048-dim collection; during

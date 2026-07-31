@@ -75,3 +75,33 @@ general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"   # in Infisical /litellm; mint per-app virtual keys from it
   database_url: "os.environ/DATABASE_URL"       # litellm-db (:5433) — /key/generate + spend tracking
   store_model_in_db: true                       # persist model groups → Model Hub can list them
+
+  # ── learned-sparse (SPLADE) for sift's hybrid lexical leg — 2026-07-31 ──────────────────
+  # This is a PASS-THROUGH, deliberately NOT a `model_list:` entry, because TEI's
+  # /embed_sparse is not an OpenAI route: it takes {"inputs": [...]} (not {"input", "model"})
+  # and returns [[{index, value}, ...]] — a sparse term→weight list, not a float vector.
+  # Routing it as an embedding model would make litellm try to translate a shape that has no
+  # OpenAI equivalent. Pass-through forwards the body untouched, which is the only correct
+  # handling. Consequence, on purpose: no cost/spend tracking on this route, since litellm
+  # never parses the payload.
+  #
+  # Target is llama-swap's per-model escape hatch, NOT :9292/v1 — /embed_sparse carries no
+  # `model` field, so llama-swap's normal body-based routing cannot pick the entry. Hitting
+  # /upstream/tei-sparse still triggers its on-demand load + TTL eviction as usual.
+  #
+  # include_subpath: true is REQUIRED — it is what forwards /sparse/embed_sparse rather than
+  # only the bare /sparse. sift builds `{base_url}/embed_sparse` itself
+  # (sift-indexer/src/silver/sparse_embedder.rs), so its base_url is exactly:
+  #     http://127.0.0.1:4000/sparse
+  # Going direct to llama-swap (http://127.0.0.1:9292/upstream/tei-sparse) is equally valid
+  # and one hop shorter; this route exists so the whole model fleet stays addressable from
+  # one place.
+  #
+  # ⚠ litellm does NOT hot-reload config (unlike llama-swap): `systemctl --user restart
+  #   litellm` after editing, or this block silently does nothing.
+  pass_through_endpoints:
+    - path: "/sparse"
+      target: "http://127.0.0.1:9292/upstream/tei-sparse"
+      include_subpath: true
+      auth: false
+      timeout: 120

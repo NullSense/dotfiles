@@ -47,6 +47,84 @@ models:
     description: "embed·tools · LFM2.5-Embedding-350M 1024-dim CLS, CUDA GPU (~0.4 GB VRAM) — semantic MCP tool filter. Asymmetric query:/document: prefixes recommended."
     metadata: { engine: "llama.cpp", hf: "LiquidAI/LFM2.5-Embedding-350M-GGUF", class: embed, thinking: na, best_for: "MCP tool semantic search (litellm mcp_semantic_tool_filter)", tags: [embed, tools, local, lfm2, gpu, cuda] }
 
+  # ── LEARNED-SPARSE (SPLADE-family) — sift's hybrid lexical leg (2026-07-31) ──────────────
+  #    TEI is the only engine here that can serve SPLADE pooling: Infinity explicitly does
+  #    not (michaelfeil/infinity#399), which is why this is its own entry and not another
+  #    --model-id on the infinity image. `--pooling splade` is documented as working ONLY on
+  #    "Bert and Distilbert MaskedLM architectures" — that constraint, not model quality, is
+  #    what picked the model below.
+  #
+  #    MODEL: opensearch-neural-sparse-encoding-v2-distill — DistilBERT + MLM head, 67M,
+  #    BEIR avg nDCG@10 0.528, Apache-2.0. That beats naver/splade-v3 (~0.520) at 60% the
+  #    size. Stronger sparse models exist and were rejected on servability, not merit:
+  #      doc-v3-gte  0.546, 8192 ctx — GTE arch, TEI cannot splade-pool it (needs a sidecar)
+  #      LACONIC-1B  0.576 (BEIR14)  — Llama3 arch, same problem, and 15x the params
+  #
+  #    ⚠ SYMMETRIC — DO NOT swap in a `doc-`prefixed variant here. The `doc-*` models
+  #    (doc-v2-distill, doc-v3-distill, doc-v3-gte) are INFERENCE-FREE: the model encodes
+  #    documents only, and a query is a tokenizer + token→weight lookup table with no
+  #    forward pass. Pointing this endpoint at one silently applies the DOCUMENT encoder to
+  #    queries — off-distribution, no error, just quietly worse recall. Using one requires
+  #    query-side lookup-table support in the client, which sift does not have.
+  #
+  #    CONSUMER: sift indexer + api via SparsePlan::Endpoint{format: Tei}. sift appends
+  #    `/embed_sparse` itself (sift-indexer/src/silver/sparse_embedder.rs), so its base_url
+  #    is llama-swap's per-model escape hatch — /embed_sparse carries no `model` field, so
+  #    normal body-based routing cannot select this entry:
+  #        http://127.0.0.1:9292/upstream/tei-sparse
+  #
+  #    5090 SIZING: the binding constraint is NOT the 67M of weights (~134 MB fp16) but the
+  #    MLM logits tensor, which is [total_batch_tokens x 30522 vocab]. At 32768 batch tokens
+  #    that is 32768*30522*2 B ≈ 2.0 GB of transient activation — raise --max-batch-tokens
+  #    only with that multiplier in mind. --max-client-batch-size must stay >= sift's
+  #    configured sparse batch_size or sift's batches get rejected at the door.
+  #    --auto-truncate defaults to true (deliberately left default: sift chunks can exceed
+  #    DistilBERT's 512 tokens, and truncating beats a 413).
+  #    ⚠⚠ `--entrypoint text-embeddings-router` IS LOAD-BEARING — DO NOT REMOVE. ⚠⚠
+  #    Without it the image runs its own /entrypoint.sh, which does:
+  #        DRIVER_CUDA=$(nvidia-smi | awk '/CUDA Version/ {print $3; exit}')
+  #    Our driver (610.43.03) prints "CUDA UMD Version: 13.3" — the newer nvidia-smi header
+  #    format, which that regex does NOT match ("CUDA UMD Version" != "CUDA Version"). The
+  #    parse yields empty, `${DRIVER_CUDA:-0.0.0}` makes it 0.0.0, the script concludes the
+  #    host driver is ancient and prepends /usr/local/cuda/compat (libcuda 575.57.08) to
+  #    LD_LIBRARY_PATH. CUDA forward-compat only works when the host driver is OLDER than
+  #    the compat package; ours is NEWER, so libcuda 575 vs KMD 610 gives
+  #    CUDA_ERROR_SYSTEM_DRIVER_MISMATCH (803).
+  #    TEI then does NOT fail — it logs a WARN and silently falls back to
+  #    "Starting DistilBert model on Cpu" + "forcing max_batch_requests=4", serving
+  #    CORRECT results at a crawl. Nothing downstream errors; a bulk reindex just never
+  #    finishes. Skipping the entrypoint uses the ldconfig-resolved host libcuda instead
+  #    (/lib/libcuda.so.1 -> libcuda.so.610.43.03), which is what we want.
+  #    VERIFY after any TEI bump — the log line must say Cuda, not Cpu:
+  #        docker logs swap-tei-sparse 2>&1 | grep "Starting.*model on"
+  #        want: "Starting FlashDistilBert model on Cuda(CudaDevice(DeviceId(1)))"
+  #    Measured 2026-07-31: 2863 docs/s @ batch 128 on GPU. CPU path caps at batch 4.
+  #    (Upstream added entrypoint.sh precisely to fix the CUDA 13.0+ compat break; the fix
+  #     just doesn't survive this driver's nvidia-smi header. Recheck on a TEI upgrade —
+  #     if their parser learns the new format, this override can go.)
+  tei-sparse:
+    cmd: >
+      docker run --rm --name swap-tei-sparse --init --gpus all
+      -p 127.0.0.1:${PORT}:80
+      -v /home/nullsense/.cache/huggingface:/data
+      --entrypoint text-embeddings-router
+      ghcr.io/huggingface/text-embeddings-inference:120-1.9
+      --model-id opensearch-project/opensearch-neural-sparse-encoding-v2-distill
+      --pooling splade
+      --dtype float16
+      --max-batch-tokens 32768
+      --max-client-batch-size 128
+      --max-concurrent-requests 512
+      --payload-limit 16000000
+      --port 80
+    cmdStop: docker stop swap-tei-sparse
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    name: "OpenSearch neural-sparse v2-distill (TEI, SPLADE pooling)"
+    aliases: [sparse, splade, sparse-embed, "opensearch-project/opensearch-neural-sparse-encoding-v2-distill"]
+    description: "sparse · opensearch-neural-sparse-encoding-v2-distill 67M via TEI --pooling splade. BEIR 0.528 (> splade-v3 ~0.520 at 60% the size), 30522-dim over the BERT vocab, Apache-2.0. sift's hybrid lexical leg. Symmetric — queries run the model. ~2.5 GB peak."
+    metadata: { engine: "TEI", hf: "opensearch-project/opensearch-neural-sparse-encoding-v2-distill", class: sparse, thinking: na, best_for: "sift hybrid retrieval sparse leg (learned lexical expansion)", tags: [sparse, splade, local, tei, opensearch, sift] }
+
   # ── Infinity models (michaelfeil/infinity — native uv project, ~/Programming/llm-stack/infinity) ──
   #    One llama-swap entry per model = independent on-demand load/evict. All API routes live under
   #    /v1 (--url-prefix /v1 → /v1/embeddings, /v1/rerank verified 2026-07-18); /health stays at ROOT,
@@ -456,7 +534,8 @@ matrix:
     n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
     m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
     a: nanbeige4.2-3b          # vLLM FP8 looped reasoner, 64k fp8-KV (~12.6 GB reserved) — RAG/agent/summ
-  evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4 }
+    x: tei-sparse              # TEI SPLADE 67M (~2.5 GB peak: MLM logits, not weights)
+  evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8 }
   sets:
     # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident
     # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(vLLM E4B
@@ -477,6 +556,15 @@ matrix:
     legal: "f & r & j & d & t"
     legal-q: "f & q & d & t"
     legal-z: "f & z & d & t"
+    # sift HYBRID working set (2026-07-31): dense + sparse must be co-resident, because
+    # sift embeds every chunk on BOTH legs in the same Silver pass — if the solver may
+    # evict one to load the other, a bulk reindex thrashes the pair once per batch. That
+    # is also why x carries a high evict_cost (8) rather than a small-model-cheap one:
+    # cost here is measured in reload-stalls per batch, not gigabytes.
+    #   e 4.4 + x 2.5 + d 11 + t 0.4 ≈ 18.3 GB
+    # Sparse peak is activation, not weights, so it scales with --max-batch-tokens; if you
+    # raise that, re-check this number rather than trusting the 2.5.
+    sift-hybrid: "e & x & d & t"
     # sift Nemotron working set: embed→rerank in one query path, plus dictation (d) +
     # tool-embed (t). n 3.8 + m 4.7 + d 11 + t 0.4 ≈ 20 GB. Octen (e) deliberately
     # excluded — a sift cutover to nemotron means a NEW 2048-dim collection; during

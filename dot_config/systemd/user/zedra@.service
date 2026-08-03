@@ -22,6 +22,11 @@ WorkingDirectory=/%I
 # No --detach: systemd supervises the process directly. `-d` would fork away
 # and make systemd think the daemon exited immediately.
 ExecStart=/home/nullsense/.local/bin/zedra start --workdir /%I
+# Re-open the phone terminals this daemon owned before the restart. Zedra
+# terminals die with the cgroup (KillMode=mixed below); the tmux sessions they
+# attach to live in session-N.scope and do not, so this reconnects the two.
+# Leading `-` because a failure here must never fail the daemon itself.
+ExecStartPost=-/home/nullsense/bin/zedra-reattach-terminals /%I
 ExecStop=/home/nullsense/.local/bin/zedra stop --workdir /%I --grace 10
 Restart=always
 RestartSec=5

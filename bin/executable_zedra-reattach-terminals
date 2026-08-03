@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# Re-open a Zedra phone terminal for every tmux session belonging to this
+# workspace, so a daemon restart does not silently drop remote control.
+#
+# Why this exists: Zedra terminals live inside the daemon's own cgroup and the
+# unit runs KillMode=mixed, so restarting zedra@<ws> SIGKILLs every terminal it
+# owns. The tmux *server* lives in session-N.scope (outside app-zedra.slice), so
+# the sessions themselves survive — only the `tmux attach` clients die, and with
+# them the phone's view. On 2026-08-03 02:00 a restart of the /home/nullsense
+# daemon killed its `tmux attach -t sift` and `-t eagle` terminals, and the app
+# stayed blind until they were reopened by hand.
+#
+# Attaching to tmux rather than calling `zedra agent resume` is deliberate:
+# resume spawns a SECOND `claude --resume <id>` against a session that is
+# already running, so two processes would write the same transcript. Attaching
+# drives the process that is already there.
+#
+# Usage: zedra-reattach-terminals <workdir>     (invoked from ExecStartPost)
+
+set -uo pipefail
+
+WORKDIR="${1:?usage: zedra-reattach-terminals <workdir>}"
+ZEDRA="${ZEDRA_BIN:-$HOME/.local/bin/zedra}"
+READY_TIMEOUT="${ZEDRA_READY_TIMEOUT:-30}"
+
+# Everything here lands in the daemon's journal (StandardError=journal). Keep it
+# to a handful of lines per start — a boot-time helper that fails silently is
+# worse than useless, because the phone just goes quiet with no trace why.
+log() { printf 'zedra-reattach: %s\n' "$*" >&2; }
+
+command -v tmux >/dev/null 2>&1 || { log "tmux not on PATH; nothing to do"; exit 0; }
+[ -x "$ZEDRA" ] || { log "no zedra binary at $ZEDRA"; exit 0; }
+
+# 1. Wait for the daemon we were started alongside to answer its local API.
+#    ExecStartPost fires as soon as ExecStart forks, which is well before the
+#    QUIC endpoint and the 127.0.0.1 control listener are up.
+ready=0
+for _ in $(seq "$READY_TIMEOUT"); do
+    if "$ZEDRA" status --workdir "$WORKDIR" >/dev/null 2>&1; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+if [ "$ready" != 1 ]; then
+    log "daemon for $WORKDIR never became ready; not reattaching"
+    exit 0
+fi
+
+# 2. Every workspace that has a unit, so nested workdirs resolve to the most
+#    specific daemon: ~/Programming/sift belongs to the sift daemon, not to the
+#    /home/nullsense one that also prefixes it.
+#    Pull the unit name with grep, NOT `awk '{print $1}'`: systemctl marks the
+#    unit that is currently activating with a leading `●`, and since this script
+#    runs from that very unit's ExecStartPost, column 1 is the bullet and column
+#    2 is the name — for exactly one row, our own. That silently resolved this
+#    workspace to `/●`, so every session fell through to the next-best prefix
+#    (/home/nullsense) and nothing was ever reattached.
+mapfile -t WORKSPACES < <(
+    systemctl --user list-units --all --no-legend 'zedra@*.service' 2>/dev/null |
+        grep -oE 'zedra@[^[:space:]]+\.service' |
+        sed 's/\.service$//; s/^zedra@//' |
+        while read -r inst; do systemd-escape -up -- "$inst"; done
+)
+if [ "${#WORKSPACES[@]}" -eq 0 ]; then
+    # `systemctl` talking to the user manager from inside a unit that manager is
+    # still activating is not reliably answerable; fall back to serving only
+    # ourselves rather than mis-resolving every session to the wrong daemon.
+    log "could not enumerate zedra units; assuming $WORKDIR is the only workspace"
+    WORKSPACES=("$WORKDIR")
+fi
+log "workspaces: ${WORKSPACES[*]}"
+
+# 3. One terminal per tmux session that resolves to *this* workspace.
+#    Settle first: on a restart, systemd has just SIGKILLed the terminals this
+#    unit owned, and tmux needs a moment to drop those clients. Scanning inside
+#    that window makes every session look like it is already attached.
+sleep "${ZEDRA_SETTLE_SECS:-3}"
+
+seen=""
+while IFS=$'\t' read -r sess path; do
+    case " $seen " in *" $sess "*) continue ;; esac # first pane of a session wins
+    seen="$seen $sess"
+
+    best=""
+    for w in "${WORKSPACES[@]}"; do
+        case "$path/" in
+            "$w"/*) [ "${#w}" -gt "${#best}" ] && best="$w" ;;
+        esac
+    done
+    if [ "$best" != "$WORKDIR" ]; then
+        log "skip '$sess' ($path) — belongs to ${best:-no workspace}"
+        continue
+    fi
+
+    # Idempotent on manual re-runs: skip when a Zedra-owned client is already on
+    # this session. Only clients under app-zedra.slice count — the user's own
+    # desktop `tmux attach` must not suppress the phone's terminal.
+    #
+    # Ask tmux, not pgrep. Under ExecStartPost this runs in the same second that
+    # systemd SIGKILLs the previous incarnation's terminals, and those processes
+    # linger in the table just long enough for a cmdline match to see them —
+    # which silently suppressed every reattach. tmux drops a client the moment
+    # its socket closes, so its own list is the authoritative one.
+    dup=0
+    for pid in $(tmux list-clients -t "$sess" -F '#{client_pid}' 2>/dev/null); do
+        [ -r "/proc/$pid/stat" ] || continue
+        # A client SIGKILLed moments ago by our own restart stays in tmux's list
+        # until the server notices the socket, and lingers in /proc as a zombie
+        # until reaped. Either way it is not a live attachment, and treating it
+        # as one makes the reattach skip the very session it exists to restore.
+        # (Field 3 of /proc/pid/stat, read past the comm parens — "tmux: client"
+        # contains a space, so positional awk on the raw line is wrong.)
+        state=$(sed -e 's/^.*) //' -e 's/ .*//' "/proc/$pid/stat" 2>/dev/null)
+        [ "$state" = "Z" ] && continue
+        if grep -q 'app-zedra.slice' "/proc/$pid/cgroup" 2>/dev/null; then
+            dup=1
+            break
+        fi
+    done
+    if [ "$dup" = 1 ]; then
+        log "skip '$sess' — already has a zedra-owned client"
+        continue
+    fi
+
+    if "$ZEDRA" terminal open --workdir "$WORKDIR" \
+        --launch-cmd "tmux attach -t $sess" >/dev/null 2>&1; then
+        log "reattached '$sess' to $WORKDIR"
+    else
+        log "FAILED to reattach '$sess' to $WORKDIR"
+    fi
+done < <(tmux list-panes -a -F '#{session_name}'$'\t''#{pane_current_path}' 2>/dev/null)
+
+exit 0

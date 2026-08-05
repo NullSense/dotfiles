@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+config="$HOME/.config/hypr/hyprland.conf"
+if [[ -f "$HOME/.config/hypr/hyprland.lua" ]]; then
+  config="$HOME/.config/hypr/hyprland.lua"
+fi
+
+output="$(Hyprland --verify-config --config "$config" 2>&1)"
+printf '%s\n' "$output"
+
+if grep -Eq 'Config error|Invalid dispatcher' <<<"$output"; then
+  exit 1
+fi
+
+grep -q 'config ok' <<<"$output"

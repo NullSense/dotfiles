@@ -648,9 +648,32 @@ matrix:
     z: zerank-2                # Infinity fp16 (~8 GB) — heavy
     n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
     m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
-    a: nanbeige4.2-3b          # vLLM FP8 looped reasoner, 64k fp8-KV (~12.6 GB reserved) — RAG/agent/summ
+    a: nanbeige4.2-3b          # vLLM looped reasoner, 32k fp8-KV — 13.2 GB MEASURED (see budget)
     x: tei-sparse              # TEI SPLADE 67M (~2.5 GB peak: MLM logits, not weights)
   evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8 }
+
+  # ── MEASURED VRAM BUDGET, 2026-08-06 (nvidia-smi, not arithmetic) ─────────────────
+  # Every other number on this page is a hand estimate. These three are not, and where
+  # they disagree with the estimates the estimates were wrong — `a` was written down as
+  # ~12.6-15 GB and actually held 20.1 GB at its old 64k default, which is what made
+  # `rag-nanbeige` overcommit the card and fail to start with "upstream command exited
+  # prematurely".
+  #
+  #   retrieval trio (n + m + x), all three resident   12.3 GB
+  #   nanbeige @ MAXLEN 32768 / GPU_UTIL 0.40          13.2 GB
+  #   ------------------------------------------------------
+  #   full RAG stack                                   25.5 GB   of 32.6 GB
+  #   leaves                                          ~7.1 GB   free
+  #
+  # That free figure is a DELIBERATE floor, not slack to be reclaimed: it absorbs
+  # hyprwhspr dictation (~2.3 GB, comes and goes), the compositor, and vLLM's transient
+  # profiling spike at load. Target 4-8 GB free. If a set pushes below ~4 GB, shrink a
+  # model rather than trusting the estimate — llama-swap does NOT measure VRAM and will
+  # happily schedule a combination that cannot start.
+  #
+  # nanbeige at its old 64k context does NOT fit next to the trio (20.1 + 12.3 = 32.4,
+  # i.e. the whole card). Raising MAXLEN back to 65536 is a deliberate choice to evict
+  # the retrieval models for an agentic run — see the header of vllm-nanbeige.
   sets:
     # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident
     # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(vLLM E4B

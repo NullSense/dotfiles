@@ -17,6 +17,34 @@ globalTTL: 300            # default: unload a model 5 min after its last request
 logLevel: info
 startPort: 9300           # ${PORT} auto-increments from here per model
 
+# ── PRELOAD sift's retrieval serving path (2026-08-06) ─────────────────────────────
+# ttl:0 on nemotron-rerank-1b means "never idle-evict", NOT "already loaded" — after a
+# llama-swap restart or a config reload, a pinned model is still cold until something
+# asks for it. Preload is what closes that gap.
+#
+# Why it is worth the startup cost: a vLLM cold start on this box is ~50s end-to-end
+# (measured 2026-08-06 — container 14s, engine spawn 12s, weights 2.5s, torch.compile
+# 1.9s WITH a warm ~/.cache/vllm, CUDA-graph capture 9s, profile+API ~9s). sift bounds
+# rerank at 10s (RERANK_TOTAL_BUDGET), so a cold reranker does not error — the query
+# silently degrades to fused-only ranking. Paying that once at stack boot, off the
+# request path, is strictly better than letting a user's first search absorb it.
+#
+# All three are in the `sift-serve` matrix set, so co-residency is permitted and they
+# will not swap each other out. ~11 GB held from boot (n 3.8 + m 4.7 + x 2.5).
+#
+# tei-sparse IS preloaded. Do not "optimise" it out on the strength of
+# SIFT_SPARSE_ENABLED being unset in sift's .env: that env only seeds the NODE DEFAULT
+# CONTRACT — the Contract an UNCONFIGURED pipeline inherits (sift-api/src/main.rs).
+# Whether a query actually runs hybrid is decided PER PIPELINE by that pipeline's own
+# sparse leg, and configured pipelines set sparse_enabled: true themselves (see
+# sift config/pipeline.example.json). The env is not the switch it looks like.
+hooks:
+  on_startup:
+    preload:
+      - nemotron-rerank-1b
+      - nemotron-embed-1b
+      - tei-sparse
+
 models:
   # ── embeddings: sift + oracle. On-demand, evicts when idle (was ttl:0 always-on). ──
   octen-embedding-4b:
@@ -113,13 +141,60 @@ models:
       --pooling splade
       --dtype float16
       --max-batch-tokens 32768
-      --max-client-batch-size 128
+      --max-client-batch-size 512
       --max-concurrent-requests 512
       --payload-limit 16000000
       --port 80
-    cmdStop: docker stop swap-tei-sparse
+    cmdStop: docker stop -t 2 swap-tei-sparse
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300
+    # Same reason as nemotron-embed-1b: llama-swap's internal default is 10 parallel
+    # requests and #11 gets a 429. The sparse leg is embedded in the SAME Silver pass
+    # as the dense leg, at the same concurrency, so it needs the same headroom.
+    # TEI's own --max-concurrent-requests is 512, well above this.
+    concurrencyLimit: 32
+    # ttl:0 (PINNED) — 2026-08-06, was 3600, originally 300.
+    # The 3600 was set because 300 was shorter than the gap between two search
+    # sessions, so every return to work paid a cold load: measured 2026-08-03, an
+    # idle-then-query cycle took 40-120s cold vs 42s warm and turned sift's own
+    # ~1ms cache-warm search into ~10s or a 408 at the router's 30s ceiling.
+    # Pinning removes the timer from the equation entirely. This entry is also in
+    # hooks.on_startup.preload, so it is warm from boot rather than from first use.
+    # Cheap to hold: ~2.5 GB peak, and the peak is MLM-logits activation, not weights.
+    ttl: 0
+    #
+    # ⚠ 512-TOKEN INPUT CEILING — silent, and it is a TOKENIZER-MISMATCH problem.
+    # Live `/info` (2026-08-06) reports max_input_length 512 with auto_truncate true.
+    # 512 is the model's hard ceiling (DistilBERT position embeddings); no flag raises
+    # it, and TEI truncates unconditionally — no error, nothing logged.
+    #
+    # How exposed we actually are: sift's live pipeline (sift_bronze pipeline id=1)
+    # sets code/text/markdown_max_tokens ALL to 512, so it is not the gross
+    # 768-into-512 overflow that sift's DEFAULT chunker targets (768 markdown /
+    # 1024 code) would produce. But 512 is not 512 across tokenizers: sift chunks
+    # with the Nemotron tokenizer (Mistral BPE) and TEI re-tokenizes with WordPiece
+    # over a 30522 vocab, which generally yields MORE tokens for the same text. So
+    # some chunks can still cross the line, and the sparse leg quietly loses their
+    # tail while the dense leg (Nemotron, 4096) sees them whole.
+    #   `--auto-truncate false` does NOT fix this; it converts silence into a hard
+    #   rejection. Real fixes: measure the WordPiece length of real chunks and lower
+    #   the chunk target to fit, or re-chunk the sparse leg at <=512 WordPiece tokens
+    #   and max-pool the term weights. Both are retrieval-quality trades.
+    # Re-check whenever the chunker's target tokens or the embedder's tokenizer change.
+    #
+    # BATCH-SIZE INVARIANT — 128 -> 512 on 2026-08-06. This was a LATENT BREAKAGE,
+    # not a cosmetic disagreement: sift's docker-compose had already been moved to
+    # 512 after a real failure ("batch size 134 > maximum allowed batch size 128"),
+    # and this entry never got the fix. Anything routed here would have hit it again.
+    #   --max-client-batch-size >= the largest request sift will actually send
+    # Note the sizing rule that makes 128 too small: when transport.sparse.batch_size
+    # is UNSET, sift sizes a sparse request by the DOCUMENT's chunk count, so a long
+    # document alone can exceed 128. DEFAULT_SPARSE_HTTP_BATCH_SIZE = 12
+    # (sift-indexer/src/silver/contract.rs) is the per-request default, not a cap on
+    # this path — do not size this flag from that constant.
+    # Nothing auto-syncs: sift reads only `model_id` from /info, never this field, so
+    # the two definitions must be kept equal by hand. It is a pure request-validation
+    # ceiling — GPU batching is governed by --max-batch-tokens, so a larger client
+    # batch costs nothing until it lands.
     name: "OpenSearch neural-sparse v2-distill (TEI, SPLADE pooling)"
     aliases: [sparse, splade, sparse-embed, "opensearch-project/opensearch-neural-sparse-encoding-v2-distill"]
     description: "sparse · opensearch-neural-sparse-encoding-v2-distill 67M via TEI --pooling splade. BEIR 0.528 (> splade-v3 ~0.520 at 60% the size), 30522-dim over the BERT vocab, Apache-2.0. sift's hybrid lexical leg. Symmetric — queries run the model. ~2.5 GB peak."
@@ -217,10 +292,34 @@ models:
   #    sizes, GPU_UTIL, trust-remote-code, the mandatory rerank score template).
   nemotron-embed-1b:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-nemotron-embed
-    cmdStop: docker stop vllm-nemotron-embed
+    cmdStop: docker stop -t 2 vllm-nemotron-embed
     proxy: http://127.0.0.1:${PORT}
     useModelName: nemotron-embed-1b
-    ttl: 300
+    # ⚠ MUST be set for any BULK-INDEXING model. llama-swap's INTERNAL default is 10
+    # active parallel requests per model, and request 11+ gets an HTTP 429
+    # {"error":"Too many requests"} — llama-swap's own error shape, not the upstream's.
+    # Caught 2026-08-06 while moving sift's embedder off its standalone container:
+    # a 12-way concurrent probe returned exactly 2x 429 and 10x 200. The standalone
+    # :8100 container had no such ceiling, so this limit is introduced BY the move to
+    # llama-swap — it is not a pre-existing condition.
+    # sift's live SIFT_EMBEDDING_MAX_CONCURRENT is 4, so the default 10 does NOT break
+    # anything today — this is a guard, not an active fix. It matters because that gate
+    # is exactly the knob you reach for when tuning indexing: sift has been run at 16
+    # before (performance-experiments.md 8g), and docs_in_flight caps at 8 here. Raising
+    # it past 10 without this line would produce 429s that look like an indexer bug.
+    # 32 leaves headroom for both.
+    # llama-swap's docs say "recommended to be omitted" — that advice is written for
+    # interactive chat, where 10 parallel requests is generous. It is wrong for a
+    # bulk embedder.
+    concurrencyLimit: 32
+    # ttl:0 (was 300) — 2026-08-06. Completes the pinned sift serving trio with
+    # nemotron-rerank-1b and tei-sparse. sift's keep-warm pings every 4 minutes, so a
+    # 300s TTL never actually fired; pinning states the real behaviour.
+    # ⚠ ttl:0 means "never unloaded for being IDLE". It does NOT exempt the model from
+    # swap-engine eviction: loading a model that needs the VRAM (any big MoE, which is
+    # in no matrix set and therefore runs solo) still evicts this one, and the next
+    # search then pays a ~50s cold start. See the VRAM budget note on `matrix` below.
+    ttl: 0
     name: "Nemotron-3-Embed-1B (vLLM NVFP4, 2048-dim)"
     aliases: [embed-nemotron, "nvidia/Nemotron-3-Embed-1B-NVFP4"]
     description: "embedding · Nemotron-3-Embed-1B NVFP4 (Ministral-3-3B pruned, avg pooling, 2048-dim Matryoshka) via vLLM. ⚠ /v1/embeddings callers MUST prefix 'query: '/'passage: '. 2048 ≠ octen's 2560 ⇒ separate sift collection. ~3.8 GB reserved."
@@ -231,7 +330,23 @@ models:
     cmdStop: docker stop vllm-nemotron-rerank
     proxy: http://127.0.0.1:${PORT}
     useModelName: nemotron-rerank-1b
-    ttl: 300
+    # ttl:0 = PINNED, never idle-evicted (2026-08-06). Was 3600.
+    #
+    # Why pinned rather than "a long TTL": sift-api's provider warm-up
+    # (sift-api/src/services/warmup.rs) re-pings every provider every 4 minutes
+    # by default, which is far shorter than any TTL we would set — so while sift
+    # runs, this model never actually reached an idle unload anyway. The 4.7 GB
+    # was already resident continuously; ttl:3600 only made that fact implicit
+    # and made the residency depend on sift's keep-warm still being enabled.
+    #
+    # What the TTL was protecting against is real and unchanged: sift bounds
+    # rerank at 10s (RERANK_TOTAL_BUDGET), and vLLM's cold start is ~49s
+    # measured 2026-08-06 (container 14s + engine spawn 12s + weights 2.5s +
+    # compile 1.9s cached + CUDA-graph capture 9s + profile/API ~9s). A cold
+    # model therefore does NOT error — the query silently degrades to
+    # fused-only ranking. The symptom is quietly worse results, not a failure,
+    # which is exactly why this must not depend on a timer.
+    ttl: 0
     name: "llama-nemotron-rerank-1b-v2 (vLLM bf16)"
     aliases: [rerank-nemotron, "nvidia/llama-nemotron-rerank-1b-v2"]
     description: "rerank · llama-nemotron-rerank-1b-v2 (Llama-3.2-1B bidirectional cross-encoder, avg pooling) via vLLM /v1/rerank. Score template + trust-remote-code enforced by the wrapper. 8k pairs. ~4.7 GB reserved."
@@ -556,24 +671,38 @@ matrix:
     legal: "f & r & j & d & t"
     legal-q: "f & q & d & t"
     legal-z: "f & z & d & t"
-    # sift HYBRID working set (2026-07-31): dense + sparse must be co-resident, because
-    # sift embeds every chunk on BOTH legs in the same Silver pass — if the solver may
-    # evict one to load the other, a bulk reindex thrashes the pair once per batch. That
-    # is also why x carries a high evict_cost (8) rather than a small-model-cheap one:
-    # cost here is measured in reload-stalls per batch, not gigabytes.
+    # sift HYBRID INDEXING working set (2026-07-31): dense + sparse must be co-resident,
+    # because sift embeds every chunk on BOTH legs in the same Silver pass — if the
+    # solver may evict one to load the other, a bulk reindex thrashes the pair once per
+    # batch. That is also why x carries a high evict_cost (8) rather than a
+    # small-model-cheap one: cost here is measured in reload-stalls per batch, not GB.
     #   e 4.4 + x 2.5 + d 11 + t 0.4 ≈ 18.3 GB
     # Sparse peak is activation, not weights, so it scales with --max-batch-tokens; if you
     # raise that, re-check this number rather than trusting the 2.5.
+    #
+    # NOTE (2026-08-06): `e` is octen (2560-dim), sift's CURRENT dense embedder for this
+    # set. sift's .env now points its dense leg at `n` (nemotron, 2048-dim) instead, so
+    # sift-nemotron-hybrid below is the set a re-index actually wants. Both are kept:
+    # the two are NOT interchangeable (different dims ⇒ different collections), so which
+    # one applies depends on the pipeline's vector-config, not on preference.
     sift-hybrid: "e & x & d & t"
-    # sift SERVING working set (2026-07-31): the QUERY path needs the sparse
-    # leg and the reranker co-resident. Dense runs on a standalone vLLM
-    # (:8100), not llama-swap, so it is not a var here. Without this set,
-    # `sift-hybrid` (x, no m) and `sift-nemotron` (m, no x) each evict the
-    # other's model and EVERY search pays a full model load — measured at 26 s
-    # for a two-document rerank, which blows sift's own request timeout and
-    # turns every query into a 408.
-    #   x 2.5 + m 4.7 + d 11 + t 0.4 ~= 18.6 GB
-    sift-serve: "x & m & d & t"
+    # Nemotron dense + sparse, the indexing counterpart to sift-serve.
+    #   n 3.8 + x 2.5 + d 11 + t 0.4 ≈ 17.7 GB
+    sift-nemotron-hybrid: "n & x & d & t"
+    # sift SERVING working set. Without it, `sift-hybrid` (x, no m) and
+    # `sift-nemotron` (m, no x) each evict the other's model and EVERY search pays a
+    # full model load — measured at 26 s for a two-document rerank, which blows sift's
+    # own request timeout and turns every query into a 408.
+    #
+    # UPDATED 2026-08-06: the dense embedder used to run as a standalone vLLM on :8100
+    # that llama-swap knew nothing about, so `n` was deliberately NOT in this set — the
+    # solver was budgeting around a model it could not see, and that container's ~2.9 GB
+    # was invisible to every estimate on this page. sift now points at llama-swap
+    # (SIFT_EMBEDDING_API_BASE=http://127.0.0.1:9292), so the dense leg is a real var
+    # here and the query path's three models are finally all solver-visible.
+    #   n 3.8 + x 2.5 + m 4.7 + d 11 + t 0.4 ~= 22.4 GB
+    # m is ttl:0 (pinned) so it is resident regardless; listing it keeps the set honest.
+    sift-serve: "n & x & m & d & t"
     # sift Nemotron working set: embed→rerank in one query path, plus dictation (d) +
     # tool-embed (t). n 3.8 + m 4.7 + d 11 + t 0.4 ≈ 20 GB. Octen (e) deliberately
     # excluded — a sift cutover to nemotron means a NEW 2048-dim collection; during

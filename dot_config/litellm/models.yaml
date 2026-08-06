@@ -81,6 +81,19 @@ model_list:
     input_cost_per_token: 0
     output_cost_per_token: 0
     tags: ["embedding", "local", "nvidia", "nvfp4"]
+    # ── Retries OFF on retrieval routes (2026-08-06) ──────────────────────────────
+    # Both layers, because they are different mechanisms and the global
+    # `num_retries: 2` in config.yaml would otherwise apply here:
+    #   num_retries  → litellm ROUTER-level retry of the whole deployment call
+    #   max_retries  → the underlying SDK client's own retry
+    # Why 0: the failure this route actually has is a SLOW one, not a flaky one. If
+    # llama-swap's swap engine evicted this model (a solo big-MoE load will), the next
+    # call pays a ~50s cold start — a retry does not fix that, it triples it into a
+    # 150s stall and can stack three concurrent cold loads onto one GPU.
+    # timeout 120 bounds a single cold start generously without unbounded hanging.
+    num_retries: 0
+    max_retries: 0
+    timeout: 120
   model_info:
     engine: "vllm"
     hf_repo: "nvidia/Nemotron-3-Embed-1B-NVFP4"
@@ -99,6 +112,11 @@ model_list:
     input_cost_per_token: 0
     output_cost_per_token: 0
     tags: ["rerank", "local", "nvidia"]
+    # Retries OFF — same reasoning as embed-nemotron above (slow-not-flaky failure
+    # mode; a retry triples a cold start instead of fixing it).
+    num_retries: 0
+    max_retries: 0
+    timeout: 120
   model_info:
     engine: "vllm"
     hf_repo: "nvidia/llama-nemotron-rerank-1b-v2"

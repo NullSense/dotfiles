@@ -732,10 +732,36 @@ matrix:
     # re-index keep an eye on nvidia-smi (vLLM reservations are fixed, so no surprise
     # growth like infinity's batch-scaled peaks).
     sift-nemotron: "n & m & d & t"
-    # nanbeige RAG/agent experiments: reasoner + nemotron retrieval pair + tool-embed.
-    # a 15 + n 3.8 + m 4.7 + t 0.4 ≈ 24 GB — solver evicts the summarizers + octen
-    # + rewrite(d) when this loads; dictation E4B reloads on next use (~10 s, ttl:0 spawns).
-    rag-nanbeige: "a & n & m & t"
+    # ⚠ REMOVED 2026-08-06: `rag-nanbeige: "a & n & m & t"` was IMPOSSIBLE and this set
+    # existing is what made every nanbeige start fail with "upstream command exited
+    # prematurely" while the retrieval models were resident. The solver believed the
+    # combination fit, so it evicted only tei-sparse, left n+m up, and handed nanbeige
+    # a card that could not satisfy it. vLLM's own error is unambiguous:
+    #   ValueError: Free memory on device cuda:0 (18.75/31.39 GiB) on startup is less
+    #   than desired GPU memory utilization (0.66, 20.72 GiB)
+    #
+    # MEASURED, not estimated:
+    #   nanbeige alone, as llama-swap actually launches it
+    #   (cmd pins MAXLEN=131072 GPU_UTIL=0.66 — those OVERRIDE the wrapper defaults,
+    #    so tuning vllm-nanbeige's defaults does nothing for this path)   23.7 GB
+    #   retrieval trio (n + m + x)                                        13.2 GB
+    #   -------------------------------------------------------------------------
+    #   together                                                          36.9 GB  > 32.6
+    # The old comment's "a 15" was wrong by ~9 GB.
+    #
+    # nanbeige is therefore in NO set: it runs SOLO, evicting everything, which is the
+    # correct and honest behaviour for a model that wants 2/3 of the card. If you want
+    # it co-resident with retrieval, drop its context — at MAXLEN=32768 GPU_UTIL=0.40 it
+    # measures 13.2 GB and 13.2 + 13.2 = 26.4 GB fits with ~6 GB spare. That is a
+    # capability trade: 128k exists because Hermes sends max_tokens ~= context_length,
+    # and a 64k serve left no input room (see the cmd's own comment).
+    #
+    # SLEEP MODE is the better answer here and is already enabled on the wrapper.
+    # Measured 2026-08-06: POST /sleep?level=1 on nanbeige released 22.7 GB (29.2 -> 6.4
+    # GB total; a sleeping nanbeige holds only ~0.9 GB of context+graphs) and /wake_up
+    # restored it in 315 ms, serving correctly afterwards. Driving that from llama-swap
+    # needs cmd/cmdStop pointed at `vllm-wrapper` (shipped in llama-swap v243+, built
+    # separately from cmd/vllm-wrapper) rather than at the run script directly.
 #
 # Why matrix over legacy `groups`: groups force all-or-nothing exclusive unloads; the
 # matrix solver evicts the FEWEST/cheapest models to satisfy a request. (groups still

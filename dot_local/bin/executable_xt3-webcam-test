@@ -145,7 +145,7 @@ chmod +x "$STUBDIR/gphoto2"
 run_script() {
   local mode="$1" out rc
   out=$(cd "$STUBDIR" && PATH="$STUBDIR:$PATH" STUB_MODE="$mode" \
-        XT3_DEVICE=/dev/null XT3_STARTUP_SECS=6 XT3_STALL_SECS=6 \
+        XT3_DEVICE=/dev/null XT3_STARTUP_SECS=6 XT3_STALL_SECS=6 XT3_SETTLE_SECS=0 \
         XT3_DIAG="${XT3_DIAG:-0}" timeout 40 "$SCRIPT" 2>&1)
   rc=$?
   printf '%s\n__RC__%d' "$out" "$rc"

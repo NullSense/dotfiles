@@ -38,6 +38,25 @@ startPort: 9300           # ${PORT} auto-increments from here per model
 # Whether a query actually runs hybrid is decided PER PIPELINE by that pipeline's own
 # sparse leg, and configured pipelines set sparse_enabled: true themselves (see
 # sift config/pipeline.example.json). The env is not the switch it looks like.
+# ── vLLM sleep-mode swapping (2026-08-06) ─────────────────────────────────────────
+# `vllm-wrapper` is llama-swap's own helper (v243+, cmd/vllm-wrapper) for driving
+# vLLM's /sleep + /wake_up from cmd/cmdStop instead of killing the container. It is
+# NOT in the Arch package — build it when llama-swap is upgraded:
+#   go build -o ~/bin/vllm-wrapper ./cmd/vllm-wrapper   # from the matching git tag
+#
+# A sleep-wired model runs its daemon on a FIXED port from the block below, outside
+# llama-swap's ${PORT} pool, because the daemon must outlive the "stop". llama-swap
+# still routes through ${PORT} — vllm-wrapper reverse-proxies onto the fixed port.
+# Keep these out of the ${PORT} range (startPort 9300+) so they can never collide.
+#
+# Only wire models where sleep actually pays: the saving equals weights + KV cache,
+# since the CUDA context and captured graphs deliberately stay resident. Big
+# generative models win hugely; small pooling/embedding models do not (see the note
+# on nemotron-rerank-1b).
+macros:
+  vllm_wrapper: /home/nullsense/bin/vllm-wrapper
+  vllm_nanbeige_port: 8010
+
 hooks:
   on_startup:
     preload:
@@ -381,8 +400,53 @@ models:
     # MAXLEN=131072 (128k) since 2026-07-26: Hermes requests max_tokens≈context_length,
     # so a 64k serve left 0 input room (max_tokens 65536 == full ctx). At 128k a 65536
     # hermes context_length leaves ~64k for input. GPU_UTIL 0.66 ≈ 21 GB reserved.
-    cmd: env PORT=${PORT} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic MAXLEN=131072 GPU_UTIL=0.66 SPEC=eagle3 SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3 SPEC_TOKENS=3 ATTN=TRITON_ATTN /home/nullsense/bin/llm-servers/vllm-nanbeige
-    cmdStop: docker stop vllm-nanbeige
+    # ── SLEEP-MODE SWAPPING (2026-08-06) ──────────────────────────────────────────
+    # cmd/cmdStop go through `vllm-wrapper` (llama-swap v243+, PR #941; built from
+    # cmd/vllm-wrapper — the Arch package ships only the main binary). Instead of
+    # killing the container on evict, cmdStop calls POST /sleep?level=1 and the daemon
+    # stays alive on ${vllm_nanbeige_port}; cmd health-checks it, wakes it, and only
+    # cold-starts via --start-cmd when it is genuinely absent.
+    #
+    # Why this model above all others (measured 2026-08-06):
+    #   awake 23.7 GB  ->  asleep 0.9 GB   = 22.7 GB released
+    #   /sleep ~3 s      /wake_up 315 ms   vs an 82 s+ cold start
+    # Sleep releases the cumem pool (weights + KV) and keeps the CUDA context and
+    # captured graphs, which is exactly why the wake is sub-second. The payoff scales
+    # with weights+KV, so it is enormous here (7.9 GB FP8 weights + ~14 GB KV @128k)
+    # and NOT worth it for the retrieval trio (the reranker frees only 2.4 GB and sits
+    # on sift's hot path) — those stay pinned and are deliberately not wired this way.
+    #
+    # --wait-timeout 10m: the default is 2m and a genuine cold start here has been
+    # measured at 82 s to >4 min depending on page-cache state. Do not lower it.
+    #
+    # ⚠ TWO THINGS TO KNOW BEFORE TRUSTING THIS
+    #
+    # 1. STATE DESYNC. llama-swap tracks "running/stopped"; the daemon tracks
+    #    "awake/asleep". They are separate. Calling /sleep or /wake_up directly on
+    #    :8010 does NOT update llama-swap, and after that `POST /api/models/unload/
+    #    nanbeige4.2-3b` did NOT put it back to sleep — the daemon sat AWAKE holding
+    #    23.7 GB with llama-swap believing it had unloaded (observed 2026-08-06).
+    #    Ground truth is always `curl :8010/is_sleeping`, never llama-swap's /running.
+    #    If VRAM looks wrong, check that first and POST /sleep?level=1 to reclaim.
+    #
+    # 2. SLEEP ONLY FIXES THIS MODEL'S SIDE OF THE SWAP. Measured end-to-end:
+    #      cold start (no daemon)                      69.8 s
+    #      swap in from asleep                         41.6 s
+    #      ...of which the raw wake is                  0.34 s
+    #      ...and the first request after that          0.04 s
+    #    So waking is effectively free; the 41 s is llama-swap tearing down the THREE
+    #    retrieval models to make room (docker stop x3 + health-poll granularity).
+    #    Sleep cannot fix that half. If you want the switch to be genuinely instant,
+    #    the answer is to stop evicting at all — run nanbeige at MAXLEN=32768
+    #    GPU_UTIL=0.40 (13.2 GB measured), which co-resides with the 13.2 GB trio
+    #    inside the card with ~6 GB spare. 128k is what forces the eviction.
+    cmd: >
+      ${vllm_wrapper} serve
+      --vllm-url http://127.0.0.1:${vllm_nanbeige_port}
+      --listen :${PORT}
+      --wait-timeout 10m
+      --start-cmd "env PORT=${vllm_nanbeige_port} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic MAXLEN=131072 GPU_UTIL=0.66 SPEC=eagle3 SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3 SPEC_TOKENS=3 ATTN=TRITON_ATTN /home/nullsense/bin/llm-servers/vllm-nanbeige"
+    cmdStop: ${vllm_wrapper} sleep --vllm-url http://127.0.0.1:${vllm_nanbeige_port}
     proxy: http://127.0.0.1:${PORT}
     useModelName: nanbeige4.2-3b
     ttl: 300

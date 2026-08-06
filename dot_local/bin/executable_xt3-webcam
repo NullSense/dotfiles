@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# Stream Fujifilm X-T3 live view to /dev/video10 as a virtual webcam.
+# Source is 1024x768 @ ~25fps (X-T3 PTP firmware cap).
+# We upscale to 1440x1080 with Lanczos + light unsharp so apps see a "1080p" feed,
+# pace to 30fps, and run with a low-latency input.
+
+set -euo pipefail
+
+DEVICE="${XT3_DEVICE:-/dev/video10}"
+
+# --- Port auto-detection -----------------------------------------------------
+# The X-T3's libgphoto port is usb:BUS,DEVNUM and DEVNUM CHANGES on every USB
+# re-enumeration (observed usb:001,009 -> ,015 -> ,017 within minutes, and the
+# bus path moves too if the cable is replugged elsewhere: 1-1 -> 1-4). So the
+# port must never be hardcoded. We resolve it from --auto-detect, then pin every
+# gphoto2 call to that exact port with --port, so all of them address the same
+# device even if a second camera appears or the numbering shifts mid-startup.
+# parse_port reads --auto-detect output on stdin and emits the port, or nothing.
+# Split out from detect_port so it is testable without a camera attached
+# (see xt3-webcam-test alongside this script).
+parse_port() {
+  # auto-detect prints "<model with spaces>  usb:BBB,DDD"; port is the last field.
+  # The header ("Model  Port") and rule line can never match: neither contains
+  # "X-T3", and the grep rejects anything that is not a real usb: port.
+  awk '/X-T3/ { print $NF; exit }' \
+    | grep -E '^usb:[0-9]+,[0-9]+$' || true
+}
+
+detect_port() {
+  # `|| true` is load-bearing: with `set -o pipefail`, a gphoto2 failure makes
+  # this pipeline non-zero, and `PORT=$(detect_port)` under `set -e` would then
+  # abort the script instead of letting the caller handle "not found".
+  gphoto2 --auto-detect 2>/dev/null | parse_port || true
+}
+
+# Test hook: let the regression test source the helpers without streaming.
+# `return` only works in a sourced script; fall back to exit if run directly.
+if [[ "${XT3_SOURCE_ONLY:-0}" == "1" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+# Wait briefly for camera to enumerate (handles plug-in race).
+PORT=""
+for _ in {1..10}; do
+  PORT=$(detect_port)
+  [[ -n "$PORT" ]] && break
+  sleep 1
+done
+
+if [[ -z "$PORT" ]]; then
+  echo "X-T3 not detected via gphoto2 (no usb: port found on any bus)" >&2
+  exit 1
+fi
+echo "X-T3 detected on port $PORT" >&2
+
+# All gphoto2 calls below go through this so they cannot disagree about target.
+gp() { gphoto2 --port "$PORT" "$@"; }
+
+# Free the camera from gvfs if it grabbed it.
+pkill -f gvfs-gphoto2 2>/dev/null || true
+pkill -f gvfsd-gphoto2 2>/dev/null || true
+
+# X-T3 refuses liveview/movie capture (PTP General Error, 0 frames) when the
+# drive mode is Self-timer. Reset it in its OWN gphoto2 session BEFORE the
+# capture session — the full config path is required (short name 'capturemode'
+# is not resolvable), and it must not share the invocation with --capture-movie.
+# Best-effort: guarded so a firmware that lacks/renames the node can't abort us.
+# By-name first; some firmware states enumerate the choices as opaque values
+# ("Unknown value 0008") where only the index form lands.
+#
+# SESSION BUDGET: every gphoto2 invocation is a separate PTP session, and this
+# firmware needs breathing room between them — back-to-back sessions are what
+# leaves the camera answering "PTP Device Busy" to everything that follows.
+# So the hot path opens ONE probe session at most. The diagnostic reads
+# (capturemode/capturedelay) are behind XT3_DIAG=1 because they cost a session
+# each and only produce log text.
+CAPTUREMODE=/main/capturesettings/capturemode
+gp --set-config "$CAPTUREMODE=Single" >/dev/null 2>&1 || true
+
+# NOT a hard gate: `Current: Self-timer` is usually a gphoto2 LABELLING artifact,
+# not a real self-timer. The Fuji driver can't map this firmware's
+# StillCaptureMode values (the choice list degenerates to
+# "Self-timer" / "Unknown value 0008"), so it falls back to choice 0's name.
+# The authoritative check is capturedelay (PTP 0x501c): 0.000s = no self-timer,
+# in which case liveview is fine and the label means nothing. Warn only.
+if [[ "${XT3_DIAG:-0}" == "1" ]] \
+   && gp --get-config "$CAPTUREMODE" 2>/dev/null | grep -q '^Current: Self-timer'; then
+  delay=$(gp --get-config /main/capturesettings/capturedelay 2>/dev/null \
+            | sed -n 's/^Current: //p') || delay=""
+  if [[ "$delay" == "0.000s" ]]; then
+    echo "note: capturemode reads 'Self-timer' but capturedelay=0.000s — label artifact, continuing." >&2
+  elif [[ -z "$delay" ]]; then
+    # Probe failed -> we cannot tell artifact from real. Say so rather than
+    # crying wolf about a self-timer we have no evidence for.
+    echo "note: capturemode reads 'Self-timer'; capturedelay probe failed, cannot confirm — continuing." >&2
+  else
+    echo "warn: capturemode='Self-timer' with capturedelay=$delay — a real self-timer is armed." >&2
+    echo "warn: turn the self-timer off on the camera if liveview does not start." >&2
+  fi
+fi
+
+# There is deliberately NO --capture-preview preflight here. It proved the
+# camera would hand over frames, but cost a whole extra PTP session immediately
+# before --capture-movie, and on this firmware that back-to-back pattern is
+# itself a cause of "PTP Device Busy". The first-frame timeout in the watchdog
+# below gives the same honest diagnostic for free, using the real stream.
+
+# Re-resolve immediately before streaming: the probes above take a few seconds,
+# and the camera can re-enumerate inside that window (it does so every ~60-135s
+# while idle). Streaming on a stale DEVNUM is an instant "No camera found".
+NEWPORT=$(detect_port)
+if [[ -z "$NEWPORT" ]]; then
+  echo "X-T3 left the bus during preflight — exiting for a clean restart." >&2
+  exit 1
+fi
+if [[ "$NEWPORT" != "$PORT" ]]; then
+  echo "X-T3 re-enumerated during preflight: $PORT -> $NEWPORT" >&2
+  PORT="$NEWPORT"
+fi
+
+# --- Supervised streaming ----------------------------------------------------
+# Run gphoto2 and ffmpeg as separately-tracked children rather than a bare
+# pipeline, so we can (a) reap BOTH on exit and (b) watch for a frame stall.
+#
+# Reaping matters: an orphaned gphoto2 keeps the PTP session open, and the next
+# start then hits "PTP Device Busy" on every operation — the exact dead-end seen
+# on 2026-08-06, which not even `gphoto2 --reset` could clear.
+#
+# Stall-watching matters: if the PTP session hangs (camera half-asleep) gphoto2
+# can sit there without exiting while ffmpeg starves. systemd sees a live
+# process and keeps the unit "active" while the feed is actually dead. The
+# watchdog turns that silent failure into an exit, which systemd can restart.
+STALL_SECS="${XT3_STALL_SECS:-20}"
+
+WORKDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/xt3-webcam.XXXXXX")
+GP_PID=""
+FF_PID=""
+READER_PID=""
+
+cleanup() {
+  trap - TERM INT EXIT
+  for pid in "$FF_PID" "$GP_PID" "$READER_PID"; do
+    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+  done
+  # Escalate on anything that ignored SIGTERM, so no gphoto2 survives to hold
+  # the PTP session hostage.
+  sleep 1
+  for pid in "$FF_PID" "$GP_PID" "$READER_PID"; do
+    [[ -n "$pid" ]] && kill -9 "$pid" 2>/dev/null || true
+  done
+  rm -rf "$WORKDIR"
+}
+trap cleanup TERM INT EXIT
+
+mkfifo "$WORKDIR/mjpeg" "$WORKDIR/progress"
+touch "$WORKDIR/heartbeat"
+
+# Heartbeat reader: ffmpeg emits a -progress block every stats_period REGARDLESS
+# of whether input is flowing, so a block alone proves nothing. Only touch the
+# heartbeat when the frame COUNT actually advances — that is what distinguishes
+# "streaming" from "stalled but alive".
+(
+  last=""
+  while IFS='=' read -r key value; do
+    if [[ "$key" == "frame" && "$value" != "$last" ]]; then
+      last="$value"
+      touch "$WORKDIR/heartbeat"
+    fi
+  done < "$WORKDIR/progress"
+) &
+READER_PID=$!
+
+gphoto2 --port "$PORT" \
+    --stdout \
+    --set-config liveviewsize=0 \
+    --capture-movie \
+  > "$WORKDIR/mjpeg" &
+GP_PID=$!
+
+ffmpeg -hide_banner -loglevel warning \
+    -fflags nobuffer -flags low_delay -use_wallclock_as_timestamps 1 \
+    -f mjpeg -i "$WORKDIR/mjpeg" \
+    -vf "scale=1440:1080:flags=lanczos,unsharp=5:5:0.6:5:5:0.0,format=yuv420p" \
+    -r 30 \
+    -threads 0 \
+    -stats_period 2 -progress "$WORKDIR/progress" \
+    -f v4l2 "$DEVICE" &
+FF_PID=$!
+
+echo "streaming: gphoto2=$GP_PID ffmpeg=$FF_PID -> $DEVICE (stall limit ${STALL_SECS}s)" >&2
+
+# STARTUP_SECS is separate from STALL_SECS: the camera needs a few seconds to
+# open liveview and ffmpeg has to probe the mjpeg stream, so first frame is
+# slower than steady-state. Until the first frame lands, a timeout means the
+# camera never started producing — report THAT, not a generic stall, and never
+# let it surface as ffmpeg blaming the loopback.
+STARTUP_SECS="${XT3_STARTUP_SECS:-25}"
+started=$(date +%s)
+first_frame=0
+
+while kill -0 "$GP_PID" 2>/dev/null && kill -0 "$FF_PID" 2>/dev/null; do
+  sleep 5
+  now=$(date +%s)
+  beat=$(stat -c %Y "$WORKDIR/heartbeat" 2>/dev/null || echo 0)
+
+  if (( first_frame == 0 )); then
+    if (( beat > started )); then
+      first_frame=1
+      echo "first frame after $((now - started))s — feed live." >&2
+    elif (( now - started > STARTUP_SECS )); then
+      echo "X-T3 produced no frames in ${STARTUP_SECS}s on $PORT (camera busy or asleep)." >&2
+      echo "The v4l2 loopback is fine — the camera is not producing liveview." >&2
+      echo "If this repeats, power-cycle the camera and leave it in shooting mode." >&2
+      exit 1
+    fi
+    continue
+  fi
+
+  if (( now - beat > STALL_SECS )); then
+    echo "no new frames for $((now - beat))s — feed stalled, exiting for restart." >&2
+    exit 1
+  fi
+done
+
+# One side died. WHICH one is far less informative than whether we ever saw a
+# frame, so check that first.
+#
+# When the camera produces nothing, ffmpeg exits almost immediately rather than
+# waiting out the first-frame timeout: `-fflags nobuffer` sets analyzeduration
+# to 0, so the mjpeg demuxer gives up on an empty pipe within about a second and
+# reports "Output file does not contain any stream" -> "Error opening output
+# file <device>: Invalid argument". Attributing that to the output device is the
+# ORIGINAL RED HERRING that sent the 2026-08-06 investigation after the v4l2
+# loopback for an hour. It is a camera-side fault and must be reported as one.
+if (( first_frame == 0 )); then
+  echo "X-T3 produced no frames on $PORT — camera is busy or asleep." >&2
+  echo "The v4l2 loopback is fine; any ffmpeg complaint about $DEVICE above is" >&2
+  echo "a downstream symptom of the empty stream, not the cause." >&2
+  echo "If this repeats, power-cycle the camera and leave it in shooting mode." >&2
+elif ! kill -0 "$GP_PID" 2>/dev/null; then
+  echo "gphoto2 exited after streaming (camera gone or PTP session dropped)." >&2
+else
+  echo "ffmpeg exited after streaming (loopback write failed?)." >&2
+fi
+wait "$GP_PID" 2>/dev/null || true
+wait "$FF_PID" 2>/dev/null || true
+exit 1

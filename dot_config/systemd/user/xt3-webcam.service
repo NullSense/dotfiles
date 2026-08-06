@@ -1,0 +1,43 @@
+[Unit]
+Description=Fujifilm X-T3 virtual webcam (gphoto2 -> v4l2loopback)
+# Don't start unless the v4l2 loopback exists AND the camera is actually
+# present on the USB bus. The udev rule path uses lsusb's vendor:product
+# (04cb:02dd) — but ConditionPathExists wants a sysfs path, so we check
+# the canonical idVendor file under /sys/bus/usb/devices/ via a glob trick.
+ConditionPathExistsGlob=/dev/video10
+# Rate-limit lives here in [Unit] (newer systemd ignores it in [Service]).
+# The X-T3 re-enumerates every ~60-135s while AUTO POWER OFF is enabled: each
+# sleep kills the service, udev restarts it, and a 3-per-60s limit tripped
+# within two sleep cycles -> unit stuck 'failed' even once the camera woke up.
+# ExecCondition below makes an absent camera a clean SKIP (not a start), so a
+# generous budget here cannot spin: the only starts that count are ones where
+# the camera is genuinely on the bus.
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+[Service]
+Type=simple
+# ExecCondition (NOT ExecStartPre): if the camera isn't on the USB bus, a
+# non-zero exit makes systemd SKIP the unit cleanly instead of marking it
+# failed. That stops Restart=on-failure from retry-looping when the camera is
+# unplugged — which previously churned during shutdown (3x restart attempts in
+# the teardown window) and burned the start-limit. Restart now only fires if
+# the camera IS present and the xt3-webcam script itself crashes.
+ExecCondition=/usr/bin/bash -c 'lsusb | grep -q 04cb:02dd'
+ExecStart=%h/.local/bin/xt3-webcam
+# Belt-and-braces orphan sweep: the script traps TERM/INT/EXIT and reaps its
+# own children, but if it is ever SIGKILLed the trap never runs and a surviving
+# gphoto2 holds the PTP session -> next start fails "PTP Device Busy" on every
+# op (not clearable by `gphoto2 --reset`; needs a camera power-cycle).
+ExecStopPost=-/usr/bin/pkill -f "gphoto2 --port .* --capture-movie"
+Restart=always
+# Exponential backoff 10s -> 120s. A FLAT retry is actively harmful here: each
+# attempt opens a fresh PTP session, and hammering a half-asleep camera every
+# ~11s is what kept it wedged in "PTP Device Busy" (observed 2026-08-06 10:19,
+# 18 consecutive failures). Backing off gives the camera time to settle.
+RestartSec=10
+RestartSteps=5
+RestartMaxDelaySec=120
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# Regression tests for xt3-webcam.
+#
+# Part 1 - port parsing. The camera's libgphoto port is usb:BUS,DEVNUM and
+# DEVNUM changes on EVERY re-enumeration (seen live: usb:001,009 -> ,015 -> ,017
+# in minutes, and 1-1 -> 1-4 on replug). A hardcoded or mis-parsed port makes
+# gphoto2 target a stale device and fail "No camera found", which then surfaces
+# downstream as the misleading ffmpeg error
+# "Error opening output file /dev/video10: Invalid argument".
+#
+# Part 2 - failure diagnostics. Under `set -e` + `set -o pipefail`, assigning
+# from a FAILING pipeline aborts the script AT THE ASSIGNMENT. That silently
+# killed the preflight before it could explain itself (observed 2026-08-06
+# 10:19: the unit failed 18 times logging nothing after the capturemode note).
+# These tests drive the real script against a stub gphoto2 to prove every
+# failure path still prints its diagnostic.
+
+set -uo pipefail
+
+SCRIPT="$(dirname "$(readlink -f "$0")")/xt3-webcam"
+XT3_SOURCE_ONLY=1 source "$SCRIPT"
+
+pass=0
+fail=0
+
+ok()   { printf 'ok   %s\n' "$1"; pass=$((pass + 1)); }
+bad()  { printf 'FAIL %s\n       %s\n' "$1" "$2"; fail=$((fail + 1)); }
+
+# ---------------------------------------------------------------- part 1 ----
+check_parse() {
+  local name="$1" input="$2" want="$3" got
+  got=$(printf '%s' "$input" | parse_port)
+  [[ "$got" == "$want" ]] && ok "$name" \
+    || bad "$name" "want: $(printf %q "$want")  got: $(printf %q "$got")"
+}
+
+# Real capture, 2026-08-06 08:46 (camera on bus 1 port 1-1).
+check_parse 'detects port from real auto-detect output' \
+'Model                          Port
+----------------------------------------------------------
+Fuji Fujifilm X-T3             usb:001,009
+' 'usb:001,009'
+
+# Same camera after re-enumerating onto a different physical port (1-4).
+check_parse 'follows the camera when DEVNUM changes' \
+'Model                          Port
+----------------------------------------------------------
+Fuji Fujifilm X-T3             usb:001,015
+' 'usb:001,015'
+
+# Real capture while the camera was asleep/off the bus: header only.
+check_parse 'empty when camera absent' \
+'Model                          Port
+----------------------------------------------------------
+' ''
+
+check_parse 'empty on no input' '' ''
+
+check_parse 'ignores header row' \
+'Model                          Port
+' ''
+
+check_parse 'ignores a non-X-T3 camera' \
+'Model                          Port
+----------------------------------------------------------
+Canon EOS 5D Mark IV           usb:001,004
+' ''
+
+check_parse 'picks X-T3 when another camera is listed first' \
+'Model                          Port
+----------------------------------------------------------
+Canon EOS 5D Mark IV           usb:001,004
+Fuji Fujifilm X-T3             usb:001,017
+' 'usb:001,017'
+
+check_parse 'handles multi-digit bus numbers' \
+'Model                          Port
+----------------------------------------------------------
+Fuji Fujifilm X-T3             usb:012,123
+' 'usb:012,123'
+
+# gphoto2 emits this when a driver matches but no port is bound; not usable.
+check_parse 'rejects a bare usb: with no bus,dev' \
+'Model                          Port
+----------------------------------------------------------
+Fuji Fujifilm X-T3             usb:
+' ''
+
+# ---------------------------------------------------------------- part 2 ----
+# Drive the real script with a stub gphoto2 on PATH. STUB_MODE selects which
+# camera behaviour to emulate.
+STUBDIR=$(mktemp -d)
+trap 'rm -rf "$STUBDIR"' EXIT
+
+cat > "$STUBDIR/gphoto2" <<'STUB'
+#!/usr/bin/env bash
+# Stub gphoto2. Emulates observed real-world X-T3 responses.
+args="$*"
+
+emit_detect() {
+  printf 'Model                          Port            \n'
+  printf -- '----------------------------------------------------------\n'
+  [[ "${STUB_MODE:-}" == "absent" ]] && exit 0
+  printf 'Fuji Fujifilm X-T3             usb:001,018     \n'
+}
+
+case "$args" in
+  *--auto-detect*)
+    # "detect_fails" reproduces gphoto2 exiting non-zero, which under pipefail
+    # used to abort the caller at `PORT=$(detect_port)`.
+    if [[ "${STUB_MODE:-}" == "detect_fails" ]]; then
+      echo 'gphoto2: error' >&2
+      exit 1
+    fi
+    emit_detect
+    ;;
+  # MUST precede the --set-config arm: the real movie invocation is
+  # "--port P --stdout --set-config liveviewsize=0 --capture-movie", so it
+  # matches *--set-config* too and would otherwise never reach this case.
+  *--capture-movie*)
+    # "busy_movie": camera accepts the session but never emits a frame — the
+    # real PTP-Device-Busy shape, and the case that used to surface as
+    # "/dev/video10: Invalid argument".
+    if [[ "${STUB_MODE:-}" == "busy_movie" ]]; then sleep 60; exit 0; fi
+    # Otherwise emit a real MJPEG stream so ffmpeg can actually decode frames.
+    exec ffmpeg -hide_banner -loglevel quiet \
+      -f lavfi -i "testsrc=size=1024x768:rate=25" \
+      -f mjpeg -q:v 8 -
+    ;;
+  *--get-config*capturedelay*)
+    if [[ "${STUB_MODE:-}" == "getconfig_fails" ]]; then exit 1; fi
+    printf 'Label: Capture Delay\nCurrent: 0.000s\nEND\n'
+    ;;
+  *--get-config*capturemode*)
+    printf 'Label: Still Capture Mode\nCurrent: Self-timer\nEND\n'
+    ;;
+  *--set-config*) exit 1 ;;   # real camera rejects this on fw 5.11
+esac
+exit 0
+STUB
+chmod +x "$STUBDIR/gphoto2"
+
+# Run the script with the stub, capturing merged output. Short timeouts keep the
+# suite fast; the script's real defaults are 25s/20s.
+run_script() {
+  local mode="$1" out rc
+  out=$(cd "$STUBDIR" && PATH="$STUBDIR:$PATH" STUB_MODE="$mode" \
+        XT3_DEVICE=/dev/null XT3_STARTUP_SECS=6 XT3_STALL_SECS=6 \
+        XT3_DIAG="${XT3_DIAG:-0}" timeout 40 "$SCRIPT" 2>&1)
+  rc=$?
+  printf '%s\n__RC__%d' "$out" "$rc"
+}
+
+check_run() {
+  local name="$1" mode="$2" want_rc="$3" want_text="$4" result out rc
+  result=$(run_script "$mode")
+  rc=${result##*__RC__}
+  out=${result%__RC__*}
+  if [[ "$rc" != "$want_rc" ]]; then
+    bad "$name" "want rc=$want_rc got rc=$rc; output: $(printf '%s' "$out" | tr '\n' '|')"
+  elif ! printf '%s' "$out" | grep -qF "$want_text"; then
+    bad "$name" "output missing $(printf %q "$want_text"); got: $(printf '%s' "$out" | tr '\n' '|')"
+  else
+    ok "$name"
+  fi
+}
+
+# THE headline case: the camera accepts the movie session but never emits a
+# frame. This is what produced "Error opening output file /dev/video10: Invalid
+# argument" and pointed the whole 2026-08-06 investigation at the loopback. It
+# must now be reported as camera-side, by the first-frame timeout.
+check_run 'silent camera reported as camera-side, not as a loopback error' \
+  busy_movie 1 'produced no frames'
+check_run 'silent camera explicitly absolves the loopback' \
+  busy_movie 1 'loopback is fine'
+
+# Absent camera must name the real reason.
+check_run 'absent camera reports detection failure' \
+  absent 1 'not detected via gphoto2'
+
+# gphoto2 itself failing must not abort at `PORT=$(detect_port)`.
+check_run 'auto-detect failure is handled, not fatal-at-assignment' \
+  detect_fails 1 'not detected via gphoto2'
+
+# A failing capturedelay probe must not kill the script at the assignment, and
+# must not cry wolf about a self-timer it has no evidence for. Diagnostic reads
+# cost a PTP session each so they sit behind XT3_DIAG=1; enable it here.
+XT3_DIAG=1 check_run 'capturedelay probe failure is survived, not fatal' \
+  getconfig_fails 1 'probe failed, cannot confirm'
+XT3_DIAG=1 check_run 'capturedelay probe failure still reaches streaming' \
+  getconfig_fails 1 'streaming:'
+
+# No failure path may ever blame the loopback - that was the original red herring.
+for mode in busy_movie absent detect_fails; do
+  result=$(run_script "$mode")
+  if printf '%s' "${result%__RC__*}" | grep -qi 'video10'; then
+    bad "mode=$mode never blames /dev/video10" "output mentions video10"
+  else
+    ok "mode=$mode never blames /dev/video10"
+  fi
+done
+
+printf '\n%d passed, %d failed\n' "$pass" "$fail"
+[[ "$fail" -eq 0 ]]

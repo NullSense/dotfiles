@@ -350,6 +350,17 @@ models:
     cmdStop: docker stop vllm-nemotron-rerank
     proxy: http://127.0.0.1:${PORT}
     useModelName: nemotron-rerank-1b
+    # Same reasoning as nemotron-embed-1b's limit, which this entry was missing
+    # (added 2026-08-07). llama-swap's INTERNAL default is 10 active parallel
+    # requests per model, and request 11+ gets an HTTP 429 {"error":"Too many
+    # requests"} in llama-swap's OWN error shape — not vLLM's. On the rerank leg
+    # that misreads badly: sift bounds rerank at 10s (RERANK_TOTAL_BUDGET) and
+    # treats a failed rerank as a degrade to fused-only ranking, so a 429 storm
+    # under bulk indexing surfaces as quietly worse results, exactly like the
+    # cold-start case the ttl:0 note above describes — never as an error.
+    # 32 matches the embed entry and leaves headroom above any candidate count
+    # sift issues concurrently.
+    concurrencyLimit: 32
     # ttl:0 = PINNED, never idle-evicted (2026-08-06). Was 3600.
     #
     # Why pinned rather than "a long TTL": sift-api's provider warm-up

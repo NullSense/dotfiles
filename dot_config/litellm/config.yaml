@@ -105,3 +105,23 @@ general_settings:
       include_subpath: true
       auth: false
       timeout: 120
+
+# ── Hugging Face repo ids as first-class model names (2026-08-07) ────────────────
+# sift addresses retrieval models by their HF REPO ID, never a local short name, and
+# that is load-bearing rather than stylistic: `embedding_model` feeds `vector_config_id`
+# and therefore a generation's `storage_schema_id`, so the name is part of the corpus's
+# IDENTITY. Serving these under a nickname would compute a different collection identity
+# for the same weights — `Scope::from_caller` then refuses the query with a 503 rather
+# than searching them, and realigning the name costs a full re-embed.
+#
+# An alias (not a second model_list entry) on purpose: a duplicate block would be a
+# second copy of the retries-off + timeout reasoning on `embed-nemotron`/`rerank-nemotron`,
+# and the two copies would drift. One deployment, two addressable names.
+#
+# ⚠ Verify after editing — the documented examples for model_group_alias are all chat
+#   routes; that it also covers /v1/embeddings and /v1/rerank is verified empirically here,
+#   not promised by the docs. And litellm does NOT hot-reload: restart, or this does nothing.
+router_settings:
+  model_group_alias:
+    "nvidia/Nemotron-3-Embed-1B-NVFP4": embed-nemotron
+    "nvidia/llama-nemotron-rerank-1b-v2": rerank-nemotron

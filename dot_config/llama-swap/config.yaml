@@ -496,18 +496,19 @@ models:
   #    WHY 64k AND NOT 32k. Not throughput — max-model-len bounds ONE request, it does
   #    not set concurrency (the KV pool does). It is sift's synthesis prompt: the
   #    evidence bundle is capped at 96 KiB (~24k tokens) and arrives with chat history
-  #    and an 8k output ceiling on top. 32k would truncate a full bundle; 64k does not.
+  #    and a 16k output ceiling on top. 32k would truncate a full bundle; 64k does not.
   #
-  #    WHY NO EAGLE-3 HERE. The draft head is what puts the 64k config at 20.1 GB
-  #    measured, and 20.1 + 12.3 (trio) = 32.4 GB — the entire card, no headroom. Without
-  #    spec: 7.9 weights + 5.5 KV (64k @ fp8, halved from the looped arch's 176 KB/token)
-  #    + ~1 graphs. Sift's LLM calls are two per turn and latency-bound by retrieval, not
-  #    by decode tok/s, so trading spec decoding for co-residency is the right side of
-  #    that trade HERE and the wrong side for Hermes.
+  #    EAGLE-3 IS ON HERE, and the reason is the quant, not the draft head. This block
+  #    used to argue the opposite ("WHY NO EAGLE-3") from an FP8-dynamic weight budget
+  #    where 64k + spec measured 20.1 GB and 20.1 + 12.3 (trio) left no headroom. The
+  #    weights below are no longer those weights: NVFP4-FP8 LoopShield + GPU_UTIL 0.45
+  #    holds 64k AND the draft head at 26.9/32.6 GB with the trio resident (measured
+  #    2026-08-07). The old comment survived the weight swap and contradicted the
+  #    `cmd:` three lines under it — SPEC=eagle3 has been set this whole time.
   #
-  #    KV is already fp8 (KV_DTYPE default in the run script) — that is the halving that
-  #    makes 64k fit at all. There is no further quantization step available: vLLM has no
-  #    int4 KV path for this arch, and the weights are already FP8-dynamic.
+  #    KV is fp8 (KV_DTYPE default in the run script) — that halving, from the looped
+  #    arch's 176 KB/token, is what makes 64k fit at all. vLLM has no int4 KV path for
+  #    this arch, so KV is as small as it goes.
   nanbeige-sift:
     cmd: >
       env PORT=${PORT}
@@ -524,11 +525,25 @@ models:
     cmdStop: docker stop vllm-nanbeige-sift
     proxy: http://127.0.0.1:${PORT}
     useModelName: nanbeige-sift
-    ttl: 300
+    # ttl:0 (PINNED) — 2026-08-07, was 300. Completes the sift serving quartet:
+    # the dense/sparse/rerank trio was pinned 2026-08-06 and this, the model that
+    # PLANS the turn, was left idle-evicting behind them.
+    #
+    # Measured 2026-08-07 on this stack: a decompose call costs 2.3s warm and
+    # 44.9s COLD (identical request, `reasoning_effort: "none"`, 80 completion
+    # tokens either way — the whole 44.9s is model load). Sift's decompose
+    # timeout is 8s, so every conversation resuming after an idle gap silently
+    # lost its query planner and fell back to searching the raw question. No
+    # timeout value fixes that: 8s cannot survive a cold start and 60s hangs the
+    # user with no retrieval started. Residency is the fix.
+    #
+    # ⚠ As elsewhere: ttl:0 means "never unloaded for being IDLE". The matrix can
+    # still evict it to satisfy a different set — see evict_costs below.
+    ttl: 0
     aliases: [sift-nanbeige]
-    name: "Nanbeige4.2-3B · Sift 64k (co-resident, no spec)"
-    description: "reason·agent·rag · Same FP8-dynamic weights as nanbeige4.2-3b, served at 64k with fp8 KV and NO EAGLE-3 draft so it fits beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for 128k reasoning."
-    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "fp8-dynamic", class: "reason·agent·rag", thinking: "toggle (default on)", best_for: "Sift grounded chat turns needing retrieval co-residency", tags: [reason, agent, rag, local, nanbeige, vllm, fp8, sift] }
+    name: "Nanbeige4.2-3B · Sift 64k (co-resident, EAGLE-3)"
+    description: "reason·agent·rag · NVFP4-FP8 LoopShield weights served at 64k with fp8 KV and an EAGLE-3 draft head, sized to fit beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for 128k reasoning."
+    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "nvfp4-fp8-loopshield", class: "reason·agent·rag", thinking: "toggle (default on; sift sends reasoning_effort explicitly)", best_for: "Sift grounded chat turns needing retrieval co-residency", tags: [reason, agent, rag, local, nanbeige, vllm, nvfp4, sift] }
 
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
   # Each reasoning-capable model exposes two extra aliases:

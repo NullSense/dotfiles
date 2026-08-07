@@ -513,9 +513,13 @@ models:
       env PORT=${PORT}
       CONTAINER_NAME=vllm-nanbeige-sift
       SERVED_NAME=nanbeige-sift
-      MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic
+      MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-NVFP4-FP8-LoopShield
       MAXLEN=65536
-      GPU_UTIL=0.50
+      GPU_UTIL=0.45
+      SPEC=eagle3
+      SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3
+      SPEC_TOKENS=3
+      ATTN=TRITON_ATTN
       /home/nullsense/bin/llm-servers/vllm-nanbeige
     cmdStop: docker stop vllm-nanbeige-sift
     proxy: http://127.0.0.1:${PORT}

@@ -559,7 +559,37 @@ models:
     # Use the checkpoint's own chat_template.jinja: it is Gemma-4 tool-capable and
     # preserves the text-only checkpoint's trained rewrite behavior. vLLM's generic
     # example tool template leaks planning text on ordinary no-tool requests here.
-    cmd: env PORT=${PORT} MAXLEN=65536 MAX_SEQS=2 /home/nullsense/bin/llm-servers/vllm-gemma4b --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4
+    # GPU_UTIL=0.42 OVERRIDES the script's 0.35 default. Measured 2026-08-07, after
+    # `sift-agent` returned HTTP 500 for 79 s with the retrieval models resident.
+    #
+    # TWO separate vLLM checks have to pass, and 0.35 satisfies only the first once
+    # anything else is on the card:
+    #   1. util x 31.4 must be <= FREE memory at startup, else
+    #        "Free memory on device cuda:0 (21.41/31.39 GiB) on startup is less than
+    #         desired GPU memory utilization"
+    #      (verified by overshooting to 0.78 = 24.5 GB against 21.4 GB free — the raise
+    #       made it strictly worse, so this is not a "give it more" problem.)
+    #   2. what is left after weights must still hold one full-length sequence, else
+    #        "No available memory for the cache blocks."
+    #      Weights here are 8.99 GB MEASURED (bf16 262k-vocab embeddings dominate despite
+    #      NVFP4 linears — see the script's own note), and this cmd raises MAXLEN to
+    #      65536, four times the script's 4096 default, so the KV floor is ~1.3 GB rather
+    #      than the script's verified-alone margin.
+    #
+    #   0.42 x 31.4 = 13.2 GB:  <= free, and 13.2 - 9.0 = 4.2 GB KV, comfortably above
+    #   the ~1.3 GB that 65536 tokens needs.
+    #
+    # 0.55 (17.3 GB) also WORKS and was verified first, but vLLM RESERVES the whole
+    # fraction whether it needs it or not, so it left the card at 30.5/32.6 GB — 2.1 GB
+    # free, under this page's own 4-8 GB floor and under what hyprwhspr dictation wants
+    # transiently. Reserving less is the difference between "three models fit" and "three
+    # models fit and dictation still works".
+    #
+    # This is the same failure already documented twice on this page (rag-nanbeige,
+    # gemma-4-12b-opus, both "upstream command exited prematurely"): the matrix solver
+    # schedules a combination it believes fits, but a util fraction verified on a QUIET
+    # card does not survive co-residency. The script's 0.35 was verified alone.
+    cmd: env PORT=${PORT} MAXLEN=65536 MAX_SEQS=2 GPU_UTIL=0.42 /home/nullsense/bin/llm-servers/vllm-gemma4b --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4
     cmdStop: docker stop vllm-gemma4b
     proxy: http://127.0.0.1:${PORT}
     useModelName: rewrite

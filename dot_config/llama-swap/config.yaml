@@ -56,6 +56,7 @@ startPort: 9300           # ${PORT} auto-increments from here per model
 macros:
   vllm_wrapper: /home/nullsense/bin/vllm-wrapper
   vllm_nanbeige_port: 8010
+  vllm_nanbeige_sift_port: 8011
 
 hooks:
   on_startup:
@@ -481,6 +482,50 @@ models:
             enable_thinking: false
             preserve_thinking: false
 
+  # ── nanbeige-sift: the SAME weights at 64k, sized to CO-RESIDE with retrieval ──────────
+  #    A second entry rather than a smaller `nanbeige4.2-3b`, because the two consumers
+  #    want incompatible things and only one of them can win per process:
+  #      Hermes  → 128k, because it sends max_tokens ~= context_length (see the entry
+  #                above); at 64k it has zero input room.
+  #      Sift    → co-residency, because ONE grounded turn needs dense + sparse + rerank
+  #                + a chat model all live. Evicting the retrieval trio per turn is what
+  #                made a chat turn take 4m40s (measured 2026-08-06).
+  #    Separate CONTAINER_NAME and PORT, so both can exist; the matrix decides which is
+  #    resident, and they are in different sets so it never tries to hold both.
+  #
+  #    WHY 64k AND NOT 32k. Not throughput — max-model-len bounds ONE request, it does
+  #    not set concurrency (the KV pool does). It is sift's synthesis prompt: the
+  #    evidence bundle is capped at 96 KiB (~24k tokens) and arrives with chat history
+  #    and an 8k output ceiling on top. 32k would truncate a full bundle; 64k does not.
+  #
+  #    WHY NO EAGLE-3 HERE. The draft head is what puts the 64k config at 20.1 GB
+  #    measured, and 20.1 + 12.3 (trio) = 32.4 GB — the entire card, no headroom. Without
+  #    spec: 7.9 weights + 5.5 KV (64k @ fp8, halved from the looped arch's 176 KB/token)
+  #    + ~1 graphs. Sift's LLM calls are two per turn and latency-bound by retrieval, not
+  #    by decode tok/s, so trading spec decoding for co-residency is the right side of
+  #    that trade HERE and the wrong side for Hermes.
+  #
+  #    KV is already fp8 (KV_DTYPE default in the run script) — that is the halving that
+  #    makes 64k fit at all. There is no further quantization step available: vLLM has no
+  #    int4 KV path for this arch, and the weights are already FP8-dynamic.
+  nanbeige-sift:
+    cmd: >
+      env PORT=${PORT}
+      CONTAINER_NAME=vllm-nanbeige-sift
+      SERVED_NAME=nanbeige-sift
+      MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic
+      MAXLEN=65536
+      GPU_UTIL=0.50
+      /home/nullsense/bin/llm-servers/vllm-nanbeige
+    cmdStop: docker stop vllm-nanbeige-sift
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: nanbeige-sift
+    ttl: 300
+    aliases: [sift-nanbeige]
+    name: "Nanbeige4.2-3B · Sift 64k (co-resident, no spec)"
+    description: "reason·agent·rag · Same FP8-dynamic weights as nanbeige4.2-3b, served at 64k with fp8 KV and NO EAGLE-3 draft so it fits beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for 128k reasoning."
+    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "fp8-dynamic", class: "reason·agent·rag", thinking: "toggle (default on)", best_for: "Sift grounded chat turns needing retrieval co-residency", tags: [reason, agent, rag, local, nanbeige, vllm, fp8, sift] }
+
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
   # Each reasoning-capable model exposes two extra aliases:
   #   <model-id>:think  →  forces thinking ON  (chat_template_kwargs.enable_thinking: true)
@@ -743,8 +788,9 @@ matrix:
     n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
     m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
     a: nanbeige4.2-3b          # vLLM looped reasoner, 32k fp8-KV — 13.2 GB MEASURED (see budget)
+    A: nanbeige-sift           # same weights @64k, no spec — sized to co-reside with n+m+x
     x: tei-sparse              # TEI SPLADE 67M (~2.5 GB peak: MLM logits, not weights)
-  evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8 }
+  evict_costs: { A: 6, e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8 }
 
   # ── MEASURED VRAM BUDGET, 2026-08-06 (nvidia-smi, not arithmetic) ─────────────────
   # Every other number on this page is a hand estimate. These three are not, and where
@@ -826,6 +872,16 @@ matrix:
     # re-index keep an eye on nvidia-smi (vLLM reservations are fixed, so no surprise
     # growth like infinity's batch-scaled peaks).
     sift-nemotron: "n & m & d & t"
+    # sift CHAT working set — the one a grounded turn actually needs. A turn is
+    # decompose -> dense+sparse retrieval -> cross-encoder rerank -> synthesis, so the
+    # chat model and all three retrieval legs must be resident TOGETHER or the turn pays
+    # a model load per stage (measured 4m40s and a bare 408 before this set existed).
+    #   A 14.4 + n 3.8 + x 2.5 + m 4.7 ~= 25.4 GB, leaving ~7 GB — the same shape as the
+    #   "full RAG stack" budget above, with the 64k no-spec variant standing in for `a`.
+    # `d` is deliberately NOT here: rewrite is 11 GB and would push this over the card.
+    # Sift can use either chat model — `A` for quality, `d` (sift-agent) when dictation
+    # must stay hot — but not both at once.
+    sift-chat: "A & n & x & m"
     # ⚠ REMOVED 2026-08-06: `rag-nanbeige: "a & n & m & t"` was IMPOSSIBLE and this set
     # existing is what made every nanbeige start fail with "upstream command exited
     # prematurely" while the retrieval models were resident. The solver believed the

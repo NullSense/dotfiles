@@ -52,12 +52,6 @@ keymap("n", "<leader>s", [[:%s/\<<C-r><C-w>\>/<C-r><C-w>/gI<Left><Left><Left>]],
 -- WINDOW & SPLIT MANAGEMENT
 -- ================================
 
--- Split navigation (Ctrl + hjkl)
-keymap("n", "<C-j>", "<C-W><C-J>", { desc = "Move to split below" })
-keymap("n", "<C-k>", "<C-W><C-K>", { desc = "Move to split above" })
-keymap("n", "<C-l>", "<C-W><C-L>", { desc = "Move to split right" })
-keymap("n", "<C-h>", "<C-W><C-H>", { desc = "Move to split left" })
-
 -- Resize splits
 keymap("n", "<S-Up>", ":resize +2<CR>", { desc = "Increase split height" })
 keymap("n", "<S-Down>", ":resize -2<CR>", { desc = "Decrease split height" })

@@ -96,14 +96,32 @@
 [gpg "ssh"]
 	allowedSignersFile = /home/nullsense/.config/git/allowed_signers
     program = /home/nullsense/bin/git-sign-ssh
-# Route all GitHub git operations over SSH (uses the Bitwarden auth key that
-# agents get by default). This deliberately reverses the old https-rewrite:
-# git-over-https to github.com relied on agent-vault token injection, which
-# only covers api.github.com, so `git push` from a sandboxed agent 401'd.
-# SSH sidesteps the proxy entirely. `gh` still uses https+agent-vault for
-# API calls (PRs/issues) — unaffected.
-[url "git@github.com:"]
-    insteadOf = https://github.com/
+# Route ALL GitHub git operations (fetch AND push) over https with the gh
+# OAuth token, via the credential helper below.
+#
+# 2026-07-27: this REPLACES the previous "everything over SSH" rewrite. That
+# rewrite existed because git-over-https once relied on agent-vault token
+# injection, which only covers api.github.com, so `git push` from a sandboxed
+# agent 401'd. That rationale is obsolete: the `!gh auth git-credential`
+# helper supplies the token directly rather than depending on proxy injection,
+# verified from inside agent-isolated against private repos (fetch + push).
+#
+# Why the change: the SSH path authenticates through the Bitwarden SSH agent,
+# which is a Desktop-GUI-only feature. From a remote SSH session (e.g. phone
+# while travelling) its per-session confirmation prompt renders on the
+# unattended desktop, so git hangs forever rather than failing. The gh token
+# is plaintext in ~/.config/gh/hosts.yml (NOT the keyring), so https works
+# headless: no GUI, no keyring unlock, no agent.
+#
+# The `NullSense@` userinfo is load-bearing — it is what the credential helper
+# keys on, and it keeps the URL from matching a bare https://github.com/ base.
+# Org repos are fine: only the prefix is swapped, so Cortiq-Lab/… is preserved.
+#
+# Revert to SSH-for-everything:
+#   git config --global --remove-section 'url.https://NullSense@github.com/'
+#   git config --global url."git@github.com:".insteadOf https://github.com/
+[url "https://NullSense@github.com/"]
+    insteadOf = git@github.com:
     insteadOf = ssh://git@github.com/
 [credential "https://github.com"]
 	helper = 

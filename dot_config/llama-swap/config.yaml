@@ -457,7 +457,7 @@ models:
       --vllm-url http://127.0.0.1:${vllm_nanbeige_port}
       --listen :${PORT}
       --wait-timeout 10m
-      --start-cmd "env PORT=${vllm_nanbeige_port} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic MAXLEN=131072 GPU_UTIL=0.66 SPEC=eagle3 SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3 SPEC_TOKENS=3 ATTN=TRITON_ATTN /home/nullsense/bin/llm-servers/vllm-nanbeige"
+       --start-cmd "env PORT=${vllm_nanbeige_port} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic MAXLEN=32768 GPU_UTIL=0.45 SPEC=eagle3 SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3 SPEC_TOKENS=3 ATTN=TRITON_ATTN /home/nullsense/bin/llm-servers/vllm-nanbeige"
     cmdStop: ${vllm_wrapper} sleep --vllm-url http://127.0.0.1:${vllm_nanbeige_port}
     proxy: http://127.0.0.1:${PORT}
     useModelName: nanbeige4.2-3b
@@ -526,8 +526,8 @@ models:
       CONTAINER_NAME=vllm-nanbeige-sift
       SERVED_NAME=nanbeige-sift
       MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-NVFP4-FP8-LoopShield
-      MAXLEN=65536
-      GPU_UTIL=0.45
+      MAXLEN=32768
+      GPU_UTIL=0.35
       SPEC=eagle3
       SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3
       SPEC_TOKENS=3
@@ -551,9 +551,9 @@ models:
     # ⚠ As elsewhere: ttl:0 means "never unloaded for being IDLE". The matrix can
     # still evict it to satisfy a different set — see evict_costs below.
     ttl: 0
-    aliases: [sift-nanbeige]
-    name: "Nanbeige4.2-3B · Sift 64k (co-resident, EAGLE-3)"
-    description: "reason·agent·rag · NVFP4-FP8 LoopShield weights served at 64k with fp8 KV and an EAGLE-3 draft head, sized to fit beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for 128k reasoning."
+    aliases: [sift-nanbeige, sift-agent, sift-decompose]
+    name: "Nanbeige4.2-3B · Sift 32k (co-resident, EAGLE-3)"
+    description: "reason·agent·rag · NVFP4-FP8 LoopShield weights served at 32k with fp8 KV and an EAGLE-3 draft head, sized to fit beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for longer-context reasoning."
     metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "nvfp4-fp8-loopshield", class: "reason·agent·rag", thinking: "toggle (default on; sift sends reasoning_effort explicitly)", best_for: "Sift grounded chat turns needing retrieval co-residency", tags: [reason, agent, rag, local, nanbeige, vllm, nvfp4, sift] }
 
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
@@ -669,7 +669,7 @@ models:
     proxy: http://127.0.0.1:${PORT}
     useModelName: rewrite
     ttl: 0
-    aliases: [sift-rag-e4b, sift-decompose, sift-agent]
+    aliases: [sift-rag-e4b]
     name: "Shared E4B · Rewrite + Sift RAG (vLLM NVFP4 + MTP, 64K tools)"
     description: "rewrite·agent·rag · Gemma-4 E4B NVFP4 W4A16 + MTP n=3 on vLLM — resident 64K context, native Gemma-4 automatic tool calling and separated reasoning with the checkpoint template, structured output, and low-latency dictation cleanup from one physical slot."
     metadata: { engine: "vllm", hf: "principled-intelligence/gemma-4-E4B-it-text-only", class: "rewrite·agent·rag", thinking: "dynamic per request (default off; Sift agent on)", best_for: "dictation rewrite, Sift decomposition, and Sift agentic RAG", tags: [rewrite, dictation, agent, rag, tools, local, vllm, gemma, mtp, nvfp4] }

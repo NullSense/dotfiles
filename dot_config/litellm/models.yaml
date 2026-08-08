@@ -27,8 +27,8 @@ model_list:
       source_url: https://huggingface.co/LiquidAI/LFM2.5-Embedding-350M
 - model_name: embed
   litellm_params:
-    model: openai/embed                    # embeddings dialect — keep openai/ (llamafile provider is chat-only)
-    api_base: http://127.0.0.1:9292/v1     # llama-swap → Octen-Embedding-4B (shared GPU)
+    model: openai/nemotron-embed-1b        # embeddings dialect — keep openai/ (llamafile provider is chat-only)
+    api_base: http://127.0.0.1:9292/v1     # llama-swap → Nemotron-3-Embed-1B NVFP4
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
@@ -36,22 +36,23 @@ model_list:
     - "embedding"
     - "local"
     - "shared"
-    - "qwen3-embedding"
+    - "nvidia"
+    - "nvfp4"
   model_info:
-    engine: "llama.cpp"
-    hf_repo: "Octen/Octen-Embedding-4B"
+    engine: "vllm"
+    hf_repo: "nvidia/Nemotron-3-Embed-1B-NVFP4"
     mode: embedding
     input_cost_per_token: 0
     output_cost_per_token: 0
     max_input_tokens: 8192
     metadata:
-      display_name: "Embed · Octen-Embedding-4B (local)"
-      backend: "llama.cpp CUDA (RTX 5090) · Octen-Embedding-4B (Qwen3-Embedding-4B finetune), 2560-dim"
-      vram: "~4.4 GB"
-      quant: "Q?_K_M"
+      display_name: "Embed · Nemotron-3-Embed-1B NVFP4 (local)"
+      backend: "vLLM CUDA (RTX 5090) · Nemotron-3-Embed-1B NVFP4, 2048-dim"
+      vram: "~1 GB"
+      quant: "NVFP4"
       role: "shared embedder for sift + oracle"
-      tags: ["embedding", "local", "shared", "qwen3-embedding"]
-      source_url: https://huggingface.co/Qwen/Qwen3-Embedding-4B
+      tags: ["embedding", "local", "shared", "nvidia", "nvfp4"]
+      source_url: https://huggingface.co/nvidia/Nemotron-3-Embed-1B-NVFP4
 
   # ── Infinity models (via llama-swap :9292/v1 — see llama-swap config, f2llm-embed/bge-rerank) ──
 - model_name: embed-legal
@@ -937,7 +938,7 @@ model_list:
   # and enable_thinking=true per agent request; vLLM applies the template flag without reload.
 - model_name: sift-decompose
   litellm_params:
-    model: openai/rewrite
+    model: openai/nanbeige-sift
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     max_tokens: 1024
@@ -960,25 +961,25 @@ model_list:
 
 - model_name: sift-agent
   litellm_params:
-    model: openai/rewrite
+    model: openai/nanbeige-sift
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
-    tags: ["sift", "agent", "rag", "tools", "local", "gemma"]
+    tags: ["sift", "agent", "rag", "tools", "local", "nanbeige"]
   model_info:
     engine: "vllm"
-    hf_repo: "principled-intelligence/gemma-4-E4B-it-text-only"
+    hf_repo: "Nanbeige/Nanbeige4.2-3B"
     mode: chat
     supports_function_calling: true
     supports_response_schema: true
     max_input_tokens: 65536
     max_output_tokens: 8192
     metadata:
-      display_name: "Sift Agent · Gemma-4 E4B (64K vLLM tools)"
-      backend: "vLLM 0.24 · E4B NVFP4+MTP, Gemma-4 tool/reasoning parsers + checkpoint-native template via llama-swap"
+      display_name: "Sift Agent · Nanbeige4.2-3B (32K vLLM tools)"
+      backend: "vLLM 0.26 · Nanbeige NVFP4 + EAGLE3, Qwen3 tool/reasoning parsers via llama-swap"
       role: "Sift agentic RAG and tool use (thinking enabled per request, no reload)"
-      tags: ["sift", "agent", "rag", "tools", "local", "gemma", "vllm", "64k"]
+      tags: ["sift", "agent", "rag", "tools", "local", "nanbeige", "vllm", "32k"]
 
   # ── too big for 12 GB → cloud in both environments ─────────────────────────────
 - model_name: anthropic/claude-3.5-sonnet

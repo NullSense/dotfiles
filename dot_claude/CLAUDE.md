@@ -41,21 +41,26 @@ Taken (non-exhaustive): SUPER+ALT+ C=Capture · D=Dictation · V=Voice menu · R
 ## Testing
 Fix a bug → write a regression test immediately (TDD preferred).
 
-## Library docs → Context7 (never web search)
-Resolve the ID first, then fetch a narrow topic (1–2k tokens; 5k+ for overviews). Reuse resolved
-IDs in-session. Check the version against project deps.
+## Documentation and web research — never answer third-party facts from memory
+- **Known libraries, SDKs, CLIs, and developer tools → Context7 MCP first.** Resolve the library ID,
+  verify it against the project-pinned version, then fetch a narrow topic (1–2k tokens; 5k+ for
+  overviews). Reuse resolved IDs in-session.
+- **Whenever a web search is needed → Exa first.** Use regular web search only when Exa is
+  unavailable or still has no relevant result after a sensible reformulation. Fetching an already
+  known authoritative URL directly is not a web search.
+- **Services/products** (apps, SaaS, hardware, OS features) → use current official documentation as
+  evidence; use Exa to discover the right official page and then current real-world fixes/issues.
+- **Libraries/models** → after Context7, use official versioned docs, GitHub, and Hugging Face model
+  cards/issues as appropriate. Never rely on training memory for a current claim.
 
-## Research before answering (services, libraries, APIs, tools) — never from memory
-For any question about a third-party service/library/API/tool — even well-known ones — search until
-confident, THEN answer with the LATEST data. Don't answer from training memory alone.
-1. **Service/product** (apps, SaaS, hardware, OS features) → the service's **official docs** first.
-2. Official docs missing/thin on the answer → **exa** web search for current real-world fixes/issues.
-3. **Dev / libraries** → **Context7 + GitHub + Hugging Face** MCPs/searches (resolve the lib, read
-   current docs + issues + model cards); see Library docs → Context7 above for the Context7 flow.
-
-## Structured memory → `~/.claude/memory/`
-`general.md` (cross-project conventions) · `tools/*.md` · `domain/*.md`. Write new cross-project
-conventions there, not into this file. Keep this file to top-level preferences only.
+## Memory
+- Required behavior and durable rules belong in this file or the closest project `AGENTS.md` /
+  `CLAUDE.md`; native memory is a recall aid, never the sole authority.
+- Curated cross-agent notes live under `~/.claude/memory/`: start with `MEMORY.md`, then read only
+  the relevant `tools/*.md` or `domain/*.md`. Add durable cross-project findings there rather than
+  bloating this top-level guidance.
+- Codex native memories (`~/.codex/memories/`) and Claude-mem are generated state. Let their owning
+  agent manage them; do not hand-edit their databases or generated files.
 
 @RTK.md
 

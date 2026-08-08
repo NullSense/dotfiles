@@ -6,6 +6,7 @@ personality = "pragmatic"
 web_search = "live"
 suppress_unstable_features_warning = true
 plan_mode_reasoning_effort = "high"
+approvals_reviewer = "auto_review"
 
 [projects."/home/nullsense/Programming/Tensil"]
 trust_level = "trusted"
@@ -91,6 +92,7 @@ hide_gpt5_1_migration_prompt = true
 "gpt-5.1-codex-max" = "gpt-5.2-codex"
 
 [features]
+memories = true
 unified_exec = true
 apply_patch_freeform = true
 shell_snapshot = true

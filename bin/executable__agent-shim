@@ -24,6 +24,13 @@ set -euo pipefail
 
 agent="$1"; shift
 
+# Herdr identifies host-visible sandbox wrappers through this scoped hint. The
+# actual agent process is hidden behind infisical + bwrap, so process-name
+# detection cannot see it directly. Do not set this outside a Herdr pane.
+if [[ "${HERDR_ENV:-}" == "1" ]]; then
+    export HERDR_AGENT="$agent"
+fi
+
 wrapper_flags=()
 passthrough=()
 saw_terminator=0

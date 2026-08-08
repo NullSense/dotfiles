@@ -527,6 +527,21 @@ ARGS+=(
     --setenv VISUAL           "${VISUAL:-${EDITOR:-nvim}}"
     --setenv AGENT_ISOLATED   "1"
 )
+
+# Herdr injects pane identity and its local control socket into pane processes.
+# Preserve that capability across bwrap's --clearenv so an agent can use the
+# Herdr CLI/skill from inside the sandbox. The host-visible HERDR_AGENT hint is
+# set by _agent-shim; these variables are the in-sandbox control surface.
+if [[ "${HERDR_ENV:-}" == "1" ]]; then
+    for _herdr_var in \
+        HERDR_ENV HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID \
+        HERDR_BIN_PATH HERDR_SOCKET_PATH; do
+        [[ -n "${!_herdr_var:-}" ]] && \
+            ARGS+=( --setenv "$_herdr_var" "${!_herdr_var}" )
+    done
+    unset _herdr_var
+fi
+
 [[ -n "${LC_ALL:-}"     ]] && ARGS+=( --setenv LC_ALL     "$LC_ALL" )
 [[ -n "${LC_CTYPE:-}"   ]] && ARGS+=( --setenv LC_CTYPE   "$LC_CTYPE" )
 [[ -n "${LC_MESSAGES:-}" ]] && ARGS+=( --setenv LC_MESSAGES "$LC_MESSAGES" )
@@ -893,12 +908,18 @@ if (( SELF_TEST )); then
     run pos "agent state dir writable"         "touch $HOME/.claude/.sandbox-test && rm $HOME/.claude/.sandbox-test && echo ok"
     run pos "chezmoi source writable"          "touch $CHEZMOI_ROOT/.sandbox-test && rm $CHEZMOI_ROOT/.sandbox-test && echo ok"
     run pos "~/.local/bin writable"            "touch $HOME/.local/bin/.sandbox-test && rm $HOME/.local/bin/.sandbox-test && echo ok"
+    if [[ "${HERDR_ENV:-}" == "1" ]]; then
+      run pos "Herdr pane identity forwarded"  'test "$HERDR_ENV" = 1 && test -n "$HERDR_PANE_ID" && echo ok'
+      run pos "Herdr socket usable"            'test -n "$HERDR_SOCKET_PATH" && test -S "$HERDR_SOCKET_PATH" && "$HERDR_BIN_PATH" status >/dev/null && echo ok'
+    fi
     # GitHub token injected — only assert when the HOST can resolve one, so the
     # self-test stays green on logged-out / headless machines. Verifies both the
     # gh CLI env token and the MCP header var arrive inside the sandbox.
-    if [[ -n "${GH_TOKEN:-}" ]] || { command -v gh >/dev/null 2>&1 && gh auth token >/dev/null 2>&1; }; then
-      run pos "GH_TOKEN injected (gh CLI)"      'test -n "$GH_TOKEN" && echo ok'
-      run pos "GITHUB_PAT injected (MCP hdr)"   'test -n "$GITHUB_PERSONAL_ACCESS_TOKEN" && echo ok'
+    if (( ALLOW_GITHUB )); then
+      if [[ -n "${GH_TOKEN:-}" ]] || { command -v gh >/dev/null 2>&1 && gh auth token >/dev/null 2>&1; }; then
+        run pos "GH_TOKEN injected (gh CLI)"    'test -n "$GH_TOKEN" && echo ok'
+        run pos "GITHUB_PAT injected (MCP hdr)" 'test -n "$GITHUB_PERSONAL_ACCESS_TOKEN" && echo ok'
+      fi
     fi
     # GPU passthrough — only assert on hosts that actually have the device,
     # so the self-test stays green on GPU-less machines.

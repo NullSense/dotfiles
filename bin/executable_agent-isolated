@@ -511,6 +511,15 @@ ARGS+=(
 )
 # NEVER bound: $XRD/{rbw,gnupg,bus,dbus-1,pulse,pipewire-0}.
 
+# Codex's managed command sandbox permits local socket access under /tmp but
+# rejects the default Herdr socket below ~/.config. Give the agent a private
+# in-sandbox mount path without exposing the rest of Herdr's config directory.
+HERDR_SANDBOX_SOCKET=""
+if [[ "${HERDR_ENV:-}" == "1" && -S "${HERDR_SOCKET_PATH:-}" ]]; then
+    HERDR_SANDBOX_SOCKET="/tmp/herdr.sock"
+    ARGS+=( --bind "$HERDR_SOCKET_PATH" "$HERDR_SANDBOX_SOCKET" )
+fi
+
 # Env: scrub everything, then setenv allowlist.
 ARGS+=(
     --clearenv
@@ -536,10 +545,14 @@ if [[ "${HERDR_ENV:-}" == "1" ]]; then
     for _herdr_var in \
         HERDR_ENV HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID \
         HERDR_BIN_PATH HERDR_SOCKET_PATH; do
-        [[ -n "${!_herdr_var:-}" ]] && \
-            ARGS+=( --setenv "$_herdr_var" "${!_herdr_var}" )
+        _herdr_value="${!_herdr_var:-}"
+        if [[ "$_herdr_var" == "HERDR_SOCKET_PATH" && -n "$HERDR_SANDBOX_SOCKET" ]]; then
+            _herdr_value="$HERDR_SANDBOX_SOCKET"
+        fi
+        [[ -n "$_herdr_value" ]] && \
+            ARGS+=( --setenv "$_herdr_var" "$_herdr_value" )
     done
-    unset _herdr_var
+    unset _herdr_var _herdr_value
 fi
 
 [[ -n "${LC_ALL:-}"     ]] && ARGS+=( --setenv LC_ALL     "$LC_ALL" )
@@ -910,7 +923,7 @@ if (( SELF_TEST )); then
     run pos "~/.local/bin writable"            "touch $HOME/.local/bin/.sandbox-test && rm $HOME/.local/bin/.sandbox-test && echo ok"
     if [[ "${HERDR_ENV:-}" == "1" ]]; then
       run pos "Herdr pane identity forwarded"  'test "$HERDR_ENV" = 1 && test -n "$HERDR_PANE_ID" && echo ok'
-      run pos "Herdr socket usable"            'test -n "$HERDR_SOCKET_PATH" && test -S "$HERDR_SOCKET_PATH" && "$HERDR_BIN_PATH" status >/dev/null && echo ok'
+      run pos "Herdr socket usable via /tmp"   'test "$HERDR_SOCKET_PATH" = /tmp/herdr.sock && test -S "$HERDR_SOCKET_PATH" && "$HERDR_BIN_PATH" status >/dev/null && echo ok'
     fi
     # GitHub token injected — only assert when the HOST can resolve one, so the
     # self-test stays green on logged-out / headless machines. Verifies both the

@@ -1,0 +1,26 @@
+name = "Sift"
+description = "Retrieval platform — main checkout"
+group = "NullSense"
+working_dir = "/home/nullsense/Programming/sift"
+
+[[tabs]]
+name = "Agent"
+
+[[tabs.panes]]
+label = "Codex"
+command = "codex"
+
+[[tabs.panes]]
+label = "Shell"
+split = "right"
+
+[[tabs]]
+name = "Review"
+command = "herdr-reviewr"
+
+[[tabs]]
+name = "Git"
+command = "lazygit"
+
+[[tabs]]
+name = "Dev"

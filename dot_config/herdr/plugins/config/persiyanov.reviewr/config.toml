@@ -1,0 +1,6 @@
+theme = "gruvbox"
+base_branches = ["main"]
+default_scope = "branch"
+navigator_position = "right"
+toggle_placement = "overlay"
+auto_open = false

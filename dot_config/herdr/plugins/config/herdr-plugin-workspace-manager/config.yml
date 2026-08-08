@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/razajamil/herdr-plugin-workspace-manager/v0.6.0/schema.json
+layouts:
+  - id: sift
+    setup:
+      command: bash scripts/worktree-setup.sh
+      blocking: true
+    tabs:
+      - title: Agent
+        panes:
+          - title: Codex
+            agent: codex
+            setup: true
+          - title: Shell
+            split: vertical
+            size: "35%"
+      - title: Review
+        panes:
+          - title: Reviewr
+            command: herdr-reviewr
+      - title: Git
+        panes:
+          - title: Lazygit
+            command: lazygit
+      - title: Dev
+        panes:
+          - title: Shell
+
+workspaces:
+  - repo: /home/nullsense/Programming/sift
+    defaultLayout: sift

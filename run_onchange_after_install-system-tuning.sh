@@ -214,6 +214,43 @@ ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue
 ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", ATTR{queue/scheduler}="bfq"
 UDEV_EOF
 
+write_root_file /etc/sysctl.d/99-zram.conf 644 <<'SYSCTL_EOF'
+# Prefer compressed zram to filesystem reclaim, without retaining cold pages as
+# aggressively as swappiness=180 did on this long-lived development workload.
+vm.swappiness = 133
+vm.watermark_boost_factor = 0
+vm.watermark_scale_factor = 125
+vm.page-cluster = 0
+vm.vfs_cache_pressure = 50
+SYSCTL_EOF
+
+write_root_file /etc/tmpfiles.d/99-transparent-hugepage.conf 644 <<'THP_EOF'
+# Keep transparent huge pages available to applications that explicitly opt in
+# (model runtimes, databases, etc.) without forcing them on every anonymous
+# allocation. Existing huge pages are left alone; this controls new allocations.
+w /sys/kernel/mm/transparent_hugepage/enabled - - - - madvise
+THP_EOF
+
+# Keep a small disk-backed safety valve below zram's priority. The dedicated
+# @swap subvolume is outside snapshots; btrfs-progs creates a preallocated,
+# NODATACOW swapfile suitable for Btrfs.
+if [[ ! -e /swap/swapfile ]]; then
+    echo ":: Creating 12 GiB Btrfs fallback swapfile…"
+    sudo btrfs filesystem mkswapfile --size 12g --uuid clear /swap/swapfile
+fi
+if ! swapon --noheadings --show=NAME | grep -Fxq /swap/swapfile; then
+    sudo swapon --priority 10 /swap/swapfile
+fi
+if ! grep -Eq '^[[:space:]]*/swap/swapfile[[:space:]]' /etc/fstab; then
+    printf '%s\n' '/swap/swapfile none swap defaults,pri=10 0 0' \
+        | sudo tee -a /etc/fstab >/dev/null
+fi
+
+# Apply the memory tuning live. Neither operation restarts applications.
+echo ":: Applying zram VM policy + transparent hugepage policy…"
+sudo sysctl --load /etc/sysctl.d/99-zram.conf
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/99-transparent-hugepage.conf
+
 # Re-apply the rules/links that can take effect live.
 echo ":: Reloading udev (I/O schedulers + WoL link)…"
 sudo udevadm control --reload

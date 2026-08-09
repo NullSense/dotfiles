@@ -33,6 +33,14 @@ vm.vfs_cache_pressure = 50
 SYSCTL
 sudo sysctl --system
 
+# Let latency-sensitive applications opt into THP explicitly. This keeps THP
+# available for model runtimes that use madvise while avoiding unconditional
+# promotion/compaction overhead in mixed compilation, browser, and gaming use.
+sudo tee /etc/tmpfiles.d/99-transparent-hugepage.conf > /dev/null <<'THP'
+w /sys/kernel/mm/transparent_hugepage/enabled - - - - madvise
+THP
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/99-transparent-hugepage.conf
+
 echo "=== [3/11] btrfs swapfile on @swap (12GB, low priority — overflow only) ==="
 # @swap subvolume is excluded from snapper snapshots (swap can't be snapshotted).
 # `btrfs filesystem mkswapfile` (btrfs-progs >=6.1) atomically does:

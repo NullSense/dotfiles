@@ -21,9 +21,11 @@ ZRAM
 sudo systemctl daemon-reexec
 sudo systemctl start systemd-zram-setup@zram0.service || true
 
-# Sysctl tuned for zram (high swappiness preferred for compressed swap)
+# Sysctl tuned for zram. 133 still treats compressed swap as cheaper than
+# filesystem paging, while avoiding the aggressive cold-page accumulation and
+# interactive refault latency observed with 180 on the long-lived dev workload.
 sudo tee /etc/sysctl.d/99-zram.conf > /dev/null <<'SYSCTL'
-vm.swappiness = 180
+vm.swappiness = 133
 vm.watermark_boost_factor = 0
 vm.watermark_scale_factor = 125
 vm.page-cluster = 0
@@ -38,7 +40,7 @@ echo "=== [3/11] btrfs swapfile on @swap (12GB, low priority — overflow only) 
 #   - fallocate (preallocated, no holes — also mandatory)
 #   - mkswap
 # Priority 10 < zram priority 100, so zram fills first and the disk swapfile
-# is overflow only. With 64GB RAM + 16GB zram, 12GB on-disk is plenty.
+# is overflow only. With 64GB RAM + 32GB logical zram, 12GB on-disk is plenty.
 if ! swapon --show | grep -q '/swap/swapfile'; then
   sudo btrfs filesystem mkswapfile --size 12g --uuid clear /swap/swapfile
   sudo swapon --priority 10 /swap/swapfile

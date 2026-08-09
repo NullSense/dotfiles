@@ -21,7 +21,7 @@ LoadCredentialEncrypted=agent-vault-master:%h/.config/credstore.encrypted/agent-
 # Pipe the unsealed credential into agent-vault's --password-stdin. The
 # password never enters the service's environment block (so it never appears
 # in `systemctl show` or `journalctl` envblob dumps).
-ExecStart=/bin/sh -c 'cat "$CREDENTIALS_DIRECTORY/agent-vault-master" | /usr/local/bin/agent-vault server --password-stdin'
+ExecStart=/bin/sh -c 'cat "$CREDENTIALS_DIRECTORY/agent-vault-master" | /usr/local/bin/agent-vault server --password-stdin --telemetry=false'
 
 # If the daemon crashes (OOM, panic), bring it back. systemd's default
 # StartLimitIntervalSec/StartLimitBurst caps will prevent a tight loop if

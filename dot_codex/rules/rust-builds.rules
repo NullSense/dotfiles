@@ -1,0 +1,35 @@
+# Rust compiler invocations need sccache's local daemon socket. Codex's inner
+# command sandbox blocks socket(2), so these trusted build commands run outside
+# that inner layer while remaining inside the outer agent-isolated sandbox.
+prefix_rule(
+    pattern = ["rtk", "cargo", ["check", "build", "test", "clippy", "nextest"]],
+    decision = "allow",
+    justification = "Rust builds need access to the local sccache daemon",
+    match = [
+        "rtk cargo check --workspace",
+        "rtk cargo build --release",
+        "rtk cargo test -p sift-indexer",
+        "rtk cargo clippy --workspace",
+        "rtk cargo nextest run",
+    ],
+    not_match = [
+        "rtk cargo run",
+        "rtk cargo install ripgrep",
+    ],
+)
+
+# Keep the same behavior for tools that invoke Cargo directly instead of via
+# the global RTK convention.
+prefix_rule(
+    pattern = ["cargo", ["check", "build", "test", "clippy", "nextest"]],
+    decision = "allow",
+    justification = "Rust builds need access to the local sccache daemon",
+    match = [
+        "cargo check --workspace",
+        "cargo test",
+    ],
+    not_match = [
+        "cargo run",
+        "cargo install ripgrep",
+    ],
+)

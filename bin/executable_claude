@@ -2,4 +2,27 @@
 # claude shim — PATH-shadows /home/nullsense/.local/bin/claude so every
 # invocation (any shell, any script, any exec syscall) routes through
 # agent-isolated. See ~/bin/_agent-shim for design notes.
-exec /home/nullsense/bin/_agent-shim claude "$@"
+
+# claude-mem starts its worker from Claude's SessionStart hook, but upstream
+# intentionally leaves that worker running after Claude exits. Stop it once the
+# last Claude process is gone so Chroma and the worker only live with Claude.
+stop_claude_mem_if_idle() {
+    pgrep -x claude >/dev/null 2>&1 && return 0
+
+    local worker plugin_root
+    worker=$(printf '%s\n' "$HOME"/.claude/plugins/cache/thedotmack/claude-mem/*/scripts/worker-service.cjs \
+        | sort -V | tail -n 1)
+    [[ -f "$worker" ]] || return 0
+    plugin_root=${worker%/scripts/worker-service.cjs}
+    node "$plugin_root/scripts/bun-runner.js" "$worker" stop >/dev/null 2>&1 || true
+
+    # v13.11 can exit its Bun controller without reaping the uv/chroma-mcp
+    # subprocesses. With no Claude process left, these exact data-dir owners are
+    # orphaned and safe to terminate.
+    pkill -TERM -f "chroma-mcp.*--data-dir $HOME/.claude-mem/chroma" >/dev/null 2>&1 || true
+}
+
+trap stop_claude_mem_if_idle EXIT
+status=0
+/home/nullsense/bin/_agent-shim claude "$@" || status=$?
+exit "$status"

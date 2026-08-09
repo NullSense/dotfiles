@@ -132,9 +132,9 @@ ensure_dashboards() {
 
 case "${1:-status}" in
   up)
-    # obs is ~6 GB and only needed to VIEW traces → off by default. `stack obs` (or STACK_OBS=1
-    # stack up) brings up otel-lgtm + Langfuse + collector; otherwise just the gateway DB.
-    if [ "${STACK_OBS:-0}" = 1 ]; then ensure_obs; else ensure_gateway_db; fi
+    # Observability is ~6 GB and only needed to VIEW traces. It is deliberately
+    # impossible for `stack up` to start it; `stack obs` is the sole opt-in path.
+    ensure_gateway_db
     # llama-swap + litellm are SYSTEMD user units now (2026-07-22): enabled at login,
     # Restart=on-failure, cgroup kill = no orphans. The old nohup+pidfile scheme tracked
     # the `infisical run` wrapper PID — when it died, orphaned litellm children kept
@@ -172,7 +172,8 @@ case "${1:-status}" in
     # key/config mgmt work immediately. Local logical names (summarize/rewrite→llama-swap :9292) 5xx
     # until you `stack up` their backends. Handy for config testing or cloud-only use. `stack down`
     # stops it. systemd-owned (litellm.service) — env in ~/bin/llm-servers/litellm-gateway.
-    if [ "${STACK_OBS:-0}" = 1 ]; then ensure_obs; else ensure_gateway_db; fi
+    # Keep gateway startup independent from the heavy observability stack.
+    ensure_gateway_db
     wait_tcp 127.0.0.1:5433 15 && echo "  • gateway DB ready :5433" \
       || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
     ensure_gateway_env

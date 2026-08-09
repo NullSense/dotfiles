@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Notify when a newer stable Agent Vault release is available.
+
+set -euo pipefail
+
+readonly API_URL="https://api.github.com/repos/Infisical/agent-vault/releases/latest"
+readonly USER_AGENT="agent-vault-update-check"
+
+export PATH="${HOME}/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin"
+
+for command_name in agent-vault curl jq notify-send; do
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    printf 'agent-vault-update-check: required command not found: %s\n' "${command_name}" >&2
+    exit 1
+  fi
+done
+
+installed_version="$(agent-vault version | sed -n '1s/^agent-vault //p')"
+if [[ -z "${installed_version}" ]]; then
+  printf 'agent-vault-update-check: could not determine installed version\n' >&2
+  exit 1
+fi
+
+release_json="$(
+  curl \
+    --proto '=https' \
+    --proto-redir '=https' \
+    --tlsv1.2 \
+    --connect-timeout 10 \
+    --max-time 30 \
+    --fail \
+    --silent \
+    --show-error \
+    --location \
+    --header 'Accept: application/vnd.github+json' \
+    --header "User-Agent: ${USER_AGENT}" \
+    "${API_URL}"
+)"
+
+latest_tag="$(jq -er '.tag_name' <<<"${release_json}")"
+release_url="$(jq -er '.html_url' <<<"${release_json}")"
+latest_version="${latest_tag#v}"
+
+newest_version="$(printf '%s\n%s\n' "${installed_version}" "${latest_version}" | sort -V | tail -n 1)"
+if [[ "${installed_version}" != "${latest_version}" && "${newest_version}" == "${latest_version}" ]]; then
+  printf -v notification_body \
+    'Installed: v%s\nAvailable: %s\n%s' \
+    "${installed_version}" \
+    "${latest_tag}" \
+    "${release_url}"
+  notify-send \
+    --app-name='Agent Vault' \
+    --urgency=normal \
+    --icon=software-update-available \
+    'Agent Vault update available' \
+    "${notification_body}"
+  printf 'agent-vault-update-check: v%s -> %s\n' "${installed_version}" "${latest_tag}"
+else
+  printf 'agent-vault-update-check: current v%s; latest %s\n' "${installed_version}" "${latest_tag}"
+fi

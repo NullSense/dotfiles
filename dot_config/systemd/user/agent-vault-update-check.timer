@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for Agent Vault updates every two days
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=2d
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target

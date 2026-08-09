@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for Agent Vault updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/agent-vault-update-check
+Nice=10
+IOSchedulingClass=idle

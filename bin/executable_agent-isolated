@@ -270,6 +270,28 @@ case "$WORKSPACE" in
 esac
 (( WORKSPACE_BIND == 0 )) && WORKSPACE="$HOME"
 
+# Give every linked Git worktree a stable in-sandbox source path. Rust debug
+# metadata and several compiler inputs include absolute paths, so mounting the
+# same repository at one canonical path lets sccache reuse objects across
+# agent worktrees. sccache client-side mode preprocesses inside this namespace;
+# the host daemon never needs to resolve the canonical path itself.
+HOST_WORKSPACE_ROOT="$WORKSPACE"
+CANONICAL_WORKSPACE_ROOT=""
+if (( WORKSPACE_BIND )) && [[ "${AGENT_CANONICAL_WORKSPACE:-1}" != "0" ]]; then
+    _repo_root="$(git -C "$WORKSPACE" rev-parse --path-format=absolute --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$_repo_root" && ( "$WORKSPACE" == "$_repo_root" || "$WORKSPACE" == "$_repo_root"/* ) ]]; then
+        _git_common_dir="$(git -C "$_repo_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+        if [[ -n "$_git_common_dir" ]]; then
+            _repo_name="$(basename "$(dirname "$_git_common_dir")")"
+            _repo_name="$(printf '%s' "$_repo_name" | tr -c 'A-Za-z0-9._-' '-')"
+            _repo_hash="$(printf '%s' "$_git_common_dir" | sha256sum | cut -c1-12)"
+            HOST_WORKSPACE_ROOT="$_repo_root"
+            CANONICAL_WORKSPACE_ROOT="/workspace/${_repo_name}-${_repo_hash}"
+        fi
+    fi
+    unset _repo_root _git_common_dir _repo_name _repo_hash
+fi
+
 # ─────────────────────── Build bwrap argv ─────────────────────────
 ARGS=()
 
@@ -417,6 +439,13 @@ fi
 if (( WORKSPACE_BIND )); then
     ARGS+=( --bind "$WORKSPACE" "$WORKSPACE" )
 fi
+if [[ -n "$CANONICAL_WORKSPACE_ROOT" ]]; then
+    ARGS+=(
+        --dir /workspace
+        --dir "$CANONICAL_WORKSPACE_ROOT"
+        --bind "$HOST_WORKSPACE_ROOT" "$CANONICAL_WORKSPACE_ROOT"
+    )
+fi
 
 # Config surface (rw, DEFAULT-ON as of 2026-05-28). Agents can edit dotfiles +
 # run the edit-source → `chezmoi apply` loop in-sandbox. Previously gated behind
@@ -537,12 +566,21 @@ ARGS+=(
     --setenv COLORTERM        "${COLORTERM:-truecolor}"
     --setenv LANG             "${LANG:-C.UTF-8}"
     --setenv PATH             "$HOME/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin"
+    --setenv SHELL            "/bin/bash"
+    --setenv CARGO_HOME       "$HOME/.cargo"
+    --setenv RUSTUP_HOME      "$HOME/.rustup"
     --setenv XDG_RUNTIME_DIR  "$XRD"
     --setenv WAYLAND_DISPLAY  "${WAYLAND_DISPLAY:-wayland-1}"
     --setenv EDITOR           "${EDITOR:-nvim}"
     --setenv VISUAL           "${VISUAL:-${EDITOR:-nvim}}"
     --setenv AGENT_ISOLATED   "1"
+    --setenv SCCACHE_CLIENT_SIDE "1"
+    --setenv AGENT_HOST_WORKSPACE_ROOT "$HOST_WORKSPACE_ROOT"
+    --setenv AGENT_CANONICAL_WORKSPACE_ROOT "$CANONICAL_WORKSPACE_ROOT"
 )
+if [[ -n "$CANONICAL_WORKSPACE_ROOT" && -x "$HOME/bin/sccache-worktree" ]]; then
+    ARGS+=( --setenv RUSTC_WRAPPER "$HOME/bin/sccache-worktree" )
+fi
 
 # Herdr injects pane identity and its local control socket into pane processes.
 # Preserve that capability across bwrap's --clearenv so an agent can use the
@@ -846,7 +884,8 @@ if (( ALLOW_DOCKER )); then
     unset _dsock _dhost
 fi
 
-# chdir
+# Keep tools such as Git and Moon on the real worktree path. The Rust compiler
+# wrapper alone enters the stable mirror so cache keys match across worktrees.
 ARGS+=( --chdir "$WORKSPACE" )
 
 # Optional per-host override.
@@ -929,6 +968,11 @@ if (( SELF_TEST )); then
     run pos "chezmoi source writable"          "touch $CHEZMOI_ROOT/.sandbox-test && rm $CHEZMOI_ROOT/.sandbox-test && echo ok"
     run pos "Codex source config exposed"      "test -s $CHEZMOI_ROOT/dot_codex/private_config.toml && test -w $CHEZMOI_ROOT/dot_codex/private_config.toml && echo ok"
     run pos "~/.local/bin writable"            "touch $HOME/.local/bin/.sandbox-test && rm $HOME/.local/bin/.sandbox-test && echo ok"
+    if [[ -n "$CANONICAL_WORKSPACE_ROOT" ]]; then
+      run pos "canonical workspace mirror"       'test "$(stat -c %d:%i "$AGENT_HOST_WORKSPACE_ROOT/Cargo.toml")" = "$(stat -c %d:%i "$AGENT_CANONICAL_WORKSPACE_ROOT/Cargo.toml")" && echo ok'
+      run pos "host workspace cwd retained"       'case "$PWD" in "$AGENT_HOST_WORKSPACE_ROOT"|"$AGENT_HOST_WORKSPACE_ROOT"/*) echo ok;; *) exit 1;; esac'
+      run pos "sccache worktree wrapper"          'test "$SCCACHE_CLIENT_SIDE" = 1 && test "$RUSTC_WRAPPER" = "$HOME/bin/sccache-worktree" && echo ok'
+    fi
     if [[ "${HERDR_ENV:-}" == "1" ]]; then
       run pos "Herdr pane identity forwarded"  'test "$HERDR_ENV" = 1 && test -n "$HERDR_PANE_ID" && echo ok'
       run pos "Herdr socket usable via /tmp"   'test "$HERDR_SOCKET_PATH" = /tmp/herdr.sock && test -S "$HERDR_SOCKET_PATH" && "$HERDR_BIN_PATH" status >/dev/null && echo ok'

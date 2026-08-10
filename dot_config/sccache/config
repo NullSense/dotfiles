@@ -1,0 +1,3 @@
+[cache.disk]
+dir = "/home/nullsense/.cache/sccache"
+size = 107374182400 # 100 GiB

@@ -1,0 +1,13 @@
+[Unit]
+Description=Shared sccache daemon for local and agent builds
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=SCCACHE_IDLE_TIMEOUT=0
+Environment=SCCACHE_CLIENT_SIDE=1
+ExecStart=%h/.local/bin/sccache --start-server
+ExecStop=%h/.local/bin/sccache --stop-server
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily bounded cleanup of Sift Cargo targets
+
+[Timer]
+OnBootSec=30min
+OnUnitActiveSec=1d
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

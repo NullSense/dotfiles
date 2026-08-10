@@ -1,0 +1,11 @@
+[Unit]
+Description=Bound Sift Cargo targets across worktrees
+ConditionPathIsDirectory=%h/Programming/sift/.git
+ConditionFileIsExecutable=%h/Programming/sift/scripts/target-maintenance.sh
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Programming/sift
+ExecStart=/usr/bin/bash %h/Programming/sift/scripts/target-maintenance.sh --all-worktrees
+Nice=15
+IOSchedulingClass=idle

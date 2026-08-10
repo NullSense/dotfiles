@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Normalize Rust compiler paths to an agent-stable bind mount before sccache.
+
+set -euo pipefail
+
+host_root="${AGENT_HOST_WORKSPACE_ROOT:?missing AGENT_HOST_WORKSPACE_ROOT}"
+canonical_root="${AGENT_CANONICAL_WORKSPACE_ROOT:?missing AGENT_CANONICAL_WORKSPACE_ROOT}"
+
+# trybuild snapshots compiler diagnostics, including source paths. Preserve its
+# native worktree paths so golden stderr remains stable and reviewable.
+case "$PWD" in
+    "$host_root"/target/tests/trybuild | "$host_root"/target/tests/trybuild/*)
+        exec sccache "$@"
+        ;;
+esac
+for argument in "$@"; do
+    case "$argument" in
+        *"$host_root/target/tests/trybuild"* | "$host_root"/*/tests/ui/*)
+            exec sccache "$@"
+            ;;
+    esac
+done
+
+case "$PWD" in
+    "$host_root") canonical_cwd="$canonical_root" ;;
+    "$host_root"/*) canonical_cwd="$canonical_root/${PWD#"$host_root"/}" ;;
+    # Registry and Git dependencies already live at stable shared paths. Keep
+    # their cwd while still normalizing worktree-local output/extern arguments.
+    *) canonical_cwd="$PWD" ;;
+esac
+
+rewrite_value() {
+    printf '%s' "${1//"$host_root"/"$canonical_root"}"
+}
+
+# Cargo and build scripts expose more path-bearing variables than the obvious
+# manifest/output quartet (for example LD_LIBRARY_PATH, CARGO_TARGET_TMPDIR,
+# DEP_* metadata, and CARGO_BIN_EXE_*). Any one of them can enter rustc's cache
+# key. Rewrite every exported value containing the worktree root so new Cargo
+# variables cannot silently re-fragment the cache.
+while IFS= read -r -d '' entry; do
+    variable="${entry%%=*}"
+    value="${entry#*=}"
+    if [[ "$variable" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && "$value" == *"$host_root"* ]]; then
+        printf -v "$variable" '%s' "$(rewrite_value "$value")"
+        export "$variable=${!variable}"
+    fi
+done </proc/self/environ
+unset entry variable value
+
+declare -a rewritten=()
+for argument in "$@"; do
+    rewritten+=("$(rewrite_value "$argument")")
+done
+
+cd "$canonical_cwd"
+exec sccache "${rewritten[@]}"

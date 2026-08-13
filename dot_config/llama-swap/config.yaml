@@ -747,39 +747,44 @@ models:
     description: "vision·ocr · Chandra-OCR-2 Q5_K_M ~3.9GB (LM + f16 mmproj). Sharper OCR on tables/forms/small digits than granite. On-demand."
     metadata: { engine: "llama.cpp", hf: "datalab-to/chandra-ocr-2", class: vision, thinking: na, best_for: "high-fidelity OCR — tables, forms, license plates, small text", tags: [vision, ocr, local, chandra, multimodal] }
 
-  # ── Documents-pipeline OCR cascade (3 GGUF VLMs on CUDA) ─────────────────────────────────────
+  # ── Documents-pipeline OCR cascade (3 VLMs on vLLM docker, CUDA) ─────────────────────────────
   #    Served on-demand for ~/Documents/pipeline engines.route_scanned (best-first → escalate to High
-  #    agreement → mark needs_claude). GGUF llama.cpp-cuda is the GPU OCR path on the 5090. Model ids
-  #    below MUST match settings.ocr.engines[].model in the pipeline. ttl 300 = evict 5 min idle
-  #    (tiny, ~1.2-1.7GB). NOTE: these 3 GGUFs were swept in the Jun-2026 disk cleanup — re-download
-  #    before use (HF: PaddlePaddle/PaddleOCR-VL-1.6-GGUF, JamePeng2023/MinerU2.5-Pro-2605-1.2B-GGUF,
-  #    ggml-org/GLM-OCR-GGUF).
+  #    agreement → mark needs_claude). Migrated from llama.cpp GGUF to vLLM docker (vllm/vllm-openai
+  #    :v0.26.0, cu130 default = sm_120 OK on 5090) 2026-08-11 for continuous batching + chunked
+  #    prefill. Model ids below MUST match settings.ocr.engines[].model in the pipeline. ttl 3600 =
+  #    keep warm through a full docs-batch. gpu-memory-utilization is a FRACTION OF TOTAL (0.2≈6.4GB)
+  #    — these three co-resident ≈ 18-19GB, so the `ocr` matrix set evicts the sift stack while they
+  #    run (approved). HF safetensors download on first launch into the mounted cache
+  #    (~/.cache/huggingface). Served via the standard OpenAI /v1/chat/completions interface.
   paddleocr-vl:
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.cache/huggingface/hub/models--PaddlePaddle--PaddleOCR-VL-1.6-GGUF/snapshots/511b09642bb324401f15f97cc23bc67e8f0a291d/PaddleOCR-VL-1.6-GGUF.gguf --mmproj /home/nullsense/.cache/huggingface/hub/models--PaddlePaddle--PaddleOCR-VL-1.6-GGUF/snapshots/511b09642bb324401f15f97cc23bc67e8f0a291d/PaddleOCR-VL-1.6-GGUF-mmproj.gguf --device CUDA0 --n-gpu-layers 99 --ctx-size 8192 --temp 0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-ocr-paddle --init --gpus all -p 127.0.0.1:${PORT}:8000 -v /home/nullsense/.cache/huggingface:/root/.cache/huggingface vllm/vllm-openai:v0.26.0 PaddlePaddle/PaddleOCR-VL-1.6 --served-model-name paddleocr-vl --trust-remote-code --max-model-len 16384 --max-num-batched-tokens 8192 --no-enable-prefix-caching --gpu-memory-utilization 0.18 --mm-processor-cache-gb 0
+    cmdStop: docker stop swap-ocr-paddle
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300
-    name: "PaddleOCR-VL-1.6 (SOTA doc OCR, CUDA)"
+    ttl: 3600
+    name: "PaddleOCR-VL-1.6 (SOTA doc OCR, vLLM)"
     aliases: [paddleocr-vl]
-    description: "ocr · PaddleOCR-VL-1.6 ~1.73GB (ERNIE-4.5-0.3B + SigLIP). SOTA OmniDocBench 96.33. Documents pipeline PRIMARY OCR (HTTP). Prompt 'OCR:'. On-demand."
-    metadata: { engine: "llama.cpp", hf: "PaddlePaddle/PaddleOCR-VL-1.6-GGUF", class: ocr, thinking: na, best_for: "document OCR — text/tables/formulas, primary cascade engine", tags: [ocr, vision, local, paddleocr, multimodal] }
+    description: "ocr · PaddleOCR-VL-1.6 0.9B bf16 (~2.1GB) via vLLM v0.26.0. SOTA OmniDocBench 96.33. Documents pipeline PRIMARY OCR (HTTP). Prompt 'OCR:'. On-demand (evicts sift during OCR runs)."
+    metadata: { engine: "vllm", hf: "PaddlePaddle/PaddleOCR-VL-1.6", class: ocr, thinking: na, best_for: "document OCR — text/tables/formulas, primary cascade engine", tags: [ocr, vision, local, paddleocr, multimodal, vllm] }
 
   mineru:
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.cache/huggingface/hub/models--JamePeng2023--MinerU2.5-Pro-2605-1.2B-GGUF/snapshots/930f9067342afd5a1dbbefdc920a1b0deaba6f53/MinerU2.5-Pro-2605-1.2b-Q8_0.gguf --mmproj /home/nullsense/.cache/huggingface/hub/models--JamePeng2023--MinerU2.5-Pro-2605-1.2B-GGUF/snapshots/930f9067342afd5a1dbbefdc920a1b0deaba6f53/mmproj-MinerU2.5-Pro-2605-Q8_0.gguf --device CUDA0 --n-gpu-layers 99 --ctx-size 20480 --temp 0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-ocr-mineru --init --gpus all -p 127.0.0.1:${PORT}:8000 -v /home/nullsense/.cache/huggingface:/root/.cache/huggingface vllm/vllm-openai:v0.26.0 opendatalab/MinerU2.5-Pro-2605-1.2B --served-model-name mineru --max-model-len 8192 --gpu-memory-utilization 0.25 --mm-processor-cache-gb 0
+    cmdStop: docker stop swap-ocr-mineru
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300
-    name: "MinerU2.5-Pro-2605 (German doc OCR, CUDA)"
+    ttl: 3600
+    name: "MinerU2.5-Pro-2605 (German doc OCR, vLLM)"
     aliases: [mineru]
-    description: "ocr · MinerU2.5-Pro-2605-1.2B Q8_0 ~1.18GB (Qwen2.5-VL). OmniDocBench 95.69, native German (best umlaut fidelity). Documents pipeline 2nd consensus. Prompt '\\nText Recognition:' + sys. On-demand."
-    metadata: { engine: "llama.cpp", hf: "JamePeng2023/MinerU2.5-Pro-2605-1.2B-GGUF", class: ocr, thinking: na, best_for: "German document OCR — end-to-end page parse, cross-check engine", tags: [ocr, vision, local, mineru, multimodal] }
+    description: "ocr · MinerU2.5-Pro-2605-1.2B bf16 (native Qwen2VL) via vLLM. OmniDocBench 95.72, native German (best umlaut fidelity). Documents pipeline 2nd consensus. Prompt '\nText Recognition:' + sys. CAVEAT: bare vLLM WITHOUT MinerULogitsProcessor (mineru-vl-utils not in stock image) degenerates to '!!!!...' — needs custom image w/ pip install 'mineru-vl-utils[vllm]' + --logits_processors. max_model_len capped at model's max_position_embeddings=8192. On-demand."
+    metadata: { engine: "vllm", hf: "opendatalab/MinerU2.5-Pro-2605-1.2B", class: ocr, thinking: na, best_for: "German document OCR — end-to-end page parse, cross-check engine", tags: [ocr, vision, local, mineru, multimodal, vllm] }
 
   glm-ocr:
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.cache/huggingface/hub/models--ggml-org--GLM-OCR-GGUF/snapshots/65a42de1148dbed2297e922b5dbc7d9b70c36578/GLM-OCR-Q8_0.gguf --mmproj /home/nullsense/.cache/huggingface/hub/models--ggml-org--GLM-OCR-GGUF/snapshots/65a42de1148dbed2297e922b5dbc7d9b70c36578/mmproj-GLM-OCR-Q8_0.gguf --device CUDA0 --n-gpu-layers 99 --flash-attn off --fit off --ctx-size 12000 --temp 0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-ocr-glm --init --gpus all -p 127.0.0.1:${PORT}:8000 -v /home/nullsense/.cache/huggingface:/root/.cache/huggingface vllm/vllm-openai:v0.26.0 zai-org/GLM-OCR --served-model-name glm-ocr --max-model-len 12000 --max-num-batched-tokens 8192 --limit-mm-per-prompt '{"image":1}' --gpu-memory-utilization 0.15 --mm-processor-cache-gb 0
+    cmdStop: docker stop swap-ocr-glm
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300
-    name: "GLM-OCR (3rd consensus, CUDA)"
+    ttl: 3600
+    name: "GLM-OCR (3rd consensus, vLLM)"
     aliases: [glm-ocr]
-    description: "ocr · GLM-OCR Q8_0 (official ggml-org GGUF). OmniDocBench ~95.15. Documents pipeline 3rd consensus (rarely reached). Prompt 'OCR'. needs --flash-attn off. On-demand."
-    metadata: { engine: "llama.cpp", hf: "ggml-org/GLM-OCR-GGUF", class: ocr, thinking: na, best_for: "document OCR — third independent consensus engine", tags: [ocr, vision, local, glm, multimodal] }
+    description: "ocr · GLM-OCR 0.9B bf16 via vLLM (native glm_ocr). OmniDocBench ~95.15. Documents pipeline 3rd consensus (rarely reached). Prompt 'Text Recognition:' (per zai-org model card). MTP spec-decode OFF — needs vLLM nightly + transformers>=5.0.0 (stock 0.26.0 lacks MTP weights). 3721-token encoder ceiling → max-num-batched-tokens 8192 + limit-mm 1. On-demand."
+    metadata: { engine: "vllm", hf: "zai-org/GLM-OCR", class: ocr, thinking: na, best_for: "document OCR — third independent consensus engine", tags: [ocr, vision, local, glm, multimodal, vllm] }
 
   # ── GLiNER2 NER is ORACLE-OWNED, not in this stack (decided 2026-06-18). Oracle runs it
   #     in-process/sidecar with GLINER2_DEVICE=auto (GPU when a card is present, CPU fallback).
@@ -820,7 +825,15 @@ matrix:
     a: nanbeige4.2-3b          # vLLM looped reasoner, 32k fp8-KV — 13.2 GB MEASURED (see budget)
     A: nanbeige-sift           # same weights @64k, no spec — sized to co-reside with n+m+x
     x: tei-sparse              # TEI SPLADE 67M (~2.5 GB peak: MLM logits, not weights)
-  evict_costs: { A: 6, e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8 }
+    P: paddleocr-vl            # Documents OCR cascade, PRIMARY  — vLLM, GPU_UTIL 0.18 (~5.8 GB RESERVED)
+    M: mineru                  # Documents OCR cascade, fallback 1 — vLLM, GPU_UTIL 0.25 (~8.0 GB RESERVED)
+    G: glm-ocr                 # Documents OCR cascade, fallback 2 — vLLM, GPU_UTIL 0.15 (~4.8 GB RESERVED)
+  # OCR evict costs are high for the same reason as x: the cost is reload-stalls per DOCUMENT,
+  # not GB. A vault re-verify walks the cascade per scanned page; evicting mid-run re-pays a
+  # full model load each time. vLLM gpu-memory-utilization is a FRACTION OF TOTAL (32 GB), so
+  # the reservation exceeds the bf16 weights; P+M+G ≈ 18.6 GB reserved → the `ocr` set runs
+  # solo-evicting (VRAM is the binding constraint, sift stack reloads after the OCR run).
+  evict_costs: { A: 6, e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8, P: 8, M: 8, G: 7 }
 
   # ── MEASURED VRAM BUDGET, 2026-08-06 (nvidia-smi, not arithmetic) ─────────────────
   # Every other number on this page is a hand estimate. These three are not, and where
@@ -912,6 +925,22 @@ matrix:
     # Sift can use either chat model — `A` for quality, `d` (sift-agent) when dictation
     # must stay hot — but not both at once.
     sift-chat: "A & n & x & m"
+    # Documents-vault OCR cascade (2026-08-11, migrated GGUF→vLLM docker). Before the set existed
+    # the three OCR VLMs ran SOLO and evicted the previous one — engines.py walks primary ->
+    # fallback -> fallback WITHIN A SINGLE DOCUMENT whenever numeric agreement is low, so a scanned
+    # doc could pay three full model loads, and the next doc paid them again. Now they co-reside.
+    #   P ~5.8 + M ~8.0 + G ~4.8 + t 0.4 ~= 19.0 GB RESERVED (gpu-memory-utilization of 32 GB total,
+    #   vLLM reserves ahead even for small weights). The sift stack is NOT in this set: 19 GB +
+    #   sift trio (12.3 GB) would exceed the card, so an OCR run evicts sift and reloads it after.
+    #
+    # `d` (rewrite, 11 GB) is DELIBERATELY EXCLUDED, unlike most sets here. The Documents
+    # pipeline runs its own in-process PP-OCRv6/PP-StructureV3 on the SAME card via
+    # paddlepaddle-gpu (~2 GB, observed during a run) and llama-swap cannot see that
+    # allocation — the identical blind spot that made the old standalone vLLM on :8100 corrupt
+    # every estimate on this page. Adding d would push the visible total over budget and the
+    # true total to ~27 GB, betting the OCR run on an invisible 2 GB. Dictation reloads
+    # after a vault run; a failed OCR cascade silently degrades legal documents.
+    ocr: "P & M & G & t"
     # ⚠ REMOVED 2026-08-06: `rag-nanbeige: "a & n & m & t"` was IMPOSSIBLE and this set
     # existing is what made every nanbeige start fail with "upstream command exited
     # prematurely" while the retrieval models were resident. The solver believed the

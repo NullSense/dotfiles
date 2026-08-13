@@ -267,12 +267,58 @@ model_list:
       tags: ["summarization", "cloud", "deepseek", "cheap"]
       source_url: https://openrouter.ai/deepseek/deepseek-v4-flash
 
-  # ── summarize-fallback: env-independent DeepSeek-v4-flash (gateway failure fallback) ──
-  #    No supported_environments key → loaded in BOTH dev and prod, so a failed
-  #    local Gemma (dev) fails over to DeepSeek cloud "via litellm". Requires
-  #    OPENROUTER_API_KEY in the gateway env (same as the prod summarize deploys).
+  # ── summarize-fallback: the rung that catches a failed primary ────────────────
+  #    DEV → llama-swap `gemma-4-e4b` (llama.cpp E4B, MODE=sum).
+  #
+  #    The ONE property that matters in a fallback is a LOWER FLOOR than the primary
+  #    — it is invoked precisely when the primary could not run. The 2026-08-13
+  #    blackout: `summarize` is VRAM-adaptive and exits 1 below an 8 GB free-VRAM
+  #    floor (llama-summarize-auto:38-40); during an Oracle ingest GLiNER2-large held
+  #    the card, so it refused, and the only other rung was cloud DeepSeek — dead on
+  #    OpenRouter 402. All 124 summaries lost.
+  #
+  #    `gemma-4-e4b` is the SAME binary+weights the primary execs when it picks E4B
+  #    (llama-summarize-auto:37), minus the pre-flight gate: llama.cpp allocates the
+  #    ~6 GB it actually needs instead of pre-reserving a fraction, so it starts in
+  #    the 6-8 GB band where the primary gives up. Same benched quality (4.96
+  #    faithfulness / 0% fabrication), no credits to exhaust.
+  #
+  #    ⚠ NOT `rewrite`, the obvious-looking pick: ttl:0 means never EVICTED once
+  #    started, not already running — and it reserves GPU_UTIL=0.42 ≈ 13.2 GB, so it
+  #    fails to start in exactly the squeeze it would be called for (verified live
+  #    2026-08-13: "Free memory 11.04 GiB < desired 13.19 GiB"). A fallback with a
+  #    HIGHER floor than the primary is not a fallback.
+  #    PROD → cloud DeepSeek-v4-flash (no local GPU there); needs OPENROUTER_API_KEY.
 - model_name: summarize-fallback
-  litellm_params:                      # BOTH envs → cloud DeepSeek-v4-flash via OpenRouter
+  litellm_params:                      # DEV → low-floor local llama.cpp E4B
+    model: openai/gemma-4-e4b
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "summarization"
+    - "local"
+    - "gemma"
+    - "fallback"
+    - "low-vram-floor"
+  model_info:
+    engine: "llama.cpp"
+    hf_repo: "google/gemma-4-E4B-it"
+    supported_environments: ["development"]
+    mode: chat
+    supports_function_calling: true
+    max_input_tokens: 65536
+    max_output_tokens: 8192
+    metadata:
+      display_name: "Summarize-fallback · Gemma-4 E4B (local llama.cpp, low floor)"
+      backend: "llama.cpp E4B via llama-swap `gemma-4-e4b` (MODE=sum, ttl 300)"
+      vram: "~6 GB allocated on demand (no pre-reserved fraction)"
+      note: "same weights as the primary's E4B branch, without its 8 GB pre-flight refusal"
+      tags: ["summarization", "local", "gemma", "fallback"]
+
+- model_name: summarize-fallback
+  litellm_params:                      # PROD → cloud DeepSeek-v4-flash via OpenRouter
     model: openrouter/deepseek/deepseek-v4-flash
     api_key: "os.environ/OPENROUTER_API_KEY"
     input_cost_per_token: 9e-08
@@ -284,6 +330,7 @@ model_list:
     - "fallback"
   model_info:
     engine: "openrouter"
+    supported_environments: ["production"]
     mode: chat
     supports_function_calling: true
     input_cost_per_token: 0.00000009
@@ -291,7 +338,7 @@ model_list:
     max_input_tokens: 131072
     max_output_tokens: 8192
     metadata:
-      display_name: "Summarize-fallback · DeepSeek-v4-flash (cloud, both envs)"
+      display_name: "Summarize-fallback · DeepSeek-v4-flash (cloud, prod)"
       backend: "OpenRouter · deepseek/deepseek-v4-flash"
       vram: "0 (hosted)"
       tags: ["summarization", "cloud", "deepseek", "fallback"]

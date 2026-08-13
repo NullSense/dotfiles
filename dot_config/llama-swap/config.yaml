@@ -235,10 +235,10 @@ models:
     # native venv remains the dev fallback: swap `docker run …` for
     # `.venv/bin/infinity_emb v2 --host 127.0.0.1 --port ${PORT} <same flags>`).
     # Score parity container↔native verified (bge 0.45535 both).
-    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-f2llm --init --gpus all -p 127.0.0.1:${PORT}:7997 -v /home/nullsense/.cache/huggingface:/hf infinity-serving:local --engine torch --device cuda --dtype float16 --no-bettertransformer --model-id codefuse-ai/F2LLM-v2-1.7B --revision 2af800f9d08546d675b1c7c522351ce1d900dc2e --served-model-name f2llm-embed --batch-size 128 --url-prefix /v1
+    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-f2llm --init --gpus all -p 127.0.0.1:${PORT}:7997 -v /home/nullsense/.cache/huggingface:/hf infinity-serving:local --engine torch --device cuda --dtype float16 --no-bettertransformer --model-id codefuse-ai/F2LLM-v2-1.7B --revision 2af800f9d08546d675b1c7c522351ce1d900dc2e --served-model-name codefuse-ai/F2LLM-v2-1.7B@2af800f9d08546d675b1c7c522351ce1d900dc2e --batch-size 128 --url-prefix /v1
     cmdStop: docker stop swap-f2llm
     proxy: http://127.0.0.1:${PORT}
-    useModelName: f2llm-embed
+    useModelName: codefuse-ai/F2LLM-v2-1.7B@2af800f9d08546d675b1c7c522351ce1d900dc2e
     ttl: 300
     name: "F2LLM-v2-1.7B (Infinity, 2048-dim)"
     aliases: [embed-legal, f2llm, "codefuse-ai/F2LLM-v2-1.7B"]

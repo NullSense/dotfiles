@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# hypr-move — group-aware window move for SUPER+SHIFT+hjkl.
+#
+# WHY
+# ---
+# In i3, `move left`/`move right` inside a tabbed container REORDERS the tabs,
+# and only pops the window out once you push past the first/last tab. Hyprland
+# splits that across two dispatchers and has no option to combine them:
+#
+#   movegroupwindow b|f    reorders within the group, but wraps around forever,
+#                          so on its own you can never leave the group.
+#   movewindoworgroup <d>  pops out of the group (or merges into one in that
+#                          direction), but never reorders — so bound directly it
+#                          ejects the window on the very first press, which is
+#                          what "why can't I move within the group" was about.
+#
+# So: reorder while there is another tab that way, and fall through to
+# movewindoworgroup at the boundary. That reproduces i3's behaviour exactly —
+# shuffle along the tabs, and the press that would have gone past the end takes
+# you out instead.
+#
+# Perpendicular moves (u/d with a horizontal groupbar) always fall through, so
+# SUPER+SHIFT+k/j remains the quick way out of a group.
+#
+# NB assumes a horizontal groupbar, i.e. group:groupbar:stacked = false (the
+# default, and what looknfeel.conf sets). If you ever switch to a stacked
+# groupbar the tab axis becomes vertical and TAB_PREV/TAB_NEXT should move to
+# u/d.
+
+set -uo pipefail
+
+TAB_PREV=l
+TAB_NEXT=r
+
+dir="${1:-}"
+case "$dir" in
+l | r | u | d) ;;
+*)
+    echo "usage: hypr-move {l|r|u|d}" >&2
+    exit 2
+    ;;
+esac
+
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" 2>/dev/null | head -1)
+    export HYPRLAND_INSTANCE_SIGNATURE
+fi
+
+fallthrough() { exec hyprctl dispatch movewindoworgroup "$dir"; }
+
+# `.grouped` is the group's member list in tab order; find where we sit in it.
+# NB bind the window object as $w FIRST. Writing `$g | index(.address)` looks
+# right but reprojects `.` onto the array, so `.address` throws "Cannot index
+# array with string" — jq exits non-zero, idx/count come back empty, and every
+# press silently falls through to an eject instead of reordering.
+read -r idx count < <(
+    hyprctl activewindow -j 2>/dev/null |
+        jq -r '. as $w | ($w.grouped // []) as $g
+               | "\(($g | index($w.address)) // -1) \($g | length)"' 2>/dev/null
+) || fallthrough
+
+[ "${count:-0}" -gt 1 ] || fallthrough
+[ "${idx:--1}" -ge 0 ] || fallthrough
+
+case "$dir" in
+"$TAB_PREV") [ "$idx" -gt 0 ] && exec hyprctl dispatch movegroupwindow b ;;
+"$TAB_NEXT") [ "$idx" -lt "$((count - 1))" ] && exec hyprctl dispatch movegroupwindow f ;;
+esac
+
+fallthrough

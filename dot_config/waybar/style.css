@@ -184,6 +184,28 @@ window#waybar.hidden { opacity: 0; }
 }
 
 /* ============================================================
+ * Preselect — armed i3-style split direction (SUPER+V)
+ * Yellow to match the BRIGHT gradient stop that ~/bin/hypr-preselect
+ * paints onto the armed window's border, so bar and border read as one
+ * signal. Collapses to nothing when disarmed (empty text + no padding).
+ * ============================================================ */
+#custom-preselect.armed {
+    background: @yellow;
+    color: @bg0;
+    border-color: @yellow;
+    font-weight: bold;
+    padding: 2px 10px;
+    margin-left: 4px;
+}
+
+#custom-preselect.idle {
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+}
+
+/* ============================================================
  * Media — left side, italic, easy on the eye, expands to fit title
  * ============================================================ */
 #custom-media {

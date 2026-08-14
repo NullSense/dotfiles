@@ -16,7 +16,8 @@
         "custom/workspaces",
         "hyprland/window",
         "custom/media",
-        "hyprland/submap"
+        "hyprland/submap",
+        "custom/preselect"
     ],
     "modules-center": [
         "clock"
@@ -167,6 +168,19 @@
     "hyprland/submap": {
         "format": "   {}",
         "tooltip": false
+    },
+    // Preselect readout — the textual half of the i3 split indicator. The
+    // primary hint is the armed window's border gradient (see
+    // ~/bin/hypr-preselect); this pill is the peripheral-vision confirmation,
+    // and sits next to the submap module because both show transient modal
+    // state. Signal-driven only (interval 0): hypr-preselect sends RTMIN+14 on
+    // every arm/clear, so there is no polling cost while disarmed.
+    "custom/preselect": {
+        "exec": "~/bin/hypr-preselect status",
+        "return-type": "json",
+        "interval": 0,
+        "signal": 14,
+        "tooltip": true
     },
     "clock": {
         "format": "{:%a  %H:%M}",

@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# hypr-preselect — i3-style "where will the next window land?" for Hyprland's dwindle layout.
+#
+# WHY THIS EXISTS
+# ---------------
+# i3/sway feel deterministic because `split h` / `split v` are explicit, sticky,
+# and *visible* (i3 draws the split indicator on the parent container). Hyprland's
+# dwindle has the mechanism — `layoutmsg preselect <dir>` — but renders no hint at
+# all (upstream feature request hyprwm/Hyprland#9187, still open). So we draw it.
+#
+# HOW THE INDICATOR WORKS
+# -----------------------
+# We recolor *only the focused window's* border into a two-stop gradient running
+# dim -> bright, angled so the BRIGHT end lands exactly on the edge that is about
+# to be split. That is literally "seeing where the next edge will break".
+#
+# The angle convention is not documented; it was read off the gradient shader
+# (src/render/shaders/glsl/gradient.glsl, getOkColorForCoordArray1):
+#   progress = y*sin(a) + x*(1-sin(a))   with gradient[0] at progress 0
+#   a=0deg   -> progress follows x  -> last color on the RIGHT edge
+#   a=90deg  -> progress follows y  -> last color on the BOTTOM edge
+#   a=180deg -> x mirrored          -> last color on the LEFT edge
+#   a=270deg -> y mirrored          -> last color on the TOP edge
+# i.e. the angle IS the direction, and the last stop lands on that edge.
+#
+# Per-window recolor uses `hyprctl dispatch setprop <win> active_border_color`,
+# which leaves the global theme colors untouched (no restore-on-crash hazard).
+#
+# dwindle's preselect is ONE-SHOT: it is consumed by the next window that opens.
+# `hypr-preselect watch` tails the Hyprland event socket and clears the border the
+# moment that happens, so the indicator can never lie about being armed.
+#
+# USAGE
+#   hypr-preselect r|l|u|d   arm a direction
+#   hypr-preselect cycle     off -> down -> right -> off   (the i3 mod+v muscle memory)
+#   hypr-preselect clear     disarm
+#   hypr-preselect status    waybar JSON on stdout
+#   hypr-preselect watch     event-socket daemon (started from hypr autostart.conf)
+
+set -uo pipefail
+
+STATE="${XDG_RUNTIME_DIR:-/tmp}/hypr-preselect.state"
+WAYBAR_SIGNAL=14 # keep in sync with custom/preselect in waybar/config.jsonc
+
+# Gradient stops. DIM matches the inactive-border grey so the armed window still
+# reads as themed; BRIGHT is gruvbox yellow — a colour used nowhere else in the
+# border palette, so an armed window is unmistakable at a glance.
+DIM="rgba(504945ff)"
+BRIGHT="rgba(fabd2fff)"
+
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" 2>/dev/null | head -1)
+    export HYPRLAND_INSTANCE_SIGNATURE
+fi
+
+angle_of() { case "$1" in r) echo 0 ;; d) echo 90 ;; l) echo 180 ;; u) echo 270 ;; esac; }
+arrow_of() { case "$1" in r) echo "▸" ;; d) echo "▾" ;; l) echo "◂" ;; u) echo "▴" ;; esac; }
+label_of() { case "$1" in r) echo right ;; d) echo down ;; l) echo left ;; u) echo up ;; esac; }
+
+active_addr() { hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty'; }
+
+# Read "<dir> <address>" from the state file; empty string when disarmed.
+read_state() { [ -r "$STATE" ] && cat "$STATE" || true; }
+state_dir() { read_state | cut -d' ' -f1; }
+state_addr() { read_state | cut -d' ' -f2; }
+
+poke_waybar() { pkill -RTMIN+$WAYBAR_SIGNAL waybar 2>/dev/null || true; }
+
+# Drop the gradient from a window, tolerating a window that has since closed.
+unpaint() {
+    [ -n "${1:-}" ] || return 0
+    hyprctl dispatch setprop "address:$1" active_border_color unset >/dev/null 2>&1 || true
+}
+
+paint() {
+    local addr=$1 dir=$2
+    hyprctl dispatch setprop "address:$addr" active_border_color \
+        "$DIM $BRIGHT $(angle_of "$dir")deg" >/dev/null 2>&1 || true
+}
+
+arm() {
+    local dir=$1 addr
+    addr=$(active_addr)
+    # preselect only means anything for a tiled window; refuse loudly rather than
+    # arm an indicator that dwindle will silently ignore.
+    if [ -z "$addr" ] || [ "$(hyprctl activewindow -j | jq -r '.floating')" = "true" ]; then
+        hyprctl notify -1 1500 0 "preselect needs a tiled window" >/dev/null 2>&1 || true
+        return 1
+    fi
+    unpaint "$(state_addr)"
+    hyprctl dispatch layoutmsg "preselect $dir" >/dev/null 2>&1
+    paint "$addr" "$dir"
+    printf '%s %s\n' "$dir" "$addr" >"$STATE"
+    poke_waybar
+}
+
+clear_preselect() {
+    unpaint "$(state_addr)"
+    # Any non-direction token cancels dwindle's pending override.
+    hyprctl dispatch layoutmsg "preselect none" >/dev/null 2>&1
+    rm -f "$STATE"
+    poke_waybar
+}
+
+# off -> down -> right -> off. Two directions is exactly i3's model (`split v`,
+# `split h`); the third state is the disarm that i3 doesn't need but we do,
+# because Hyprland's preselect is an override rather than a container property.
+cycle() {
+    case "$(state_dir)" in
+    d) arm r ;;
+    r) clear_preselect ;;
+    *) arm d ;;
+    esac
+}
+
+status() {
+    local dir
+    dir=$(state_dir)
+    if [ -z "$dir" ]; then
+        printf '{"text":"","tooltip":"","class":"idle"}\n'
+    else
+        printf '{"text":"%s split %s","tooltip":"Next window opens %s of the focused window","class":"armed"}\n' \
+            "$(arrow_of "$dir")" "$(label_of "$dir")" "$(label_of "$dir")"
+    fi
+}
+
+# Tail the Hyprland event socket. Two events matter:
+#   openwindow   — dwindle consumed the preselect; the indicator must go away.
+#   activewindowv2 — focus moved; the preselect is still armed but now applies to
+#                    a different window, so walk the gradient over to it.
+watch() {
+    local sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+    rm -f "$STATE"
+    socat -U - "UNIX-CONNECT:$sock" 2>/dev/null | while IFS= read -r line; do
+        local dir
+        dir=$(state_dir)
+        [ -n "$dir" ] || continue
+        case "$line" in
+        openwindow\>\>*)
+            clear_preselect
+            ;;
+        activewindowv2\>\>*)
+            local new="0x${line#activewindowv2>>}"
+            [ "$new" = "0x" ] && continue
+            [ "$new" = "$(state_addr)" ] && continue
+            unpaint "$(state_addr)"
+            paint "$new" "$dir"
+            printf '%s %s\n' "$dir" "$new" >"$STATE"
+            ;;
+        esac
+    done
+}
+
+case "${1:-}" in
+r | right) arm r ;;
+l | left) arm l ;;
+u | up) arm u ;;
+d | down) arm d ;;
+cycle) cycle ;;
+clear | none | off) clear_preselect ;;
+status) status ;;
+watch) watch ;;
+*)
+    echo "usage: hypr-preselect {r|l|u|d|cycle|clear|status|watch}" >&2
+    exit 2
+    ;;
+esac

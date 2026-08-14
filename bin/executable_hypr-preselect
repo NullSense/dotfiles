@@ -30,7 +30,6 @@
 
 set -uo pipefail
 
-STATE="${XDG_RUNTIME_DIR:-/tmp}/hypr-preselect.state"
 WAYBAR_SIGNAL=14 # keep in sync with custom/preselect in waybar/config.jsonc
 
 # This script owns NO styling. It only tags the armed window `psel-<dir>`; the
@@ -49,8 +48,18 @@ label_of() { case "$1" in r) echo right ;; d) echo down ;; l) echo left ;; u) ec
 
 active_addr() { hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty'; }
 
-# Read "<dir> <address>" from the state file; empty string when disarmed.
-read_state() { [ -r "$STATE" ] && cat "$STATE" || true; }
+# Read "<dir> <address>", empty when disarmed. There is deliberately NO state
+# file: the window's own psel-* tag IS the state. This is the lesson from i3,
+# where the split lives in the tree as con->parent->layout and the renderer just
+# reads it — one source of truth that cannot drift from what's on screen. A
+# sidecar file can outlive the window it describes, survive a compositor
+# restart, or disagree with the tag after a failed dispatch; the tag can't.
+read_state() {
+    hyprctl clients -j 2>/dev/null | jq -r --arg p "$TAG_PREFIX" '
+        [ .[] as $c | $c.tags[]? | select(startswith($p))
+          | {dir: ltrimstr($p), addr: $c.address} ][0]
+        | if . then "\(.dir) \(.addr)" else "" end' 2>/dev/null
+}
 state_dir() { read_state | cut -d' ' -f1; }
 state_addr() { read_state | cut -d' ' -f2; }
 
@@ -86,7 +95,6 @@ arm() {
     unpaint "$(state_addr)"
     hyprctl dispatch layoutmsg "preselect $dir" >/dev/null 2>&1
     paint "$addr" "$dir"
-    printf '%s %s\n' "$dir" "$addr" >"$STATE"
     poke_waybar
 }
 
@@ -94,7 +102,6 @@ clear_preselect() {
     unpaint "$(state_addr)"
     # Any non-direction token cancels dwindle's pending override.
     hyprctl dispatch layoutmsg "preselect none" >/dev/null 2>&1
-    rm -f "$STATE"
     poke_waybar
 }
 
@@ -126,22 +133,25 @@ status() {
 #                    a different window, so walk the gradient over to it.
 watch() {
     local sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
-    rm -f "$STATE"
+    clear_preselect # drop a tag stranded by a previous watcher
     socat -U - "UNIX-CONNECT:$sock" 2>/dev/null | while IFS= read -r line; do
-        local dir
-        dir=$(state_dir)
-        [ -n "$dir" ] || continue
+        # Match the event BEFORE querying state: read_state costs an hyprctl
+        # round-trip, and the socket carries plenty of traffic we don't care
+        # about (workspace, monitor, layer, submap events).
+        local dir new
         case "$line" in
         openwindow\>\>*)
+            [ -n "$(state_dir)" ] || continue
             clear_preselect
             ;;
         activewindowv2\>\>*)
-            local new="0x${line#activewindowv2>>}"
+            new="0x${line#activewindowv2>>}"
             [ "$new" = "0x" ] && continue
+            dir=$(state_dir)
+            [ -n "$dir" ] || continue
             [ "$new" = "$(state_addr)" ] && continue
             unpaint "$(state_addr)"
             paint "$new" "$dir"
-            printf '%s %s\n' "$dir" "$new" >"$STATE"
             ;;
         esac
     done

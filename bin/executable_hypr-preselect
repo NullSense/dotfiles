@@ -42,11 +42,24 @@ set -uo pipefail
 STATE="${XDG_RUNTIME_DIR:-/tmp}/hypr-preselect.state"
 WAYBAR_SIGNAL=14 # keep in sync with custom/preselect in waybar/config.jsonc
 
-# Gradient stops. DIM matches the inactive-border grey so the armed window still
-# reads as themed; BRIGHT is gruvbox yellow — a colour used nowhere else in the
-# border palette, so an armed window is unmistakable at a glance.
-DIM="rgba(504945ff)"
+# Gradient stops. The shader lerps all four channels including alpha, so running
+# fully-transparent -> solid makes the border FADE IN toward the splitting edge:
+# three sides stay invisible and the edge that is about to break glows. That is a
+# far stronger "here is where it breaks" cue than a two-tone ring, and it means
+# the indicator adds no visual weight to a window that isn't armed.
+# BRIGHT is gruvbox yellow, matching the fullscreen-state border rules already in
+# windows.conf, so armed/fullscreen states read from the same palette.
+DIM="rgba(fabd2f00)"
 BRIGHT="rgba(fabd2fff)"
+
+# Border thickness while armed. This is set PER WINDOW, which matters: the global
+# general:border_size here is 0 (omarchy's no-gaps toggle at
+# ~/.local/state/omarchy/toggles/hypr/window-no-gaps.conf zeroes it), so a
+# colour-only indicator would be painting a zero-pixel border and be invisible.
+# 4px matches the fullscreen-state windowrules in windows.conf. Unsetting on
+# clear returns the window to whatever the global/toggle value happens to be, so
+# this stays correct if you flip the no-gaps toggle later.
+ARMED_BORDER=4
 
 if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" 2>/dev/null | head -1)
@@ -66,16 +79,19 @@ state_addr() { read_state | cut -d' ' -f2; }
 
 poke_waybar() { pkill -RTMIN+$WAYBAR_SIGNAL waybar 2>/dev/null || true; }
 
-# Drop the gradient from a window, tolerating a window that has since closed.
+# Drop the indicator from a window, tolerating a window that has since closed.
+# `unset` restores the global/toggle value rather than a hardcoded one, so this
+# stays correct whether or not the no-gaps toggle is active.
 unpaint() {
     [ -n "${1:-}" ] || return 0
-    hyprctl dispatch setprop "address:$1" active_border_color unset >/dev/null 2>&1 || true
+    hyprctl --batch "dispatch setprop address:$1 active_border_color unset ; dispatch setprop address:$1 border_size unset" >/dev/null 2>&1 || true
 }
 
 paint() {
     local addr=$1 dir=$2
-    hyprctl dispatch setprop "address:$addr" active_border_color \
-        "$DIM $BRIGHT $(angle_of "$dir")deg" >/dev/null 2>&1 || true
+    # Order matters only for looks: set the colour first so the border never
+    # flashes in the theme colour before taking the gradient.
+    hyprctl --batch "dispatch setprop address:$addr active_border_color $DIM $BRIGHT $(angle_of "$dir")deg ; dispatch setprop address:$addr border_size $ARMED_BORDER" >/dev/null 2>&1 || true
 }
 
 arm() {

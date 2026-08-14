@@ -10,21 +10,12 @@
 #
 # HOW THE INDICATOR WORKS
 # -----------------------
-# We recolor *only the focused window's* border into a two-stop gradient running
-# dim -> bright, angled so the BRIGHT end lands exactly on the edge that is about
-# to be split. That is literally "seeing where the next edge will break".
-#
-# The angle convention is not documented; it was read off the gradient shader
-# (src/render/shaders/glsl/gradient.glsl, getOkColorForCoordArray1):
-#   progress = y*sin(a) + x*(1-sin(a))   with gradient[0] at progress 0
-#   a=0deg   -> progress follows x  -> last color on the RIGHT edge
-#   a=90deg  -> progress follows y  -> last color on the BOTTOM edge
-#   a=180deg -> x mirrored          -> last color on the LEFT edge
-#   a=270deg -> y mirrored          -> last color on the TOP edge
-# i.e. the angle IS the direction, and the last stop lands on that edge.
-#
-# Per-window recolor uses `hyprctl dispatch setprop <win> active_border_color`,
-# which leaves the global theme colors untouched (no restore-on-crash hazard).
+# This script sets no colours. It tags the armed window `psel-<dir>` and stops
+# there; the border gradient, its angle and its thickness are declared as plain
+# `windowrule = border_size …, border_color …, match:tag psel-<dir>` lines in
+# ~/.config/hypr/windows.conf, alongside the fullscreen-state border rules. All
+# theming therefore lives in the config where you'd look for it, and this file
+# stays pure state machine. Retheme there, not here.
 #
 # dwindle's preselect is ONE-SHOT: it is consumed by the next window that opens.
 # `hypr-preselect watch` tails the Hyprland event socket and clears the border the
@@ -42,31 +33,17 @@ set -uo pipefail
 STATE="${XDG_RUNTIME_DIR:-/tmp}/hypr-preselect.state"
 WAYBAR_SIGNAL=14 # keep in sync with custom/preselect in waybar/config.jsonc
 
-# Gradient stops. The shader lerps all four channels including alpha, so running
-# fully-transparent -> solid makes the border FADE IN toward the splitting edge:
-# three sides stay invisible and the edge that is about to break glows. That is a
-# far stronger "here is where it breaks" cue than a two-tone ring, and it means
-# the indicator adds no visual weight to a window that isn't armed.
-# BRIGHT is gruvbox yellow, matching the fullscreen-state border rules already in
-# windows.conf, so armed/fullscreen states read from the same palette.
-DIM="rgba(fabd2f00)"
-BRIGHT="rgba(fabd2fff)"
-
-# Border thickness while armed. This is set PER WINDOW, which matters: the global
-# general:border_size here is 0 (omarchy's no-gaps toggle at
-# ~/.local/state/omarchy/toggles/hypr/window-no-gaps.conf zeroes it), so a
-# colour-only indicator would be painting a zero-pixel border and be invisible.
-# 4px matches the fullscreen-state windowrules in windows.conf. Unsetting on
-# clear returns the window to whatever the global/toggle value happens to be, so
-# this stays correct if you flip the no-gaps toggle later.
-ARMED_BORDER=4
+# This script owns NO styling. It only tags the armed window `psel-<dir>`; the
+# border colour, gradient angle and thickness are declared as ordinary
+# windowrules in ~/.config/hypr/windows.conf, next to the fullscreen-state
+# rules. Retheme there, not here.
+TAG_PREFIX=psel-
 
 if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" 2>/dev/null | head -1)
     export HYPRLAND_INSTANCE_SIGNATURE
 fi
 
-angle_of() { case "$1" in r) echo 0 ;; d) echo 90 ;; l) echo 180 ;; u) echo 270 ;; esac; }
 arrow_of() { case "$1" in r) echo "▸" ;; d) echo "▾" ;; l) echo "◂" ;; u) echo "▴" ;; esac; }
 label_of() { case "$1" in r) echo right ;; d) echo down ;; l) echo left ;; u) echo up ;; esac; }
 
@@ -79,19 +56,22 @@ state_addr() { read_state | cut -d' ' -f2; }
 
 poke_waybar() { pkill -RTMIN+$WAYBAR_SIGNAL waybar 2>/dev/null || true; }
 
-# Drop the indicator from a window, tolerating a window that has since closed.
-# `unset` restores the global/toggle value rather than a hardcoded one, so this
-# stays correct whether or not the no-gaps toggle is active.
+# Remove every psel-* tag from a window, tolerating one that has since closed.
+# NOTE: the whole dispatch has to be passed as ONE argument. `hyprctl dispatch
+# tagwindow -psel-d address:0x…` fails because hyprctl's own flag parser eats the
+# leading `-` and prints its usage page; quoting the lot sidesteps it.
 unpaint() {
     [ -n "${1:-}" ] || return 0
-    hyprctl --batch "dispatch setprop address:$1 active_border_color unset ; dispatch setprop address:$1 border_size unset" >/dev/null 2>&1 || true
+    local d
+    for d in r l u d; do
+        hyprctl dispatch "tagwindow -${TAG_PREFIX}${d} address:$1" >/dev/null 2>&1 || true
+    done
 }
 
 paint() {
     local addr=$1 dir=$2
-    # Order matters only for looks: set the colour first so the border never
-    # flashes in the theme colour before taking the gradient.
-    hyprctl --batch "dispatch setprop address:$addr active_border_color $DIM $BRIGHT $(angle_of "$dir")deg ; dispatch setprop address:$addr border_size $ARMED_BORDER" >/dev/null 2>&1 || true
+    unpaint "$addr" # never let two direction tags coexist
+    hyprctl dispatch "tagwindow +${TAG_PREFIX}${dir} address:$addr" >/dev/null 2>&1 || true
 }
 
 arm() {

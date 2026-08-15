@@ -742,6 +742,52 @@ models:
   # (Retired 2026-07-09: LFM2-2.6B + LFM2-1.2B-Extract generative bench entries removed —
   #  unused, not in the matrix. The LFM2.5-Embedding-350M *embedding* entry above stays.)
 
+  # ── abliterated/uncensored chat — Qwen3.6-35B-A3B Uncensored (Harmony MXFP4_MOE) ──
+  #    On the 5090 (Blackwell) MXFP4 gets native FP4 acceleration — the opposite of gfx1031,
+  #    where it was software-decoded — so the 20GB MXFP4_MOE is now the right build, fully
+  #    GPU-resident (no --n-cpu-moe) in 32GB VRAM. (The Wasserstein IQ3_M downgrade was a
+  #    12GB-VRAM compromise; reverted.)
+  qwen3.6-35b-uncensored:
+    # RTX 5090 / Blackwell tuned from model-card guidance:
+    # - recommended MXFP4_MOE quant, fully GPU-resident (-ngl 999)
+    # - >=262K context to preserve Qwen3.6 thinking capabilities
+    # - q4_0 KV + flash-attn to make long context fit in 32GB VRAM
+    # - batch/ubatch/parallel from 5090 llama.cpp benchmark-style serving
+    # - coding/agent sampler: temp 0.6, top_p 0.95, top_k 20, min_p 0, presence penalty 0
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF/Qwen3.6-35B-A3B-Uncensored-Harmony-MXFP4_MOE.gguf --alias qwen-uncensored --host 127.0.0.1 --port ${PORT} --device CUDA0 --fit off --n-gpu-layers 999 --ctx-size 262144 --flash-attn on --cache-type-k q4_0 --cache-type-v q4_0 --batch-size 1024 --ubatch-size 256 --parallel 1 --threads 8 --threads-batch 8 --no-mmap --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 0
+    name: "Qwen3.6-35B-A3B Uncensored Harmony (MXFP4_MOE, RTX 5090 tuned)"
+    aliases: [qwen-uncensored, "qwen3.6-35b-uncensored:think", "qwen3.6-35b-uncensored:fast"]
+    description: "chat·agent·uncensored · Qwen3.6-35B-A3B Uncensored/Harmony MXFP4_MOE — Blackwell/RTX 5090 tuned, fully GPU-resident, 262K ctx, q4_0 KV, llama.cpp Jinja template, thinking toggleable."
+    metadata: { engine: "llama.cpp", hf: "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF", class: "chat·agent·uncensored", thinking: "toggle (default on; use :fast for off)", best_for: "Hermes Agent local reasoning/chat/tool use on RTX 5090", tags: [chat, agent, uncensored, abliterated, local, qwen, moe, rtx5090] }
+    filters:
+      setParamsByID:
+        "qwen3.6-35b-uncensored:think":
+          chat_template_kwargs:
+            enable_thinking: true
+        "qwen3.6-35b-uncensored:fast":
+          chat_template_kwargs:
+            enable_thinking: false
+
+  # ── general reasoning / coding (oracle-llm, big local chat) ──
+  qwen3.6-35b-a3b:
+    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-qwen36
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 600
+    name: "Qwen3.6-35B-A3B MoE + MTP (reason/chat)"
+    aliases: [oracle-llm, qwen3.6-a3b, qwen3.6-35b-a3b-apex, "qwen3.6-35b-a3b:think", "qwen3.6-35b-a3b:fast"]
+    description: "reason·chat·instruct · Qwen3.6 35B-A3B (MoE, ~3B active) + MTP — strongest local reasoning + conversation. Thinking toggleable (MODE code/chat/fast → reasoning on/off)."
+    metadata: { engine: "llama.cpp", hf: "Qwen/Qwen3.6-35B-A3B", class: "reason·chat·instruct", thinking: "toggle (code/chat=on, fast=off)", best_for: "reasoning, NER arbitration, multi-turn chat, agentic", tags: [reason, chat, instruct, local, qwen, moe] }
+    filters:
+      setParamsByID:
+        "qwen3.6-35b-a3b:think":
+          chat_template_kwargs:
+            enable_thinking: true
+        "qwen3.6-35b-a3b:fast":
+          chat_template_kwargs:
+            enable_thinking: false
+
   # ── vision/OCR (on-demand, evicts fast) — callable via litellm `granite-vision` ──
   #    mmproj (SigLIP2 encoder) is F16 and must NOT be quantized (dims not /32 → garbage,
   #    per IBM convert-vision-models docs). Vision is sensitive to KV quant + flash-attn,
@@ -754,6 +800,17 @@ models:
     aliases: [granite-vision]
     description: "vision · Granite-Vision 3.3-2b VLM/OCR ~2.36GB (Q4_K_M + f16 mmproj). Image understanding / OCR. Evicts in <1s."
     metadata: { engine: "llama.cpp", hf: "ibm-granite/granite-vision-3.3-2b", class: vision, thinking: na, best_for: "OCR, document/image understanding (tables, forms, charts)", tags: [vision, ocr, local, granite, multimodal] }
+
+  # ── OCR — chandra-ocr-2 Q5_K_M (Phase B download). Vision is KV-quant + flash-attn
+  #    sensitive, so default f16 KV and NO flash-attn (sharper fine-grained OCR). On-demand.
+  chandra-ocr-2:
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/mradermacher/chandra-ocr-2-GGUF/chandra-ocr-2.Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/mradermacher/chandra-ocr-2-GGUF/chandra-ocr-2.mmproj-f16.gguf --device CUDA0 --n-gpu-layers 99 --ctx-size 16384 --host 127.0.0.1 --port ${PORT} --jinja --temp 0 --metrics
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
+    name: "Chandra-OCR-2 (Q5_K_M, fine-grained OCR)"
+    aliases: [chandra]
+    description: "vision·ocr · Chandra-OCR-2 Q5_K_M ~3.9GB (LM + f16 mmproj). Sharper OCR on tables/forms/small digits than granite. On-demand."
+    metadata: { engine: "llama.cpp", hf: "datalab-to/chandra-ocr-2", class: vision, thinking: na, best_for: "high-fidelity OCR — tables, forms, license plates, small text", tags: [vision, ocr, local, chandra, multimodal] }
 
   # ── Documents-pipeline OCR cascade (vLLM docker, CUDA) ─────────────────────────────
   #    Served on-demand for ~/Documents/pipeline engines.route_scanned (best-first → escalate to High

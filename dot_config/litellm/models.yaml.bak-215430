@@ -741,6 +741,136 @@ model_list:
       tags: ["extraction", "local", "lfm2", "tiny"]
       source_url: https://huggingface.co/LiquidAI/LFM2-1.2B-Extract-GGUF
 
+  # LuffyTheFox/Qwen3.6-35B-A3B-Uncensored — abliterated local chat
+  # ⚠ HF PROVENANCE DEAD (verified 2026-07-22): the upstream …-Harmony-GGUF repo returns 401
+  #   and is gone from the author's listing (only Genesis-Hermes-V3-GGUF — a DIFFERENT
+  #   finetune — survives; do NOT rename to it). The local MXFP4_MOE gguf on disk is the
+  #   only copy; identity name kept as the historical repo lineage.
+- model_name: LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:think
+  litellm_params:
+    model: llamafile/qwen3.6-35b-uncensored:think
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+  model_info:
+    engine: "llama.cpp"
+    hf_repo: "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF"
+    mode: chat
+    supports_function_calling: true
+    max_input_tokens: 131072
+    max_output_tokens: 8192
+    metadata: { display_name: "Qwen3.6-35B Uncensored · thinking ON" }
+- model_name: LuffyTheFox/Qwen3.6-35B-A3B-Uncensored:fast
+  litellm_params:
+    model: llamafile/qwen3.6-35b-uncensored:fast
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+  model_info:
+    engine: "llama.cpp"
+    hf_repo: "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF"
+    mode: chat
+    supports_function_calling: true
+    max_input_tokens: 131072
+    max_output_tokens: 8192
+    metadata: { display_name: "Qwen3.6-35B Uncensored · thinking OFF (fast)" }
+- model_name: LuffyTheFox/Qwen3.6-35B-A3B-Uncensored
+  litellm_params:
+    model: llamafile/qwen3.6-35b-uncensored
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "chat"
+    - "local"
+    - "qwen"
+    - "uncensored"
+    - "abliterated"
+    - "moe"
+  model_info:
+    engine: "llama.cpp"
+    hf_repo: "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF"
+    mode: chat
+    supports_function_calling: true
+    max_input_tokens: 16384
+    metadata:
+      display_name: "Qwen3.6-35B Uncensored · LuffyTheFox/Qwen3.6-35B-A3B-Uncensored (local)"
+      backend: "llama.cpp CUDA (RTX 5090) · LuffyTheFox Qwen3.6-35B-A3B-Uncensored-Harmony MXFP4_MOE (MoE experts on CPU, n-cpu-moe 28)"
+      vram: "partial — ~6-8 GB GPU + experts in RAM; slow (offload)"
+      quant: "MXFP4_MOE"
+      role: "uncensored/unaligned chat + reasoning"
+      source_url: https://huggingface.co/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Harmony-GGUF  # ⚠ 401/removed from HF (2026-07-22) — local gguf is the only copy
+      tags: ["chat", "local", "qwen", "uncensored", "abliterated", "moe"]
+
+  # ibm-granite/granite-vision-3.3-2b — vision/OCR (on-demand, evicts <1s)
+  # openai/ provider (not llamafile/) for clean multimodal image_url passthrough.
+- model_name: ibm-granite/granite-vision-3.3-2b
+  litellm_params:
+    model: openai/granite-vision
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "vision"
+    - "ocr"
+    - "local"
+    - "granite"
+    - "multimodal"
+  model_info:
+    engine: "llama.cpp"
+    hf_repo: "ibm-granite/granite-vision-3.3-2b"
+    mode: chat
+    supports_function_calling: true
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 16384
+    supports_vision: true
+    metadata:
+      display_name: "Granite-Vision 3.3-2b · ibm-granite/granite-vision-3.3-2b (local, VLM/OCR)"
+      backend: "llama.cpp CUDA (RTX 5090) · granite-vision-3.3-2b Q4_K_M + f16 mmproj (SigLIP2)"
+      quant: "Q4_K_M (LLM) + F16 (mmproj)"
+      vram: "~2.36 GB"
+      role: "image understanding / OCR — callable by oracle, Docling, hyprwhspr, scripts"
+      tags: ["vision", "ocr", "local", "granite", "multimodal"]
+      source_url: https://huggingface.co/ibm-granite/granite-vision-3.3-2b-GGUF
+
+  # datalab-to/chandra-ocr-2 — sharper fine-grained OCR (Phase B). on-demand.
+- model_name: datalab-to/chandra-ocr-2
+  litellm_params:
+    model: openai/chandra-ocr-2
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags:
+    - "vision"
+    - "ocr"
+    - "local"
+    - "chandra"
+    - "multimodal"
+  model_info:
+    engine: "llama.cpp"
+    hf_repo: "datalab-to/chandra-ocr-2"
+    mode: chat
+    supports_function_calling: true
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    max_input_tokens: 16384
+    supports_vision: true
+    metadata:
+      display_name: "Chandra-OCR-2 · datalab-to/chandra-ocr-2 (local, fine-grained OCR)"
+      backend: "llama.cpp CUDA (RTX 5090) · chandra-ocr-2 Q5_K_M + f16 mmproj"
+      quant: "Q5_K_M (LLM) + F16 (mmproj)"
+      vram: "~3.9 GB"
+      role: "high-fidelity OCR (tables, forms, small digits) — sharper than granite"
+      tags: ["vision", "ocr", "local", "chandra", "multimodal"]
+      source_url: https://huggingface.co/mradermacher/chandra-ocr-2-GGUF
+
+  # ── E4B quant ladder — bench-only (hidden from hub, available for ablations) ──
   #    Findings in docs/leaderboard.md: E4B faithfulness is quant-robust (Q4≈Q5≈Q8,
   #    all 0% fab/leak) so Q4 is the max-VRAM-savings safe pick. ─────────────────────
 
@@ -938,6 +1068,9 @@ router_settings:
       hidden: true
     "gemma-12b":
       model: "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF"
+      hidden: true
+    "qwen-uncensored":
+      model: "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored"
       hidden: true
     "granite-vision":
       model: "ibm-granite/granite-vision-3.3-2b"

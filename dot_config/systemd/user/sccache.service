@@ -6,6 +6,19 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=SCCACHE_IDLE_TIMEOUT=0
 Environment=SCCACHE_CLIENT_SIDE=1
+# Sized to the actual build working set, not a round number. Measured 2026-08-14
+# on the sift repo: the main checkout's target/ alone is ~99 GiB and three live
+# git worktrees add ~18 GiB, so ~118 GiB of artifacts feed this cache — while the
+# effective cap was 100 GiB (the daemon's built-in default; this unit never set
+# one, and the install script's 20G never reached the running server). A cap
+# below the working set evicts entries the next build would have reused, which
+# turns hits into misses no build-config change can recover. Measured hit rate
+# under that cap: 28%.
+#
+# 160G covers the working set with headroom while leaving the disk comfortable:
+# /home is 1.9T at 83% used with 331G free, so the worst case here consumes ~97G
+# more than the 63G in use today. Raise only alongside a df check.
+Environment=SCCACHE_CACHE_SIZE=160G
 ExecStart=%h/.local/bin/sccache --start-server
 ExecStop=%h/.local/bin/sccache --stop-server
 

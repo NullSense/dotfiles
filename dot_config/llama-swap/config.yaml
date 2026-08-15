@@ -377,7 +377,19 @@ models:
     # model therefore does NOT error — the query silently degrades to
     # fused-only ranking. The symptom is quietly worse results, not a failure,
     # which is exactly why this must not depend on a timer.
-    ttl: 0
+    #
+    # 2026-08-14 — CHANGED ttl: 0 → 300 (user decision: reduce the number of resident
+    # models; this is now the SINGLE reranker for BOTH sift and legalkb, replacing
+    # bge-reranker-v2-m3). The cold-start reasoning above still stands and is the
+    # accepted cost of that decision.
+    #
+    # ⚠ OPERATIONAL CAVEAT: while sift is running this TTL will effectively never fire.
+    # sift-api's provider warm-up (sift-api/src/services/warmup.rs) re-pings every
+    # provider every ~4 minutes by default, which is shorter than this 300s timer — so
+    # the model stays resident regardless. To actually reclaim the ~4.7 GB when idle,
+    # sift's warm-up interval must be lengthened past the TTL or disabled for this
+    # provider. Left as-is here because that is a sift-side config change.
+    ttl: 300
     name: "llama-nemotron-rerank-1b-v2 (vLLM bf16)"
     aliases: [rerank-nemotron, "nvidia/llama-nemotron-rerank-1b-v2"]
     description: "rerank · llama-nemotron-rerank-1b-v2 (Llama-3.2-1B bidirectional cross-encoder, avg pooling) via vLLM /v1/rerank. Score template + trust-remote-code enforced by the wrapper. 8k pairs. ~4.7 GB reserved."
@@ -493,14 +505,31 @@ models:
             enable_thinking: false
             preserve_thinking: false
 
-  # ── nanbeige-sift: the SAME weights at 64k, sized to CO-RESIDE with retrieval ──────────
-  #    A second entry rather than a smaller `nanbeige4.2-3b`, because the two consumers
-  #    want incompatible things and only one of them can win per process:
-  #      Hermes  → 128k, because it sends max_tokens ~= context_length (see the entry
-  #                above); at 64k it has zero input room.
+  # ── nanbeige-sift: a SECOND quant of the same model, sized to CO-RESIDE with retrieval ─
+  #    A second entry rather than one shared entry, because the two consumers want
+  #    incompatible things and only one of them can win per process:
+  #      Hermes  → FP8-Dynamic weights at GPU_UTIL 0.45 (the entry above), the
+  #                higher-precision quant, wired to the sleep/wake daemon so an
+  #                agentic run swaps back in at 0.34s instead of an 82s cold start.
   #      Sift    → co-residency, because ONE grounded turn needs dense + sparse + rerank
   #                + a chat model all live. Evicting the retrieval trio per turn is what
-  #                made a chat turn take 4m40s (measured 2026-08-06).
+  #                made a chat turn take 4m40s (measured 2026-08-06). This entry's
+  #                NVFP4-FP8-LoopShield weights at GPU_UTIL 0.35 are what make the four
+  #                fit together.
+  #
+  #    ⚠ CORRECTED 2026-08-14. This block used to justify the split as "Hermes → 128k,
+  #    Sift → 64k", and the comments below still said 64k and "no spec". None of that
+  #    is true: BOTH entries have run MAXLEN=32768 with SPEC=eagle3 for some time, and
+  #    the surviving difference is QUANT + GPU_UTIL + the sleep daemon, as written
+  #    above. The stale text mattered — reading it, the pair looks like pure duplication
+  #    with no reason to exist, which is exactly the wrong conclusion to act on.
+  #
+  #    ⚠ ONE NANBEIGE AT A TIME. `a` is in no set, so requesting it is SOLO and evicts
+  #    this entry plus the whole retrieval trio; `A` lives in `sift-chat` and does not
+  #    load `a`. So nothing loads both — but a consumer pointed at the WRONG id silently
+  #    destroys the other's working set. Sift must use `sift-agent`/`sift-decompose`
+  #    (this entry); `SIFT_DECOMPOSE_MODEL=nanbeige4.2-3b` had it evicting its own
+  #    retrieval trio every turn until 2026-08-14. Check consumers before adding an id.
   #    Separate CONTAINER_NAME and PORT, so both can exist; the matrix decides which is
   #    resident, and they are in different sets so it never tries to hold both.
   #
@@ -550,7 +579,18 @@ models:
     #
     # ⚠ As elsewhere: ttl:0 means "never unloaded for being IDLE". The matrix can
     # still evict it to satisfy a different set — see evict_costs below.
-    ttl: 0
+    #
+    # 2026-08-14 — CHANGED ttl: 0 → 300 (user decision: reduce resident models). MEASURED that
+    # day: this entry and nanbeige4.2-3b were BOTH resident simultaneously, holding ~26-28 GB of
+    # a 29 GB card (KV alone: 6.98 GiB here + 8.64 GiB there), which is what left ~3 GB free and
+    # made the Documents OCR set unable to co-reside — the thrash documented on the `ocr` set.
+    # The residency argument above still stands on its merits; it simply lost to the OCR working
+    # set on this single card.
+    #
+    # ⚠ Same caveat as nemotron-rerank-1b: sift-api's warm-up (sift-api/src/services/warmup.rs)
+    # re-pings providers every ~4 min, shorter than this 300s timer, so while sift runs this TTL
+    # may never fire. Lengthen sift's warm-up interval to actually reclaim the VRAM when idle.
+    ttl: 300
     aliases: [sift-nanbeige, sift-agent, sift-decompose]
     name: "Nanbeige4.2-3B · Sift 32k (co-resident, EAGLE-3)"
     description: "reason·agent·rag · NVFP4-FP8 LoopShield weights served at 32k with fp8 KV and an EAGLE-3 draft head, sized to fit beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for longer-context reasoning."
@@ -747,43 +787,66 @@ models:
     description: "vision·ocr · Chandra-OCR-2 Q5_K_M ~3.9GB (LM + f16 mmproj). Sharper OCR on tables/forms/small digits than granite. On-demand."
     metadata: { engine: "llama.cpp", hf: "datalab-to/chandra-ocr-2", class: vision, thinking: na, best_for: "high-fidelity OCR — tables, forms, license plates, small text", tags: [vision, ocr, local, chandra, multimodal] }
 
-  # ── Documents-pipeline OCR cascade (3 VLMs on vLLM docker, CUDA) ─────────────────────────────
+  # ── Documents-pipeline OCR cascade (vLLM docker, CUDA) ─────────────────────────────
   #    Served on-demand for ~/Documents/pipeline engines.route_scanned (best-first → escalate to High
-  #    agreement → mark needs_claude). Migrated from llama.cpp GGUF to vLLM docker (vllm/vllm-openai
-  #    :v0.26.0, cu130 default = sm_120 OK on 5090) 2026-08-11 for continuous batching + chunked
-  #    prefill. Model ids below MUST match settings.ocr.engines[].model in the pipeline. ttl 3600 =
-  #    keep warm through a full docs-batch. gpu-memory-utilization is a FRACTION OF TOTAL (0.2≈6.4GB)
-  #    — these three co-resident ≈ 18-19GB, so the `ocr` matrix set evicts the sift stack while they
-  #    run (approved). HF safetensors download on first launch into the mounted cache
-  #    (~/.cache/huggingface). Served via the standard OpenAI /v1/chat/completions interface.
+  #    agreement → mark needs_claude). Migrated from llama.cpp GGUF to vLLM docker 2026-08-11 for
+  #    continuous batching + chunked prefill. Model ids below MUST match settings.ocr.engines[].model
+  #    in the pipeline. ttl 3600 = keep warm through a full docs-batch. gpu-memory-utilization is a
+  #    FRACTION OF TOTAL (0.2≈6.4GB). HF safetensors already downloaded into the mounted cache
+  #    (~/.cache/huggingface) — offline (HF_HUB_OFFLINE=1, via _vllm-common.sh) is safe. Served via
+  #    the standard OpenAI /v1/chat/completions interface.
+  #
+  #    2026-08-15: converted from hand-maintained inline `docker run` (three literal
+  #    vllm/vllm-openai:v0.26.0 pins, invisible to vllm-update's `$SERVERS/vllm-*` glob, and missing
+  #    the shared torch.compile/FP4-autotune cache, NVIDIA's recommended ulimits, and VLLM_HOST_NET)
+  #    to real wrapper scripts (vllm-paddleocr-vl, vllm-glm-ocr) that source _vllm-common.sh +
+  #    _vllm-image.sh, same as every other vllm-* model here. Each wrapper decides its OWN pin tier —
+  #    see _vllm-image.sh — rather than sharing one literal version. `mineru` was NOT converted: it is
+  #    disabled below (broken cascade engine, see that entry) rather than wrapper-ized.
   paddleocr-vl:
-    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-ocr-paddle --init --gpus all -p 127.0.0.1:${PORT}:8000 -v /home/nullsense/.cache/huggingface:/root/.cache/huggingface vllm/vllm-openai:v0.26.0 PaddlePaddle/PaddleOCR-VL-1.6 --served-model-name paddleocr-vl --trust-remote-code --max-model-len 16384 --max-num-batched-tokens 8192 --no-enable-prefix-caching --gpu-memory-utilization 0.18 --mm-processor-cache-gb 0
-    cmdStop: docker stop swap-ocr-paddle
+    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-paddleocr-vl
+    cmdStop: docker stop -t 2 vllm-paddleocr-vl
     proxy: http://127.0.0.1:${PORT}
     ttl: 3600
     name: "PaddleOCR-VL-1.6 (SOTA doc OCR, vLLM)"
     aliases: [paddleocr-vl]
-    description: "ocr · PaddleOCR-VL-1.6 0.9B bf16 (~2.1GB) via vLLM v0.26.0. SOTA OmniDocBench 96.33. Documents pipeline PRIMARY OCR (HTTP). Prompt 'OCR:'. On-demand (evicts sift during OCR runs)."
+    description: "ocr · PaddleOCR-VL-1.6 0.9B bf16 (~2.1GB) via vLLM (VLLM_IMAGE_PIN, verified 2026-08-15). SOTA OmniDocBench 96.33. Documents pipeline PRIMARY OCR (HTTP). Prompt 'OCR:'. On-demand (evicts sift during OCR runs)."
     metadata: { engine: "vllm", hf: "PaddlePaddle/PaddleOCR-VL-1.6", class: ocr, thinking: na, best_for: "document OCR — text/tables/formulas, primary cascade engine", tags: [ocr, vision, local, paddleocr, multimodal, vllm] }
 
-  mineru:
-    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-ocr-mineru --init --gpus all -p 127.0.0.1:${PORT}:8000 -v /home/nullsense/.cache/huggingface:/root/.cache/huggingface vllm/vllm-openai:v0.26.0 opendatalab/MinerU2.5-Pro-2605-1.2B --served-model-name mineru --max-model-len 8192 --gpu-memory-utilization 0.25 --mm-processor-cache-gb 0
-    cmdStop: docker stop swap-ocr-mineru
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 3600
-    name: "MinerU2.5-Pro-2605 (German doc OCR, vLLM)"
-    aliases: [mineru]
-    description: "ocr · MinerU2.5-Pro-2605-1.2B bf16 (native Qwen2VL) via vLLM. OmniDocBench 95.72, native German (best umlaut fidelity). Documents pipeline 2nd consensus. Prompt '\nText Recognition:' + sys. CAVEAT: bare vLLM WITHOUT MinerULogitsProcessor (mineru-vl-utils not in stock image) degenerates to '!!!!...' — needs custom image w/ pip install 'mineru-vl-utils[vllm]' + --logits_processors. max_model_len capped at model's max_position_embeddings=8192. On-demand."
-    metadata: { engine: "vllm", hf: "opendatalab/MinerU2.5-Pro-2605-1.2B", class: ocr, thinking: na, best_for: "German document OCR — end-to-end page parse, cross-check engine", tags: [ocr, vision, local, mineru, multimodal, vllm] }
+  # mineru — DISABLED, entry deliberately removed 2026-08-15 (was: a live `models:` entry that
+  # booted a broken container on any manual/API request for the `mineru` alias). The stock vLLM
+  # image lacks MinerULogitsProcessor / mineru-vl-utils[vllm]; bare vLLM degenerates to "!!!!...".
+  # ~/Documents/pipeline/settings.py already has this engine disabled downstream (enabled=False,
+  # comment: "needs custom vLLM image") — this entry re-enabled it here despite that, which is the
+  # bug this fixes. Do NOT re-add without a custom image carrying mineru-vl-utils AND flipping
+  # settings.py back to enabled=True in the same change (the two must stay in sync; that file is
+  # owned by a different workstream — do not edit it from here).
+  #
+  # NOTE: there is a SEPARATE, unrelated in-process MinerU path in the Documents pipeline
+  # (pipeline/engines.py::mineru_engine(), transformers-based, not vLLM) — that one is untouched.
+  #
+  # Last known-good cmd, kept for reference / a future re-enable:
+  #   docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-ocr-mineru --init --gpus all -p 127.0.0.1:${PORT}:8000 -v /home/nullsense/.cache/huggingface:/root/.cache/huggingface vllm/vllm-openai:v0.26.0 opendatalab/MinerU2.5-Pro-2605-1.2B --served-model-name mineru --max-model-len 8192 --gpu-memory-utilization 0.25 --mm-processor-cache-gb 0
 
   glm-ocr:
-    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-ocr-glm --init --gpus all -p 127.0.0.1:${PORT}:8000 -v /home/nullsense/.cache/huggingface:/root/.cache/huggingface vllm/vllm-openai:v0.26.0 zai-org/GLM-OCR --served-model-name glm-ocr --max-model-len 12000 --max-num-batched-tokens 8192 --limit-mm-per-prompt '{"image":1}' --gpu-memory-utilization 0.15 --mm-processor-cache-gb 0
-    cmdStop: docker stop swap-ocr-glm
+    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-glm-ocr
+    cmdStop: docker stop -t 2 vllm-glm-ocr
     proxy: http://127.0.0.1:${PORT}
     ttl: 3600
+    # 2026-08-14: --max-model-len 12000 → 16384 (matches paddleocr-vl). ocr_http.py sends ONE
+    # request per page with max_tokens=10240 (the MAX_TOKENS default — this engine sets no
+    # per-engine cap), so a page cost ~1344 vision tokens + prompt + 10240 output ≈ 11.6k against a
+    # 12000 ceiling: roughly 400 tokens of margin, and max_long_edge=1400 can push vision tokens
+    # higher still. Raising the CONTEXT rather than lowering max_tokens keeps output quality
+    # untouched — capping output would truncate genuinely dense pages. Costs ~1 GB more KV at most
+    # (64 KiB/token) and there is now headroom. Paired with the finish_reason=length check added to
+    # ocr_http.py the same day, so any remaining truncation fails loudly instead of silently.
+    #
+    # 2026-08-15: wrapper HELD at VLLM_IMAGE_PIN_HELD (v0.26.0) — v0.27.1 raises a KV-cache-too-small
+    # ValueError at this GPU_UTIL (0.15), measured by booting on both images (see _vllm-image.sh).
     name: "GLM-OCR (3rd consensus, vLLM)"
     aliases: [glm-ocr]
-    description: "ocr · GLM-OCR 0.9B bf16 via vLLM (native glm_ocr). OmniDocBench ~95.15. Documents pipeline 3rd consensus (rarely reached). Prompt 'Text Recognition:' (per zai-org model card). MTP spec-decode OFF — needs vLLM nightly + transformers>=5.0.0 (stock 0.26.0 lacks MTP weights). 3721-token encoder ceiling → max-num-batched-tokens 8192 + limit-mm 1. On-demand."
+    description: "ocr · GLM-OCR 0.9B bf16 via vLLM (VLLM_IMAGE_PIN_HELD — v0.27.1 KV-cache-too-small at this util, see _vllm-image.sh). OmniDocBench ~95.15. Documents pipeline 3rd consensus (rarely reached). Prompt 'Text Recognition:' (per zai-org model card). MTP spec-decode OFF — needs vLLM nightly + transformers>=5.0.0 (neither pin tier carries MTP weights). 3721-token encoder ceiling → max-num-batched-tokens 8192 + limit-mm 1. On-demand."
     metadata: { engine: "vllm", hf: "zai-org/GLM-OCR", class: ocr, thinking: na, best_for: "document OCR — third independent consensus engine", tags: [ocr, vision, local, glm, multimodal, vllm] }
 
   # ── GLiNER2 NER is ORACLE-OWNED, not in this stack (decided 2026-06-18). Oracle runs it
@@ -807,6 +870,14 @@ models:
 #       watch -n1 'nvidia-smi --query-gpu=memory.used --format=csv,noheader'
 #   If it approaches ~31 GB, trim the `coresident` set. A timestamped backup of this
 #   file is in this dir: config.yaml.bak-*  (restore = cp it back).
+#   ⚠ NO RETENTION POLICY (noted 2026-08-15): 5 snapshots have accumulated here since 2026-06-20
+#   (~140 KB total — not a space problem, but nothing prunes them and they're easy to lose track
+#   of). Same gap for ~/bin/llm-servers/.bak/. Proposed policy: keep the most recent snapshot per
+#   distinct reason and delete superseded ones once its config change is confirmed stable for a
+#   few days; migration/rollback snapshots (e.g. the CUDA-migration `*.vulkan-amd` set, removed
+#   2026-08-15 — see hyprwhspr-ai/docs/superpowers/specs/2026-06-25-rtx5090-cuda-migration-design.md)
+#   should be deleted once the migration they insure against is confirmed done and the hardware/
+#   dependency they'd roll back to no longer exists.
 #
 matrix:
   vars:
@@ -823,17 +894,18 @@ matrix:
     n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
     m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
     a: nanbeige4.2-3b          # vLLM looped reasoner, 32k fp8-KV — 13.2 GB MEASURED (see budget)
-    A: nanbeige-sift           # same weights @64k, no spec — sized to co-reside with n+m+x
+    A: nanbeige-sift           # NVFP4 quant @32k + eagle3 — sized to co-reside with n+m+x
     x: tei-sparse              # TEI SPLADE 67M (~2.5 GB peak: MLM logits, not weights)
     P: paddleocr-vl            # Documents OCR cascade, PRIMARY  — vLLM, GPU_UTIL 0.18 (~5.8 GB RESERVED)
-    M: mineru                  # Documents OCR cascade, fallback 1 — vLLM, GPU_UTIL 0.25 (~8.0 GB RESERVED)
+    # M (mineru) var REMOVED 2026-08-15 along with the model entry itself (see `mineru` comment
+    # under models: — the entry booted a broken container on request, now fully disabled).
     G: glm-ocr                 # Documents OCR cascade, fallback 2 — vLLM, GPU_UTIL 0.15 (~4.8 GB RESERVED)
   # OCR evict costs are high for the same reason as x: the cost is reload-stalls per DOCUMENT,
   # not GB. A vault re-verify walks the cascade per scanned page; evicting mid-run re-pays a
   # full model load each time. vLLM gpu-memory-utilization is a FRACTION OF TOTAL (32 GB), so
   # the reservation exceeds the bf16 weights; P+M+G ≈ 18.6 GB reserved → the `ocr` set runs
   # solo-evicting (VRAM is the binding constraint, sift stack reloads after the OCR run).
-  evict_costs: { A: 6, e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8, P: 8, M: 8, G: 7 }
+  evict_costs: { A: 6, e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8, P: 8, G: 7 }
 
   # ── MEASURED VRAM BUDGET, 2026-08-06 (nvidia-smi, not arithmetic) ─────────────────
   # Every other number on this page is a hand estimate. These three are not, and where
@@ -874,7 +946,11 @@ matrix:
     #   legal    ≈ f 3.5 + r 1.3 + j 1.5 + d 11 + t 0.4 ≈ 18 GB
     #   legal-q  ≈ f 3.5 + q 4.3 + d 11 + t 0.4         ≈ 19 GB
     #   legal-z  ≈ f 3.5 + z 8   + d 11 + t 0.4         ≈ 23 GB (watch during bulk runs)
-    legal: "f & r & j & d & t"
+    # 2026-08-14: r (bge-rerank) → m (nemotron-rerank-1b). legalkb's reranker was switched to
+    # nemotron in pipeline/settings.py the same day so ONE reranker serves both sift and legalkb.
+    # bge is no longer called by anything, so it never loads; the var `r` is kept defined for the
+    # legal-q/legal-z A/B sets and for an easy revert.
+    legal: "f & m & j & d & t"
     legal-q: "f & q & d & t"
     legal-z: "f & z & d & t"
     # sift HYBRID INDEXING working set (2026-07-31): dense + sparse must be co-resident,
@@ -940,7 +1016,13 @@ matrix:
     # every estimate on this page. Adding d would push the visible total over budget and the
     # true total to ~27 GB, betting the OCR run on an invisible 2 GB. Dictation reloads
     # after a vault run; a failed OCR cascade silently degrades legal documents.
-    ocr: "P & M & G & t"
+    # 2026-08-14: M (mineru) REMOVED from this set — it reserved ~8.0 GB but is enabled=False in
+    # the pipeline cascade (pipeline/settings.py: "needs custom vLLM image"), so the solver was
+    # budgeting for an engine that is never called. Set is now ~10.6 GB instead of ~19 GB.
+    # 2026-08-15: the `mineru` MODEL ENTRY itself is now also gone (see models: — it was still
+    # bootable standalone via alias even though excluded from this set). Re-add both the entry and
+    # M here together if MinerU is ever re-enabled in settings.py — the three must stay in sync.
+    ocr: "P & G & t"
     # ⚠ REMOVED 2026-08-06: `rag-nanbeige: "a & n & m & t"` was IMPOSSIBLE and this set
     # existing is what made every nanbeige start fail with "upstream command exited
     # prematurely" while the retrieval models were resident. The solver believed the

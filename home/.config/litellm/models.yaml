@@ -950,6 +950,7 @@ model_list:
     engine: "llama.cpp"
     hf_repo: "JonathanColetti/Qwen3.8-27B-Uncensored"
     mode: chat
+    supports_vision: true
     supports_function_calling: true
     max_input_tokens: 210432
     max_output_tokens: 8192
@@ -971,6 +972,7 @@ model_list:
     engine: "llama.cpp"
     hf_repo: "JonathanColetti/Qwen3.8-27B-Uncensored"
     mode: chat
+    supports_vision: true
     supports_function_calling: true
     max_input_tokens: 210432
     max_output_tokens: 8192

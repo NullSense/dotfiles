@@ -43,6 +43,15 @@ mcp_servers:
     access_groups: ["dev", "research"]
     transport: "http"
     allow_all_keys: true
+  hindsight:
+    description: "Hindsight — Hermes long-term memory bank (retain, recall, reflect only)."
+    url: "http://127.0.0.1:9177/mcp/hermes/"
+    transport: "http"
+    allow_all_keys: true
+    access_groups: ["memory"]
+    # The upstream bank MCP exposes destructive administration too. Unified
+    # clients only need the three memory operations from the official guide.
+    allowed_tools: ["retain", "recall", "reflect"]
 
 litellm_settings:
   # Task prompts (dotprompt): summarize/rewrite/extract → config/prompts/<id>.prompt.

@@ -889,9 +889,10 @@ models:
   #    fused Gated DeltaNet kernel — b10331 silently disabled it, and since the Arch package
   #    split you also need ggml-cuda installed or llama.cpp has NO gpu backend at all.
   #    ctx 65536 + q8_0 KV = 20.2 GB measured (Hermes REQUIRES >=64k ctx, so 32k/18.8GB is
-#    not an option for that client). Leaves ~2.7 GB headroom with embed+sparse+dictation.
+  #    not an option for that client). The matching f16 vision projector is required for
+  #    Qwen's native image input; llama.cpp otherwise rejects image_url with a 500.
   qwen3.8-27b-uncensored:
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-Q4_K_M.gguf --fit on --fit-target 1024 --fit-ctx 65536 --parallel 1 --kv-unified --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.75 --spec-draft-type-k q8_0 --spec-draft-type-v q8_0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-vision-f16.gguf --fit on --fit-target 1024 --fit-ctx 65536 --parallel 1 --kv-unified --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.75 --spec-draft-type-k q8_0 --spec-draft-type-v q8_0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
     proxy: http://127.0.0.1:${PORT}
     # ttl:0 = PINNED (never unloaded for being idle) — the interactive hermes workspace
     # wants it hot; a cold load is ~32 s. This parks ~22.9 GB, so if you need that VRAM
@@ -900,8 +901,8 @@ models:
     ttl: 0
     name: "Qwen3.8-27B Uncensored (Heretic, Q4_K_M + MTP)"
     aliases: [qwen38, qwen3.8-27b, "qwen3.8-27b-uncensored:think", "qwen3.8-27b-uncensored:fast"]
-    description: "chat·agent·uncensored · Qwen3.8-27B Heretic-abliterated, Q4_K_M + baked-in MTP (~18.8 GB @32k q8-KV). Refusals 98/100 -> 12/100, mean benchmark delta -0.5 (author self-reported). Thinking toggleable, default ON — use :fast for off. reasoning_effort xhigh|medium|low; do NOT leave the xhigh default, it overthinks badly."
-    metadata: { engine: "llama.cpp", hf: "JonathanColetti/Qwen3.8-27B-Uncensored", class: "chat·agent·uncensored", thinking: "toggle (default on; use :fast for off)", best_for: "uncensored chat, agentic tool use, long-context reasoning", tags: [chat, agent, uncensored, abliterated, local, qwen, mtp] }
+    description: "chat·agent·vision·uncensored · Qwen3.8-27B Heretic-abliterated, Q4_K_M + f16 vision projector + baked-in MTP. Refusals 98/100 -> 12/100, mean benchmark delta -0.5 (author self-reported). Thinking toggleable, default ON — use :fast for off. reasoning_effort xhigh|medium|low; do NOT leave the xhigh default, it overthinks badly."
+    metadata: { engine: "llama.cpp", hf: "JonathanColetti/Qwen3.8-27B-Uncensored", class: "chat·agent·vision·uncensored", thinking: "toggle (default on; use :fast for off)", best_for: "uncensored chat, agentic tool use, image understanding, long-context reasoning", tags: [chat, agent, vision, multimodal, uncensored, abliterated, local, qwen, mtp] }
     # Sampling MUST be set here, not left to the GGUF defaults. /props showed the embedded
     # generation_config gives temp 1.0/top_p 0.95/min_p 0.05 for BOTH aliases — i.e. :fast
     # was running THINKING-mode sampling on non-thinking output and missing the

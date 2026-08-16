@@ -65,7 +65,6 @@
         "zsh",
         "bash-completion",
         "tmux",
-        "chezmoi",
         "openssh",
         "reflector",
         "pacman-contrib",

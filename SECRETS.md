@@ -1,62 +1,27 @@
-# Secrets management
+# Secret boundaries
 
-Never commit secrets to this repo. Use ONE of these strategies.
+This repository is public. It contains configuration and credential *names*,
+never credential values.
 
-## Strategy 1: plain `~/.secrets` (simplest)
+Use these stores:
 
-```bash
-# ~/.secrets — gitignored, NOT in chezmoi source
-export GOOGLE_PLACES_API_KEY="..."
-export ELEVENLABS_API_KEY="..."
-export BWS_ACCESS_TOKEN="..."
-export BRAVE_API_KEY="..."
-```
+1. Infisical for durable application and service secrets.
+2. Agent Vault for per-process HTTP/HTTPS credential injection.
+3. User-scoped systemd encrypted credentials for daemon bootstrap values and
+   protocol-local secrets that an HTTP proxy cannot inject.
+4. The desktop keyring for interactive CLI OAuth sessions.
 
-`.zshrc` already does `[[ -f ~/.secrets ]] && source ~/.secrets`.
-File must be `chmod 600 ~/.secrets` and explicitly never tracked.
+The `hermes` Agent Vault is read-only Infisical-backed. Rotate values in
+Infisical, run `agent-vault vault credential-store sync hermes`, then restart
+consumers that load encrypted credentials at process start.
 
-## Strategy 2: Infisical (recommended if team uses it)
+Never put secrets in:
 
-```bash
-# install
-curl -1sLf 'https://artifacts-cli.infisical.com/setup.sh' | sudo -E bash
-sudo pacman -S infisical-cli  # if available
+- tracked files under `home/`
+- systemd `Environment=` lines
+- shell command arguments
+- `.env` backups or agent transcripts
+- Git commits, even temporarily
 
-# login + link project
-infisical login
-infisical init
-
-# usage in zshrc (already present, just uncomment)
-eval "$(infisical export --format=dotenv-export)"
-
-# per-project run
-infisical run -- npm run dev
-```
-
-## Strategy 3: Bitwarden Secrets Manager
-
-```bash
-# install bws CLI
-sudo pacman -S bitwarden-secrets-manager-cli  # AUR
-
-# usage (uncomment in zshrc)
-export BWS_ACCESS_TOKEN="..."  # from a service account
-eval "$(bws secret list --output env)"
-```
-
-## Strategy 4: chezmoi templates + age
-
-```bash
-chezmoi add --encrypt ~/.secrets   # encrypts via age, commits encrypted blob
-chezmoi apply                       # decrypts on this machine using local age key
-```
-
-Best for machine-specific stuff that needs to survive reinstall.
-
-## Recovery checklist after a leak
-
-1. **Rotate every leaked key** (cannot be skipped)
-2. Move replacements to chosen strategy above
-3. `git filter-repo --path .zshrc --invert-paths` (or BFG) to scrub history
-4. Force-push: `git push --force-with-lease`
-5. GitHub → Settings → Security → Audit log: confirm no unexpected access
+Gitleaks runs before commits and TruffleHog before pushes. Those are backstops,
+not permission to stage plaintext secrets.

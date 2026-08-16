@@ -1,0 +1,17 @@
+[Unit]
+Description=litellm MCP aggregation instance :4001 (optional profile — `stack mcp`)
+After=network-online.target litellm.service
+
+[Service]
+Type=simple
+ExecStart=/home/nullsense/bin/llm-servers/litellm-mcp
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+# MCP tool discovery can legitimately take minutes with slow remotes
+TimeoutStartSec=600
+TimeoutStopSec=20
+Environment=PATH=/home/nullsense/bin:/home/nullsense/.local/bin:/home/nullsense/.local/share/mise/shims:/usr/local/bin:/usr/bin
+WorkingDirectory=/home/nullsense
+
+# NOT WantedBy anything — started explicitly by `stack mcp`, stays optional.

@@ -1,0 +1,22 @@
+[Unit]
+Description=litellm model gateway :4000 (MCP-free profile — fast boot, always on)
+After=network-online.target docker.service
+# gateway DB (litellm-db :5433) is a docker container ensured by `stack up`; litellm
+# retries DB on its own, so no hard Requires=.
+
+[Service]
+Type=simple
+ExecStart=/home/nullsense/bin/llm-servers/litellm-gateway
+Restart=on-failure
+RestartSec=3
+# never orphan: kill the whole cgroup (infisical wrapper + litellm + MCP children)
+KillMode=control-group
+TimeoutStopSec=20
+Environment=PATH=/home/nullsense/bin:/home/nullsense/.local/bin:/home/nullsense/.local/share/mise/shims:/usr/local/bin:/usr/bin
+# THE SWITCH lives here now (systemd can't inherit a caller's exports):
+# `stack` writes LITELLM_ENVIRONMENT=development|production into this file.
+EnvironmentFile=-%h/.config/litellm/gateway.env
+WorkingDirectory=/home/nullsense
+
+[Install]
+WantedBy=default.target

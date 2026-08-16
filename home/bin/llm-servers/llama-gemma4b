@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# llama-server wrapper for Gemma 4 E4B-it via CUDA (RTX 5090) — PARALLEL summarization box.
+# Hardware: AMD Ryzen 9700X (8c/16t Zen 5) + RTX 5090 (32GB, Blackwell sm_120) + 64GB DDR5-5800
+# Model:    unsloth/gemma-4-E4B-it-qat-GGUF (UD-Q4_K_XL, 4.0GB; MatFormer "effective 4B",
+#           raw 7.5B params, 42 layers). Same gemma4 arch as llama-gemma4's 12B.
+#           QAT (Quantization-Aware Training) + Unsloth dynamic: near-BF16 quality
+#           (E4B top-1 98.5% / mean-KLD 0.0012 vs 90.9% / 0.038 for naive Q4_0) at a
+#           SMALLER footprint than the old bartowski Q5_K_M (4.0 vs 5.5GB) → +1.5GB VRAM
+#           headroom for KV/parallel slots. Single file by design: Unsloth found precisions
+#           above UD-Q4_K_XL degrade the QAT lattice. Matching QAT-assistant MTP draft below.
+# Card:     https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF
+#
+# Purpose: high-throughput batch work (article summarization at -np N) and as the
+# cheap hyprwhspr-ai dictation backend. KV here is exceptionally cheap — SWA
+# window is just 512 tokens (vs 1024 on the 12B) and 18 of 42 layers SHARE KV —
+# so many parallel slots cost almost nothing in VRAM.
+#
+# ⚠ VRAM exclusivity: 12GB fits EITHER this OR llama-gemma4 (12B), not both.
+#   Starting this next to a loaded 12B spills to GTT and craters both.
+#
+# Backend: CUDA on the RTX 5090 (llama.cpp-cuda build). The old AMD/Vulkan path is gone
+# (card replaced 2026-06). Same SWA trade-offs as llama-gemma4: prompt-cache reuse = strict
+# prefix extension only; --cache-reuse / context-shift unsupported.
+set -euo pipefail
+
+# Single CUDA GPU (RTX 5090).
+export CUDA_VISIBLE_DEVICES=0
+
+MODEL_DIR="$HOME/.lmstudio/models/unsloth/gemma-4-E4B-it-qat-GGUF"
+MODEL="${MODEL:-$MODEL_DIR/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf}"
+SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots-gemma4b}"
+PORT="${PORT:-8083}"   # 8080 = qwen36, 8082 = gemma4 12B, 8081 = taken, 1234 = LM Studio
+CTX="${CTX:-65536}"    # POOLED across slots (--kv-unified). GGUF n_ctx_train = 131072.
+mkdir -p "$SLOTS_DIR"
+
+# Parallel slots. --kv-unified pools the full -c dynamically (no per-slot ctx
+# halving): 4 articles in flight share 65536 tokens however they need. E4B's
+# tiny SWA cache makes the marginal slot ~free; raise NP for bigger batches.
+NP="${NP:-4}"
+
+# MODE — sampler + reasoning defaults; per-request overrides always win
+# (OpenAI params for samplers, chat_template_kwargs {"enable_thinking": ...}).
+#   sum  — summarization/extraction: thinking off, low temp. Faithful, fast. (default)
+#   chat — Google's recommended Gemma sampling, thinking on.
+MODE="${MODE:-sum}"
+case "$MODE" in
+  sum)  REASON=off; TEMP=0.3; TOPP=0.95; TOPK=64 ;;
+  chat) REASON=on;  TEMP=1.0; TOPP=0.95; TOPK=64 ;;
+  *) echo "MODE must be sum | chat"; exit 1 ;;
+esac
+
+# Vision is optional — the mmproj costs ~1GB VRAM that summarization doesn't need.
+# MMPROJ=on to enable image input.
+MMPROJ_ARGS=()
+if [[ "${MMPROJ:-off}" == "on" ]]; then
+  MMPROJ_ARGS=(--mmproj "$MODEL_DIR/mmproj-F16.gguf")
+fi
+
+# MTP speculative decoding (optional, default OFF). The llama-swap summarization
+# instances (summarize-cheap, e4b-q*) leave this off — at NP=4 batch, spec-decode
+# fights batching. The DEDICATED DICTATION server runs SPEC=on NP=1: short, predictable
+# rewrites give high MTP acceptance, and dictation is single-stream + latency-bound.
+# Draft = the E4B-it assistant MTP head (95 MB), the E4B analog of the 12B's MTP draft.
+#   SPEC=on enable | SPECN n-max draft depth | SPEC=off for A/B vs plain decode.
+SPEC="${SPEC:-off}"
+SPECN="${SPECN:-2}"
+# Flash-attn: ON is faster for batch/long-ctx and works fine for plain decode. BUT the MTP
+# draft path (SPEC=on) ABORTS at ggml-cuda/fattn.cu:110 on Blackwell with FA enabled (no FA
+# kernel for the speculative-decode batch shape; `auto` aborts too). So FA defaults OFF when
+# SPEC=on (still 400+ tok/s via the draft), ON otherwise. Override with FA=on|off|auto.
+# KV is f16 (below), NOT q8_0: quantized V-cache REQUIRES flash-attn ("V cache quantization
+# requires flash_attn"), which the MTP/dictation path disables — f16 is valid either way.
+FA="${FA:-$([ "$SPEC" = on ] && echo off || echo on)}"
+DRAFT="${DRAFT:-$HOME/.lmstudio/models/amaranus/Gemma-4-E4B-it-MTP/gemma-4-E4B-it-qat-assistant-MTP-Q8_0.gguf}"
+SPEC_ARGS=()
+if [[ "$SPEC" == "on" ]]; then
+  SPEC_ARGS=(
+    --model-draft "$DRAFT"
+    --spec-type draft-mtp
+    --spec-draft-n-max "$SPECN"
+    --n-gpu-layers-draft 99
+  )
+fi
+
+# --cache-ram 2048: cap host-RAM prompt cache (default 8192) — bookkeeping cost
+# grows with size, measured ~430ms/request at ~2GiB on the 12B.
+exec -a "gemma4-e4b@${PORT}.llama-server" llama-server \
+  --model "$MODEL" \
+  --alias "gemma4-e4b" \
+  --host 127.0.0.1 --port "$PORT" \
+  --device CUDA0 \
+  --fit off \
+  --n-gpu-layers 99 \
+  --ctx-size "$CTX" \
+  --parallel "$NP" \
+  --kv-unified \
+  --slot-save-path "$SLOTS_DIR" \
+  --slot-prompt-similarity 0.5 \
+  --flash-attn "$FA" \
+  --cache-type-k f16 \
+  --cache-type-v f16 \
+  --threads 8 \
+  --threads-batch 8 \
+  --no-mmap \
+  --temp "$TEMP" \
+  --top-p "$TOPP" \
+  --top-k "$TOPK" \
+  --min-p 0.0 \
+  --repeat-penalty 1.0 \
+  --jinja \
+  --reasoning "$REASON" \
+  --cache-ram 2048 \
+  "${MMPROJ_ARGS[@]}" \
+  "${SPEC_ARGS[@]}" \
+  --metrics

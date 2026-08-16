@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "cleanupPeriodDays": 9999,
+  "env": {
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "CLAUDE_CODE_NO_FLICKER": "1",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_TMPDIR": "/home/nullsense/.cache/claude-tmp"
+  },
+  "permissions": {
+    "allow": [
+      "Read(~/Programming/**)",
+      "Read(~/.dotfiles/**)",
+      "Bash(ls:*)",
+      "Bash(rg:*)",
+      "Bash(fd:*)",
+      "Bash(jq:*)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm tsc:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash list:*)",
+      "Bash(rtk proxy git diff:*)",
+      "Bash(rtk proxy git apply:*)",
+      "Bash(rtk proxy git format-patch:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./server/.env)",
+      "Read(./server/.env.*)",
+      "Read(./secrets/**)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~/*)",
+      "Bash(rm -rf $HOME*)"
+    ],
+    "defaultMode": "auto"
+  },
+  "model": "opus[1m]",
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh set"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedra agent hook receive --agent claude --quiet",
+            "timeout": 2,
+            "statusMessage": "Waiting for Zedra approval"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedra agent hook receive --agent claude --quiet",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rtk hook claude"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/home/nullsense/.claude/hooks/context-mode-cache-heal.mjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/home/nullsense/.claude/hooks/herdr-agent-state.sh' session",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh clear"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedra agent hook receive --agent claude --quiet",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/attention.sh clear"
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.local/bin/hyprwhspr-learn-on-submit",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedra agent hook receive --agent claude --quiet",
+            "timeout": 2
+          }
+        ]
+      }
+    ]
+  },
+  "worktree": {
+    "baseRef": "fresh"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash $HOME/.claude/statusline.sh"
+  },
+  "enabledPlugins": {
+    "claude-code-setup@claude-plugins-official": true,
+    "claude-mem@thedotmack": true,
+    "context-mode@context-mode": false,
+    "mattpocock-skills@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": true,
+    "zedra@zedra": true,
+    "grafana-core@grafana-skills": true,
+    "grafana-lgtm@grafana-skills": true,
+    "i-have-adhd@i-have-adhd": true
+  },
+  "extraKnownMarketplaces": {
+    "context-mode": {
+      "source": {
+        "source": "github",
+        "repo": "mksglu/context-mode"
+      }
+    },
+    "hyperb1iss-skills": {
+      "source": {
+        "source": "github",
+        "repo": "hyperb1iss/moonrepo-skill"
+      }
+    },
+    "mattpocock": {
+      "source": {
+        "source": "github",
+        "repo": "mattpocock/skills"
+      }
+    },
+    "zedra": {
+      "source": {
+        "source": "github",
+        "repo": "tanlethanh/zedra-plugin"
+      }
+    },
+    "grafana-skills": {
+      "source": {
+        "source": "github",
+        "repo": "grafana/skills"
+      }
+    },
+    "i-have-adhd": {
+      "source": {
+        "source": "github",
+        "repo": "ayghri/i-have-adhd"
+      }
+    }
+  },
+  "effortLevel": "high",
+  "skipWorkflowUsageWarning": true,
+  "editorMode": "vim",
+  "remoteControlAtStartup": true,
+  "agentPushNotifEnabled": true,
+  "skipAutoPermissionPrompt": true,
+  "additionalDirectories": [
+    "~/Programming",
+    "~/.cargo"
+  ],
+  "autoMode": {
+    "environment": [
+      "### Org-wide",
+      "**Organization**: Cortiq-Lab (GitHub org owning this repo's remote origin)",
+      "**Cloud provider(s)**: None configured",
+      "**Repository visibility**: assume private (not queryable via gh — org/repo not derivable or unsupported host; no public-visibility evidence found)",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: Infisical (referenced in .env.example and CI secret names: INFISICAL_DOMAIN, INFISICAL_PROJECT_ID, INFISICAL_BACKUPS_CLIENT_ID/SECRET); `op read` (1Password CLI) also seen as a secrets-manager marker",
+      "**Default / protected branches**: `master` is the default branch (per repo facts and CONTRIBUTING.md); protection status not queryable via gh here — treat master as protected by convention",
+      "**CI/CD deploy targets**: None configured",
+      "**Network posture**: None configured",
+      "**Source control**: The trusted repo (Cortiq-Lab/sift, remote `github.com:Cortiq-Lab/sift.git`) and its remote(s) only — no additional orgs configured",
+      "**Trusted internal domains**: None configured",
+      "**Trusted cloud buckets**: None configured",
+      "**Key internal services**: Qdrant (vector store, localhost:6333/6334 in dev), Postgres (Bronze layer), Zitadel (auth stack via `moon run sift:dev`) — all local/dev endpoints per .env.example, not confirmed prod services",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: `.env`, `.env.bak*`, `.env.production`, `.envrc`, `sift-api/.env`, `deploy/compose/env/*.env`, `deploy/dokploy/operator.env*`, `deploy/secrets/` (gitignored secret-bearing paths); `docs/reference/tenant-secrets-and-kms.md` (tenant/KMS secrets doc); CI secrets GITHUB_TOKEN, INFISICAL_BACKUPS_CLIENT_ID, INFISICAL_BACKUPS_CLIENT_SECRET, INFISICAL_DOMAIN, INFISICAL_PROJECT_ID, SIFT_API_KEY_A, SIFT_API_KEY_B, TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET — share only with audiences cleared at the named+specifics bar",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment (e.g. `.env.production`, `strip-prod-profiles.py`, `SIFT_ALLOW_DESTRUCTIVE_TEST_DB` prod-adjacent paths in this repo)",
+      "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development (Rust — multi-tenant retrieval engine 'Sift'; also personal dotfiles management per global CLAUDE.md)",
+      "**Trusted repo**: `/home/nullsense/Programming/sift`, remote `github.com:Cortiq-Lab/sift.git` (default branch `master`)",
+      "**Org-specific CLIs**: `moon` (Moon monorepo task runner — sanctioned entry point per CLAUDE.md), `rtk` (Rust Token Killer command wrapper, used heavily), `herdr`, `infisical`",
+      "**\"routine under <user>/ prefix\" qualifiers**: routine actions under `/home/nullsense/Programming/sift/` and `~/.dotfiles/` are user-owned routine work"
+    ],
+    "soft_deny": [
+      "$defaults",
+      "Bash(git push --force*) in Cortiq-Lab/sift"
+    ]
+  }
+}

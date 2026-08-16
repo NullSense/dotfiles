@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# litellm-gateway — the ALWAYS-ON model gateway (:4000). Runs the MCP-free profile
+# (~/.config/litellm/config.yaml) so startup is seconds, not the 40s-4min MCP tool
+# discovery used to take (and stalls when a remote MCP was unreachable).
+#
+# Owned by systemd (litellm.service, Restart=on-failure) — NOT by `stack` pidfiles.
+# The old nohup+pidfile scheme tracked the `infisical run` wrapper PID: when the
+# wrapper died, orphaned litellm children kept :4000 and every restart raced
+# "address already in use" (observed 2026-07-22 14:02:54). systemd's cgroup kill
+# can't orphan anything. `stack up/down/restart` drive this via systemctl.
+#
+# Env lives HERE (per-binary wrapper), not in the unit or direnv — systemd units
+# never see direnv-scoped env (see memory: agent-vault-env-systemd).
+#
+# ⚠⚠ INSTALL LINE — reproduce EXACTLY. Do not `uv tool install litellm` bare. ⚠⚠
+#
+#   uv tool install --force 'litellm[proxy,caching,extra_proxy]==1.95.0' --with 'fastapi<0.140'
+#   cd ~/.local/share/uv/tools/litellm/lib/python3.13/site-packages/litellm/proxy \
+#     && ~/.local/share/uv/tools/litellm/bin/python -m prisma generate
+#
+# Why each piece (all four were discovered the hard way on 2026-08-06, when the FIRST
+# restart in weeks failed — the long-running process had outlived a venv that could no
+# longer boot, so this was already broken and simply had not been observed yet):
+#   proxy        → the server itself; without it: "No module named 'websockets'"
+#   caching      → config.yaml sets cache_params.type: disk; without it, startup aborts
+#                  with "Please install litellm with `litellm[caching]`" (needs diskcache)
+#   extra_proxy  → brings prisma, required because general_settings sets
+#                  store_model_in_db: true + database_url
+#   prisma generate → installing the prisma PACKAGE is not enough; the client/binaries
+#                  are generated at install time. Without it: "Unable to find Prisma
+#                  binaries. Please run 'prisma generate' first."
+#   fastapi<0.140 → UPSTREAM CONSTRAINT BUG. litellm 1.95.0 declares
+#                  `fastapi>=0.136.3,<1.0`, but FastAPI removed
+#                  `fastapi.dependencies.utils.get_flat_dependant` in 0.140.x, which
+#                  litellm/proxy/management_endpoints/management_v1/common.py imports at
+#                  module scope. So a resolver that picks the newest allowed FastAPI
+#                  produces an install that satisfies the metadata and cannot start.
+#                  Bisected 2026-08-06: present through 0.139.x, gone in 0.140.13+.
+#                  Re-test this pin on any litellm upgrade — it should eventually lift.
+set -euo pipefail
+
+PORT="${LITELLM_PORT:-4000}"
+HOST="${LITELLM_HOST:-0.0.0.0}"
+CFG="${LITELLM_CFG:-$HOME/.config/litellm/config.yaml}"
+
+# tracing → otel-lgtm collector (house standard gRPC :4317; collector takes 4317/4318)
+export LITELLM_OTEL_V2=true OTEL_EXPORTER="${OTEL_EXPORTER:-otlp_grpc}" \
+  OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4317}" \
+  OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-litellm}" OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
+# THE SWITCH: development=LOCAL (llama-swap), production=CLOUD (OpenRouter).
+export LITELLM_ENVIRONMENT="${LITELLM_ENVIRONMENT:-development}"
+
+CMD=(litellm --config "$CFG" --host "$HOST" --port "$PORT")
+if [ "${LITELLM_UNSET_MASTER_KEY:-0}" = 1 ]; then
+  # The loopback-only MCP instance does not need client auth. Infisical still
+  # supplies its database and upstream-provider credentials, but this removes
+  # the gateway master key before LiteLLM starts so it cannot activate auth.
+  CMD=(env -u LITELLM_MASTER_KEY "${CMD[@]}")
+fi
+if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
+  exec infisical run --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "${CMD[@]}"
+else
+  [ -n "${OPENROUTER_API_KEY:-}" ] || echo "⚠ OPENROUTER_API_KEY unset — cloud routes will 401" >&2
+  [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2
+  exec "${CMD[@]}"
+fi

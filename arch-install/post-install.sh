@@ -197,19 +197,22 @@ if [[ ! -d "$ZINIT_HOME" ]]; then
   git clone https://github.com/zdharma-continuum/zinit.git "$ZINIT_HOME"
 fi
 
-echo "=== [10/11] chezmoi pull dotfiles ==="
-if ! command -v chezmoi &>/dev/null; then sudo pacman -S --noconfirm chezmoi; fi
-chezmoi init --apply https://github.com/NullSense/dotfiles.git
+echo "=== [10/11] plain Git dotfiles ==="
+if [[ ! -d "$HOME/.dotfiles/.git" ]]; then
+  git clone https://github.com/NullSense/dotfiles.git "$HOME/.dotfiles"
+fi
+"$HOME/.dotfiles/install.sh" --install
+"$HOME/.dotfiles/scripts/bootstrap-omarchy.sh"
 
 echo "=== [10.1/11] Helium browser (Chromium-based, AppImage with weekly auto-update) ==="
-# Helium has no built-in updater. The helium-update script deployed by chezmoi
+# Helium has no built-in updater. The tracked helium-update script
 # queries GitHub releases and atomically replaces the AppImage when a new tag appears.
 if [[ -x "$HOME/bin/helium-update" ]]; then
   "$HOME/bin/helium-update"
   systemctl --user daemon-reload || true
   systemctl --user enable --now helium-update.timer || true
 else
-  echo "  helium-update missing after chezmoi apply; skipping Helium install"
+  echo "  helium-update missing after dotfiles install; skipping Helium install"
 fi
 
 echo "=== [10.5/11] global git commit-msg hook to strip ALL AI attribution ==="

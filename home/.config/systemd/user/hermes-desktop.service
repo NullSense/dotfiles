@@ -1,0 +1,17 @@
+[Unit]
+Description=Hermes Desktop
+After=graphical-session.target agent-vault.service
+Wants=agent-vault.service
+PartOf=graphical-session.target
+
+[Service]
+Type=exec
+Environment="HERMES_HOME=/home/nullsense/.hermes"
+Environment="HERMES_DESKTOP_HERMES_ROOT=/home/nullsense/.hermes/hermes-agent"
+Environment="HERMES_DESKTOP_HERMES=/home/nullsense/.hermes/hermes-agent/venv/bin/hermes"
+LoadCredentialEncrypted=hermes-agent-vault-token:%h/.config/credstore.encrypted/hermes-agent-vault-token.cred
+LoadCredentialEncrypted=hermes-hass-token:%h/.config/credstore.encrypted/hermes-hass-token.cred
+LoadCredentialEncrypted=hermes-litellm-key:%h/.config/credstore.encrypted/hermes-litellm-key.cred
+ExecStart=/home/nullsense/.hermes/hermes-agent/venv/bin/hermes desktop --hermes-root /home/nullsense/.hermes/hermes-agent
+Restart=on-failure
+RestartSec=2

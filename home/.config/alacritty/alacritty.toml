@@ -1,0 +1,85 @@
+# Alacritty — primary terminal (migrated from Ghostty 2026-06-25, RTX 5090).
+#
+# Colors flip via the omarchy theme system; everything else is set here.
+# omarchy renders ~/.config/omarchy/current/theme/alacritty.toml on every
+# theme switch and `omarchy-restart-terminal` touches THIS file to trigger
+# alacritty's live_config_reload. We therefore IMPORT the theme palette and
+# define NO colors of our own — an explicit [colors.*] block here would
+# shadow the import and freeze the palette across theme switches.
+#
+# Performance note: alacritty renders via OpenGL, so the RTX 5090 already
+# accelerates the grid out of the box — there is no renderer/vsync knob to
+# tune in TOML (vsync is compositor-driven on Wayland). The "optimization"
+# here is structural: live theming, GPU-drawn box glyphs, a large in-RAM
+# scrollback, copy-on-select, and OSC 52 clipboard passthrough.
+
+[general]
+import = ["~/.config/omarchy/current/theme/alacritty.toml"]
+live_config_reload = true
+
+[env]
+# Full capabilities on: TERM=alacritty enables undercurl / styled underlines
+# (Smulx), strikethrough and richer key reporting in nvim/tmux. The terminfo
+# ships with the alacritty package and declares truecolor (Tc), so COLORTERM
+# is no longer required for 24-bit. Caveat: ssh to a host that lacks this
+# terminfo can garble — seed it once with:
+#   infocmp -x alacritty | ssh HOST tic -x -
+TERM = "alacritty"
+
+[terminal]
+# OSC 52 read+write — lets tmux / nvim / ssh sessions drive the system
+# clipboard through the terminal (carries over ghostty's clipboard behaviour).
+osc52 = "CopyPaste"
+
+[window]
+padding = { x = 10, y = 10 }
+opacity = 1.0               # opaque — max OLED text contrast; no compositor blur
+decorations = "None"        # Hyprland draws the border; no client-side titlebar
+startup_mode = "Windowed"
+dynamic_title = true
+
+[scrolling]
+# Alacritty keeps scrollback entirely in RAM and caps `history` at 100000
+# lines. Ghostty's 10M is impractical here; 100k is the alacritty maximum.
+history = 100000
+multiplier = 3
+
+[font]
+normal      = { family = "Hack Nerd Font Mono", style = "Regular" }
+bold        = { family = "Hack Nerd Font Mono", style = "Bold" }
+italic      = { family = "Hack Nerd Font Mono", style = "Italic" }
+bold_italic = { family = "Hack Nerd Font Mono", style = "Bold Italic" }
+size = 10.0
+
+# Render box-drawing / block / Powerline glyphs on the GPU from primitives
+# instead of the font — pixel-perfect rules with zero seams at any size.
+builtin_box_drawing = true
+
+[bell]
+animation = "EaseOutExpo"
+duration = 0               # 0 disables the bell flash entirely
+
+[selection]
+save_to_clipboard = true   # copy-on-select (matches ghostty copy-on-select)
+
+[cursor]
+style = { shape = "Block", blinking = "On" }
+blink_interval = 750
+unfocused_hollow = true
+
+[mouse]
+hide_when_typing = true
+
+[keyboard]
+bindings = [
+    { key = "V", mods = "Control|Shift", action = "Paste" },
+    { key = "C", mods = "Control|Shift", action = "Copy" },
+    { key = "Insert", mods = "Shift", action = "PasteSelection" }, # compatibility
+
+    # Font size
+    { key = "Equals",         mods = "Control", action = "IncreaseFontSize" }, # Ctrl + =
+    { key = "NumpadAdd",      mods = "Control", action = "IncreaseFontSize" }, # Ctrl + NumpadPlus
+    { key = "Minus",          mods = "Control", action = "DecreaseFontSize" }, # Ctrl + -
+    { key = "NumpadSubtract", mods = "Control", action = "DecreaseFontSize" }, # Ctrl + NumpadMinus
+    { key = "Key0",           mods = "Control", action = "ResetFontSize" },    # Ctrl + 0
+]

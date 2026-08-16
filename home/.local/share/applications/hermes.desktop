@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Hermes
+GenericName=Hermes Desktop
+Comment=Launch Hermes Desktop
+Exec=/usr/bin/systemctl --user start hermes-desktop.service
+Icon=/home/nullsense/.hermes/hermes-agent/apps/desktop/assets/icon.png
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=Hermes

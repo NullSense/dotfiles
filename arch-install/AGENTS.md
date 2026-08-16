@@ -1,7 +1,7 @@
 # Agent Toolchain Architecture
 
-This directory documents the host-side agent toolchain. Chezmoi source is
-authoritative; edit source files and apply only the target you changed.
+This directory documents the host-side agent toolchain. Live dotfiles are
+individual symlinks into `~/.dotfiles/home`; edit the live path normally.
 
 ## Current boundaries
 
@@ -9,7 +9,7 @@ authoritative; edit source files and apply only the target you changed.
   There are no PATH-shadowing shims, `infisical run` launchers, or outer bwrap
   wrappers.
 - Agent Vault is the HTTP/HTTPS credential broker. Invoke it explicitly with
-  `agent-vault run --vault <vault> -- <command>` or from a service drop-in.
+  `agent-vault vault run --vault <vault> -- <command>` or from a service drop-in.
 - Infisical backs selected Agent Vault vaults. Infisical credentials belong to
   the Agent Vault service, not agent processes.
 - Protocol-local values that an HTTP proxy cannot inject (for example a Home
@@ -22,18 +22,17 @@ authoritative; edit source files and apply only the target you changed.
 
 | Concern | Source |
 |---|---|
-| Agent Vault service | `dot_config/systemd/user/agent-vault.service` |
-| Hermes credential boundary | `dot_config/systemd/user/hermes-gateway.service.d/10-agent-vault.conf` |
-| Agent Vault operations | `AGENT-VAULT.md` |
-| MCP inventory | `.chezmoidata/mcp.yaml` |
-| MCP renderer | `dot_local/bin/executable_mcp-sync` |
-| Commit signing | `bin/executable_git-sign-ssh`, `dot_config/systemd/user/git-sign-agent.service` |
-| Claude safety hooks | `dot_claude/hooks/` and `dot_claude/settings.json` |
+| Agent Vault service | `home/.config/systemd/user/agent-vault.service` |
+| Hermes credential boundary | `home/.config/systemd/user/hermes-gateway.service.d/10-agent-vault.conf` |
+| MCP gateway inventory | `home/.config/litellm/config-mcp.yaml` |
+| MCP client endpoints | each client's native config under `home/` |
+| Commit signing | `home/bin/git-sign-ssh`, `home/.config/systemd/user/git-sign-agent.service` |
+| Claude safety hooks | `home/.claude/hooks/` and `home/.claude/settings.json` |
 
 ## Hermes runtime
 
-Hermes owns and may regenerate its base `hermes-gateway.service`. Chezmoi
-manages only `hermes-gateway.service.d/10-agent-vault.conf`; the drop-in
+Hermes owns and may regenerate its base `hermes-gateway.service`. Dotfiles
+track only `hermes-gateway.service.d/10-agent-vault.conf`; the drop-in
 survives vendor regeneration and replaces `ExecStart` with the supported
 `agent-vault run` chain.
 
@@ -48,8 +47,9 @@ by the user systemd manager at service start.
 command -v claude codex opencode hermes
 systemctl --user is-active agent-vault.service hermes-gateway.service
 systemctl --user cat hermes-gateway.service
-agent-vault run --vault hermes -- agent-vault vault discover --json
+agent-vault vault run --vault hermes -- agent-vault vault discover --json
 codex mcp list
+ss -ltn 'sport = :4001'
 git log --show-signature -1
 ```
 

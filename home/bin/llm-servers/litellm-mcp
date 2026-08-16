@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# litellm-mcp — the OPTIONAL MCP-aggregation instance (:4001), profile
+# ~/.config/litellm/config-mcp.yaml. Slow to boot BY NATURE (discovers tools from
+# every configured MCP server before uvicorn binds) — which is exactly why it is
+# a separate instance and not part of the always-on gateway (litellm-gateway).
+# Start/stop via `stack mcp` / `stack mcp off` (systemd litellm-mcp.service).
+#
+# Consumers point at http://127.0.0.1:4001/mcp/ (trailing slash). Shares
+# litellm-db with the gateway (same master/virtual keys).
+set -euo pipefail
+
+# node/npx for the stdio MCP servers: NOT in the systemd PATH — mise doesn't shim
+# node (proto/mise split ownership; `mise reshim` creates no node/npx shims), and
+# interactive shells get it via mise PATH activation, which units never run. The
+# `latest` symlink tracks mise upgrades. Without this, litellm's stdio spawn dies
+# instantly → every list_tools "Connection closed" (found 2026-07-22).
+export PATH="$HOME/.local/share/mise/installs/node/latest/bin:$PATH"
+
+# agent-vault proxy for the stdio MCP subprocesses litellm spawns (NOT litellm
+# core egress) — fetched HERE because systemd units never inherit direnv env.
+if command -v agent-vault >/dev/null 2>&1 && _AVT="$(agent-vault vault token --vault default 2>/dev/null)" && [ -n "$_AVT" ]; then
+  export AV_HTTPS_PROXY="http://${_AVT}:default@127.0.0.1:14322"
+  export AV_CA="$HOME/.agent-vault/mitm-ca.pem"
+  # LiteLLM itself owns the hosted MCP connections. Route those through Agent
+  # Vault so credentials are injected without appearing in this config.
+  export HTTPS_PROXY="$AV_HTTPS_PROXY" HTTP_PROXY="$AV_HTTPS_PROXY"
+  export SSL_CERT_FILE="$AV_CA" REQUESTS_CA_BUNDLE="$AV_CA"
+  export NO_PROXY="localhost,127.0.0.1"
+  # node/npm (npx bootstraps + the MCP servers' own API calls) must TRUST the
+  # agent-vault MITM CA — without this, npx dies with "unable to verify the first
+  # certificate" under systemd (the var used to come from the direnv session env,
+  # which systemd units never see — the known agent-vault/systemd trap).
+  export NODE_EXTRA_CA_CERTS="$AV_CA"
+  unset _AVT
+else
+  echo "⚠ agent-vault token unavailable — vault-shielded MCP servers (exa/github/hf) will fail auth" >&2
+fi
+
+exec env LITELLM_HOST=127.0.0.1 LITELLM_PORT=4001 LITELLM_UNSET_MASTER_KEY=1 \
+  LITELLM_CFG="$HOME/.config/litellm/config-mcp.yaml" \
+  OTEL_SERVICE_NAME=litellm-mcp \
+  "$(dirname "$(readlink -f "$0")")/litellm-gateway"

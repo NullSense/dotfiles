@@ -210,21 +210,27 @@ step "Verifying"
 # is good. A failed probe here is far more likely to be a slow syncer or an
 # expired CLI login than a broken config, and tearing down a working broker
 # over that is strictly worse than leaving it up and saying so.
+# Ground truth is the broker's own startup log, NOT the settings endpoint's
+# `infisical_available` flag — that flag reports false even when Infisical is
+# fully working (observed 2026-08-16: "infisical client ready" in the journal
+# while the endpoint still said false), so gating on it produces false alarms.
 verified=0
 for attempt in $(seq 1 10); do
-    tok="$(agent-vault vault token --vault "$VAULT_SRC" 2>/dev/null || true)"
-    if [[ -z "$tok" ]]; then
-        (( attempt == 1 )) && info "waiting for the CLI session to come back..."
-        sleep 2; continue
-    fi
-    body="$(curl -fsS --max-time 5 -H "Authorization: Bearer $tok" \
-             "$AV_ADDR/v1/vaults/$VAULT_SRC/settings" 2>/dev/null || true)"
-    if grep -q '"infisical_available":[[:space:]]*true' <<<"$body"; then
-        verified=1; break
-    fi
-    (( attempt == 1 )) && info "waiting for the Infisical client to come up..."
+    _line="$(journalctl --user -u agent-vault.service -n 200 --no-pager 2>/dev/null \
+             | grep -o 'infisical client ready\|infisical client unavailable' | tail -1)"
+    case "$_line" in
+        "infisical client ready")       verified=1; break ;;
+        "infisical client unavailable") verified=2; break ;;
+    esac
+    (( attempt == 1 )) && info "waiting for the Infisical client to report in..."
     sleep 2
 done
+if (( verified == 2 )); then
+    printf '\n%s!! the broker rejected the Infisical credentials%s\n' "$c_err" "$c_off" >&2
+    journalctl --user -u agent-vault.service -n 200 --no-pager 2>/dev/null \
+        | grep 'infisical client unavailable' | tail -1 | sed 's/^/    /' >&2
+    rollback
+fi
 
 if (( verified )); then
     info "infisical_available = true"
@@ -239,7 +245,7 @@ else
     "infisical client ready ... auth_method=universal" means it worked and this
     probe was simply too impatient or the CLI login lapsed. Re-check with:
 
-      agent-vault vault credential-store show $VAULT_DST
+      agent-vault vault credential-store show <vault>
 
     If instead you see "infisical client unavailable", the credentials or URL
     are wrong; re-run this script, or roll back with the commands below.

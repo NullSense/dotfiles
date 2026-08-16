@@ -129,12 +129,15 @@ info "'$VAULT_DST' credential store is currently: ${current_store:-unknown}"
 
 # The broker itself must have an Infisical machine identity, or step 4 fails.
 # Check now rather than after we have already written secrets upstream.
-_probe_tok="$(agent-vault vault token --vault "$VAULT_SRC" 2>/dev/null || true)"
-if [[ -n "$_probe_tok" ]] \
-   && curl -fsS --max-time 5 -H "Authorization: Bearer $_probe_tok" \
-        "$AV_ADDR/v1/vaults/$VAULT_SRC/settings" 2>/dev/null \
-        | grep -q '"infisical_available":[[:space:]]*true'; then
-    info "broker has an Infisical machine identity (infisical_available=true)"
+# Ask the broker's startup log, NOT /v1/vaults/<v>/settings. That endpoint's
+# `infisical_available` flag reports false even when Infisical is fully working
+# (observed 2026-08-16: journal said "infisical client ready" and
+# credential-store set succeeded, while the flag still said false), so gating
+# on it blocks a perfectly good setup.
+_inf="$(journalctl --user -u agent-vault.service -n 200 --no-pager 2>/dev/null \
+        | grep -o 'infisical client ready\|infisical client unavailable' | tail -1)"
+if [[ "$_inf" == "infisical client ready" ]]; then
+    info "broker's Infisical client is ready"
 else
     cat >&2 <<'MSG'
 
@@ -163,7 +166,7 @@ ERROR: the Agent Vault broker has no Infisical machine identity, so it cannot
 MSG
     die "broker not Infisical-enabled; see the steps above"
 fi
-unset _probe_tok
+unset _inf
 
 # ── 2. backups ──────────────────────────────────────────────────────────────
 step "Backups"

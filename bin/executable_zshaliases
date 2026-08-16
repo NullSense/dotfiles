@@ -10,18 +10,11 @@
 # ~600 user-writable files to their own absolute path. See
 # ~/the-night-an-ai-ate-my-home-directory.md for the postmortem.
 #
-# Agent-shell guard. Two architectures, both detected here:
-#   1. agent-vault: `agent-vault vault run --vault default -- <agent>` sets
-#      AGENT_VAULT_SESSION_TOKEN for the wrapped child.
-#   2. agent-isolated (bubblewrap, current default for claude/codex/opencode):
-#      sets AGENT_ISOLATED=1 in the sandbox env. The wrapper also propagates
-#      AGENT_VAULT_SESSION_TOKEN only when --agent-vault is passed; otherwise
-#      it scrubs that env var entirely.
-# Either signal short-circuits alias loading so an interactive alias
+# Agent Vault short-circuits alias loading so an interactive alias
 # (cf. the 2026-05-08 `alias ls=eza` incident) never gets captured into an
 # agent's shell snapshot. Non-interactive shells skip too.
+[[ -n "${AGENT_VAULT_TOKEN:-}" ]] && return 0
 [[ -n "${AGENT_VAULT_SESSION_TOKEN:-}" ]] && return 0
-[[ -n "${AGENT_ISOLATED:-}" ]] && return 0
 [[ -o interactive ]] || return 0
 
 # Aliases
@@ -106,10 +99,3 @@ alias paur='paru --chroot'
 # e.g. `vdl --cookies ~/cookies.txt <url>` for gated/NSFW. `grab -A <url>` for
 # audio-only. (Helium cookies can't be auto-decrypted — Chromium-fork keyring.)
 alias vdl='grab -v'
-
-# NOTE: claude/codex/opencode are NOT aliased here. dot_zshrc defines them
-# as shell functions (after sourcing this file) that route through
-# ~/bin/agent-isolated for OS-level bubblewrap isolation. To get the old
-# agent-vault credential-injection behaviour, pass --agent-vault:
-#     claude --agent-vault   # binds the MITM CA + propagates AGENT_VAULT_SESSION_TOKEN
-# Direct bypass: `command claude` or `AGENT_UNSANDBOX=1 claude`.

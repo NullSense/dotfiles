@@ -30,6 +30,12 @@ mcps:
     type: http
     url: https://mcp.context7.com/mcp
 
+  # Official Infisical documentation MCP. Hosted and continuously updated;
+  # it carries product knowledge only and never receives vault credentials.
+  infisical-docs:
+    type: http
+    url: https://infisical.com/docs/mcp
+
   # --- stdio, local ---------------------------------------------------
   playwright:
     type: stdio
@@ -63,5 +69,5 @@ mcps:
     command: npx
     args:
       - "-y"
-      - "@react-grab/mcp"
+      - "@react-grab/mcp@latest"
       - --stdio

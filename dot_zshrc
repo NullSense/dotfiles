@@ -229,45 +229,6 @@ yk() { command -v kitty >/dev/null && kitty --detach yazi "$@"; }
 [[ -f ~/bin/zshfzfrc  ]] && source ~/bin/zshfzfrc
 [[ -f ~/.secrets       ]] && source ~/.secrets
 
-# ─── AI agent isolation (bubblewrap) ────────────────────────────────────────
-# Agent isolation lives in ~/bin/{claude,codex,opencode} — real on-disk shims
-# that PATH-shadow the real binaries (~/.local/bin/claude, /usr/bin/codex,
-# /usr/bin/opencode). Each shim execs ~/bin/_agent-shim which dispatches
-# through ~/bin/agent-isolated (bwrap sandbox).
-#
-# Why shims, not zsh functions: a function only intercepts zsh invocations.
-# Anything else — `command claude`, /usr/bin/env claude, any non-zsh shell,
-# an exec() syscall from a program, a systemd unit — would bypass the
-# wrapper and reach the real binary. Binary shims in ~/bin (first on $PATH)
-# catch all PATH-based lookups regardless of shell or context.
-#
-# Escape hatches per invocation: --ssh / --gpg / --rbw / --agent-vault
-# Sandbox bypasses (deliberate, no longer accidental):
-#   • AGENT_UNSANDBOX=1 claude …      — env-var gate
-#   • ~/.local/bin/claude …           — invoke real binary by full path
-#
-# unalias the names in case a legacy alias snuck back in via zshaliases
-# (some omarchy/agent-vault setups define `alias claude='agent-vault …'`).
-# `unalias` returns 1 on the first missing name and skips the rest, so loop
-# per-name to guarantee all three get cleared regardless of which (if any)
-# alias actually exists.
-for _agent in claude codex opencode; do unalias "$_agent" 2>/dev/null; done
-unset _agent
-
-# Deliberate-unsandbox convenience: <name>-raw runs the agent outside bwrap.
-# Implementation: invoke the real binary directly at ~/.local/bin/<agent>,
-# skipping the ~/bin shim entirely. This avoids a chicken-and-egg loop where
-# AGENT_UNSANDBOX=1 routes through the shim, which routes through agent-
-# isolated, which would re-resolve "claude" back to the shim.
-#
-# Use when you need to write to paths the sandbox doesn't bind (systemd unit
-# files, /etc, ~/.config/* outside chezmoi source, etc.) Full host access,
-# all secrets exposed — the bwrap sandbox was the only in-sandbox secret
-# boundary and -raw mode skips it entirely. Last resort only.
-alias claude-raw='$HOME/.local/bin/claude'
-alias codex-raw='/usr/bin/codex'
-alias opencode-raw='/usr/bin/opencode'
-
 # zoxide MUST be last: it installs a chpwd hook + precmd, and zoxide's doctor
 # warns if any later sourced file (aliases, hooks, secrets) registers chpwd
 # after it. Keep this at the very bottom of zshrc.

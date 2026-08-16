@@ -1,6 +1,6 @@
 # Rust compiler invocations need sccache's local daemon socket. Codex's inner
 # command sandbox blocks socket(2), so these trusted build commands run outside
-# that inner layer while remaining inside the outer agent-isolated sandbox.
+# that command sandbox.
 prefix_rule(
     pattern = ["rtk", "cargo", ["check", "build", "test", "clippy", "nextest"]],
     decision = "allow",

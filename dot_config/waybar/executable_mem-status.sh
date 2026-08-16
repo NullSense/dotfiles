@@ -6,7 +6,7 @@
 #          zram-only box swap is usually 0, and a permanent "S0.0G" is noise.
 # Tooltip: RAM used/avail/total, cached, swap, shmem; top 5 apps by PSS; and
 #          tmpfs mounts >512M — INCLUDING inside foreign mount namespaces
-#          (bwrap/agent-isolated sandboxes get a private /tmp that no
+#          (container sandboxes can get a private /tmp that no
 #          per-process tool attributes; a sandboxed build tree once ate 25G
 #          while every RSS/PSS list pointed at nothing).
 #

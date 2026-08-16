@@ -6,8 +6,8 @@
 # Why: on the HOST, SSH_AUTH_SOCK points at the Bitwarden agent, which holds the
 # auth key but NOT the sign-only key — so `ssh-keygen -Y sign` can't find it
 # ("Couldn't find key in agent"). The sign key lives only in git-sign-agent.
-# Forcing SSH_AUTH_SOCK to that socket here makes signing work on the host and
-# inside agent-isolated (which binds the same socket). Verification
+# Forcing SSH_AUTH_SOCK to that socket here makes signing deterministic.
+# Verification
 # (ssh-keygen -Y verify) ignores the agent, so this is transparent for it.
 exec env SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/git-sign-agent.sock" \
     /usr/bin/ssh-keygen "$@"

@@ -3,9 +3,8 @@ Description=Dedicated ssh-agent holding ONLY the git commit-signing key
 Documentation=file://%h/dotfiles/arch-install/AGENTS.md
 # A minimal, separate ssh-agent that holds a sign-only ed25519 key (NOT the
 # Bitwarden auth key, NOT registered as an authorized key on any host/GitHub).
-# agent-isolated binds THIS socket into sandboxes by default, so agents can
-# make signed commits without exposing an auth-capable key. The full Bitwarden
-# agent (server auth / SSH push) stays behind the --ssh escape hatch.
+# Agents use this socket for signed commits without exposing an auth-capable
+# key. The full Bitwarden agent remains separate.
 # Headless (no GUI dep), survives Hyprland restarts — same rationale as
 # agent-vault.service.
 

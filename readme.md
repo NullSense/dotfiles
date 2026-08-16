@@ -20,7 +20,7 @@ github.com/NullSense/dotfiles                   ← THIS IS THE ONLY REPO
 │
 ├── dot_claude/        chezmoi → ~/.claude/             Claude Code: CLAUDE.md, mcp.json, statusline, skills, commands, memory, hooks (destructive-guard)
 ├── dot_codex/         chezmoi → ~/.codex/              Codex CLI: config.toml, rules
-├── dot_config/        chezmoi → ~/.config/             hypr/, waybar/, ghostty/, mako/, opencode/, systemd/user/, agent-isolated/, etc.
+├── dot_config/        chezmoi → ~/.config/             hypr/, waybar/, ghostty/, mako/, opencode/, systemd/user/, etc.
 ├── dot_local/         chezmoi → ~/.local/              user-installed binaries (hypr-waybar-bridge, sudo-pill-daemon, etc.)
 ├── dot_lmstudio/      chezmoi → ~/.lmstudio/           LM Studio config presets (voice-rewrite, coding, general)
 ├── dot_zshrc          chezmoi → ~/.zshrc
@@ -31,7 +31,7 @@ github.com/NullSense/dotfiles                   ← THIS IS THE ONLY REPO
 ├── dot_envrc          chezmoi → ~/.envrc               direnv root
 ├── dot_tmux.conf      chezmoi → ~/.tmux.conf
 ├── private_dot_ssh/   chezmoi → ~/.ssh/                (mode 700; private_ prefix preserves permissions)
-├── bin/               chezmoi → ~/bin/                 user shell scripts deployed to PATH (agent-isolated, full-reload, restart-waybar, …)
+├── bin/               chezmoi → ~/bin/                 user shell scripts deployed to PATH (full-reload, restart-waybar, …)
 ├── dot_git-template/  chezmoi → ~/.git-template/       global git hooks: pre-commit (gitleaks + infisical) + pre-push (trufflehog --results=verified)
 ├── root/              chezmoi → /root/ (system files; opt-in)
 │
@@ -121,29 +121,14 @@ Bitwarden Desktop  →  ~/.bitwarden-ssh-agent.sock  →  SSH_AUTH_SOCK (set in 
 - `gpg.format = ssh` + `gpg.ssh.allowedSignersFile = ~/.config/git/allowed_signers` — GPG is **not** used for git; the SSH key is the trust root for everything.
 - Locking BW Desktop (timeout or manual) clears all SSH operations until you unlock — intentional trade-off.
 
-### 2. Per-invocation isolation — `agent-isolated` (bubblewrap) via PATH shims
+### 2. Credential brokering — Agent Vault backed by Infisical
 
-Every coding-agent CLI (`claude`, `codex`, `opencode`) is auto-wrapped by `~/bin/agent-isolated`. The wrapping is enforced by **on-disk binary shims** at `~/bin/{claude,codex,opencode}` that PATH-shadow the real binaries — `~/bin/` is first in `$PATH` per `dot_zshenv`. Each shim execs `~/bin/_agent-shim` which lifts known wrapper flags and dispatches through `agent-isolated`.
-
-Why shims, not zsh functions: a function only intercepts zsh invocations. Anything else — `command claude`, `/usr/bin/env claude`, any non-zsh shell, an `exec()` syscall from a program, a systemd unit — would bypass the wrapper. Real binaries on `$PATH` catch all PATH-based lookups regardless of context.
-
-The agent runs with `tmpfs /` + `tmpfs $HOME`, plus a curated allowlist of read-only paths and read-write workspaces. It **cannot** see raw private keys/passwords — `~/.ssh/id_*`, `~/.gnupg`, `~/.config/rbw`, the rbw socket, browser profiles, the chezmoi `private_*` sources, atuin history, the cliphist DB, or any secret-bearing env var. Since **2026-07-13** it **can** (by default) use the Bitwarden SSH **auth** agent socket (`SSH_AUTH_SOCK` → `git push`/`ssh git@github.com`), `~/.ssh/known_hosts`, and `~/.config/gh` — so agents do git + `gh` directly. GitHub git is routed over SSH via gitconfig `insteadOf`, so no token is needed for git. `claude-raw`/`AGENT_UNSANDBOX=1` exposes everything.
-
-Defaults-on (since 2026-07-13): Bitwarden SSH auth key, `agent-vault` HTTPS credential injection, docker socket, GPU nodes.
-
-Escape-hatches (opt-in per invocation):
-- `claude --ssh`          → no-op now (auth agent bound by default); kept for compat
-- `claude --gpg`          → binds `$XDG_RUNTIME_DIR/gnupg`
-- `claude --rbw`          → binds the rbw socket + config + binary
-- `claude --no-agent-vault` / `--no-docker` / `--no-gpu` → opt OUT of a default-on surface
-
-Bypasses (deliberate, no longer accidental):
-- `AGENT_UNSANDBOX=1 claude …` — env-var gate inside `agent-isolated`
-- `~/.local/bin/claude …` (or `/usr/bin/codex`, `/usr/bin/opencode`) — invoke the real binary by full path
-
-`command claude` does **not** bypass: it still resolves through `$PATH` and hits the shim. Closing this hole was the reason for moving from zsh functions to shims.
-
-Self-test: `~/bin/agent-isolated --self-test` runs 26 verifications (20 negative — secrets must be hidden, 6 positive — required surfaces must be reachable).
+Coding-agent CLIs resolve directly to their vendor binaries. Agent Vault is
+invoked explicitly with `agent-vault run --vault <vault> -- <command>` or from
+a managed systemd drop-in for an unattended service. Infisical backs selected
+vaults and syncs credentials into Agent Vault; it does not wrap agent
+processes. Protocol-local credentials that cannot be injected by an HTTP proxy
+use encrypted systemd credentials scoped to the consuming service.
 
 ### 3. Secret scanning at commit & push time
 
@@ -203,7 +188,7 @@ None of these run on a timer. They exist for incident response and curiosity.
 | Layer | Mode | Trigger |
 |---|---|---|
 | Bitwarden SSH agent | automatic | always-on, GUI-managed; 5min vault timeout |
-| `agent-isolated` bwrap shim | automatic | every `claude` / `codex` / `opencode` invocation via PATH |
+| Agent Vault broker | explicit/service | `agent-vault run` or a scoped systemd drop-in |
 | gitleaks + infisical pre-commit | automatic | every `git commit` (all repos with template hook) |
 | trufflehog pre-push | automatic | every `git push` (all repos with template hook) |
 | arch-audit-gtk | automatic | 2–6h jittered + pacman post-tx hook |
@@ -217,7 +202,7 @@ None of these run on a timer. They exist for incident response and curiosity.
 ### Verifying the stack
 
 ```sh
-~/bin/agent-isolated --self-test            # 26-check sandbox verification
+systemctl --user is-active agent-vault hermes-gateway
 stat -c '%a %n' ~/.bitwarden-ssh-agent.sock # expect 700
 ssh-add -l                                  # expect your keys listed
 git log --show-signature -1                 # expect "Good signature" via SSH

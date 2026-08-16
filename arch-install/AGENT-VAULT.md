@@ -232,31 +232,28 @@ av-add-credential ANTHROPIC_API_KEY     # prompts silently for value, registers
 
 ### 6. How agents use the vault
 
-> **CURRENT WIRING (updated 2026-05-28).** Agent Vault is **opt-in**, not the
-> always-on transparent layer this section originally described. Typing
-> `claude`/`codex`/`opencode` routes through the `~/bin` shims →
-> `_agent-shim` → `infisical run` → `agent-isolated` (bwrap sandbox); see
-> [`AGENTS.md`](./AGENTS.md) for the full pipeline. Agent Vault enters the
-> loop **only** when you pass `--agent-vault`:
+> **CURRENT WIRING (updated 2026-08-16).** Coding-agent commands resolve
+> directly to their vendor binaries; there are no PATH shims, `infisical run`
+> launchers, or outer bwrap wrappers. Use Agent Vault explicitly for an ad-hoc
+> command:
 >
 > ```bash
-> claude --agent-vault          # route this session's HTTPS through the broker
-> codex  --agent-vault
+> agent-vault run --vault default -- claude
+> agent-vault run --vault default -- codex
 > ```
 >
-> The flag (lifted by `_agent-shim`, handled in `agent-isolated`) sets
-> `HTTPS_PROXY`/CA trust **inside the sandbox** for that one invocation. There
-> are no `alias claude='agent-vault vault run …'` aliases anymore — that
-> earlier approach (below) is kept for reference / ad-hoc use only.
+> Long-running services use a vault-scoped Agent Vault identity and a systemd
+> drop-in. Infisical supplies Agent Vault's credential store; it does not wrap
+> the agent process. See [`AGENTS.md`](./AGENTS.md) for the current topology.
 
-The underlying mechanism is the `agent-vault vault run` wrapper: it creates a
+The underlying mechanism is `agent-vault run`: it creates a
 vault-scoped session, sets `HTTPS_PROXY` and CA trust on the wrapped process
 **only** (your normal shell stays clean), and the token dies when the process
 exits. Use it directly for ad-hoc commands:
 
 ```bash
-agent-vault vault run --vault default -- curl https://api.openai.com/v1/models
-agent-vault vault run --vault default -- $SHELL      # transient broker subshell
+agent-vault run --vault default -- curl https://api.openai.com/v1/models
+agent-vault run --vault default -- $SHELL      # transient broker subshell
 ```
 
 The historical always-on aliases were:

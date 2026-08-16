@@ -104,7 +104,7 @@
 # injection, which only covers api.github.com, so `git push` from a sandboxed
 # agent 401'd. That rationale is obsolete: the `!gh auth git-credential`
 # helper supplies the token directly rather than depending on proxy injection,
-# verified from inside agent-isolated against private repos (fetch + push).
+# verified against private repos (fetch + push).
 #
 # Why the change: the SSH path authenticates through the Bitwarden SSH agent,
 # which is a Desktop-GUI-only feature. From a remote SSH session (e.g. phone

@@ -15,7 +15,18 @@ GATEWAY="${LLM_GATEWAY:-http://127.0.0.1:4000}"
 MASTER_PATH="${LITELLM_MASTER_PATH:-/litellm}"
 ENV="${INFISICAL_ENV:-dev}"
 
-[ $# -ge 1 ] || { echo "usage: llm-vkey <project> [infisical-path]   (e.g. llm-vkey oracle /Oracle)"; exit 1; }
+usage() {
+  echo "usage: llm-vkey <project> [infisical-path]   (e.g. llm-vkey oracle /Oracle)"
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+[ $# -ge 1 ] || { usage; exit 1; }
 tag="$1"; path="${2:-/${1^}}"   # default path = /Capitalized(project)
 
 command -v jq        >/dev/null || { echo "llm-vkey: needs jq"; exit 1; }

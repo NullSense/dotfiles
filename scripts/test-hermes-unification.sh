@@ -128,4 +128,25 @@ grep -q '^HINDSIGHT_LLM_API_KEY=litellm-key$' "$test_root/secrets.out"
 grep -q '^HASS_TOKEN=hass-token$' "$test_root/secrets.out"
 grep -q '^HTTP_PROXY=http://127.0.0.1:14322$' "$test_root/secrets.out"
 
+# The provider is not a command wrapper. Accidental argv must fail without
+# emitting any of the resolved dotenv payload.
+if env -i \
+    HOME="$fake_home" \
+    PATH=/usr/bin:/bin \
+    CREDENTIALS_DIRECTORY="$credentials_dir" \
+    HERMES_SECRET_AGENT_VAULT_BIN="$fake_agent_vault" \
+    "$repo/home/.local/libexec/hermes-secret-env" hermes memory --help \
+    >"$test_root/misuse.out" 2>"$test_root/misuse.err"; then
+    echo 'expected hermes-secret-env to reject command-wrapper arguments' >&2
+    exit 1
+fi
+test ! -s "$test_root/misuse.out"
+grep -q 'dotenv provider, not a command wrapper' "$test_root/misuse.err"
+
+# Help must be side-effect-free. It used to treat --help as a key alias and
+# mint a LiteLLM virtual key before failing to store it.
+env -i HOME="$fake_home" PATH=/usr/bin:/bin \
+    "$repo/home/bin/llm-vkey" --help >"$test_root/llm-vkey-help.out"
+grep -q '^usage: llm-vkey ' "$test_root/llm-vkey-help.out"
+
 echo 'Hermes launch and parity contracts pass'

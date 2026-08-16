@@ -42,23 +42,43 @@ for arg in "$@"; do
     fi
     case "$arg" in
         --) saw_terminator=1; passthrough+=("$arg") ;;
-        --ssh|--gpg|--rbw|--agent-vault|--dotfiles|--gpu|--no-gpu)
+        --ssh|--gpg|--rbw|--dotfiles|--gpu|--no-gpu \
+        |--agent-vault|--no-agent-vault \
+        |--docker|--no-docker \
+        |--github|--no-github \
+        |--plannotator|--no-plannotator)
             wrapper_flags+=("$arg") ;;
         *) passthrough+=("$arg") ;;
     esac
 done
 
-# Infisical injection layer (outermost). Pulls vault secrets into env so
-# agent-isolated's allowlist + --setenv pipeline can forward the per-agent
-# API keys (OPENROUTER_API_KEY, OPENCODE_API_KEY, ANTHROPIC_API_KEY, …)
-# into the bwrap sandbox. Vault secrets never touch disk.
+# Infisical injection layer (outermost) — DEFAULT-OFF since 2026-08-16.
 #
-# Layering: infisical run → agent-isolated → bwrap → agent. The user is
-# authenticated interactively via `infisical login`; non-interactive callers
-# (systemd/cron) must export INFISICAL_TOKEN or INFISICAL_UNIVERSAL_AUTH_*
-# beforehand. Set AGENT_NO_INFISICAL=1 to skip (e.g. when vault is offline).
+# This used to run unconditionally, which handed every agent the real values
+# of the per-agent API keys (ANTHROPIC_API_KEY, OPENROUTER_API_KEY,
+# OPENCODE_API_KEY, EXA_API_KEY, …) in its environment. That is exactly what
+# the credential broker exists to prevent, so it defeated the whole point:
+# the bwrap masks hid the secret FILES while this line handed over the KEYS.
+#
+# Those keys are now brokered by agent-vault instead (default-on, see
+# agent-isolated), so the agent reaches the same APIs without ever holding a
+# token. Nothing here is needed for that path.
+#
+# Project runtime secrets (DATABASE_URL, JWT_SECRET — things an app reads and
+# no HTTP proxy can broker) do NOT belong at this layer either: they are
+# per-project, and injecting them globally scopes every agent to whatever
+# .infisical.json happened to be in $PWD. Run those per-command inside the
+# project instead:  infisical run -- npm test
+# See ~/Programming/sift/.envrc for the pattern (coordinates in the file,
+# token in $XDG_RUNTIME_DIR, zero secrets at rest).
+#
+# Escape hatch: AGENT_INFISICAL=1 restores the old always-inject behaviour
+# for one invocation, e.g. debugging an agent that genuinely needs ambient
+# project secrets. Layering when enabled: infisical run → agent-isolated →
+# bwrap → agent; requires an interactive `infisical login`, or INFISICAL_TOKEN
+# / INFISICAL_UNIVERSAL_AUTH_* exported for non-interactive callers.
 infisical_prefix=()
-if [[ -z "${AGENT_NO_INFISICAL:-}" ]] && command -v infisical >/dev/null 2>&1; then
+if [[ "${AGENT_INFISICAL:-}" == "1" ]] && command -v infisical >/dev/null 2>&1; then
     infisical_prefix=(infisical run --silent --)
 fi
 

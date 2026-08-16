@@ -26,9 +26,11 @@
 #   --gpg           Bind $XDG_RUNTIME_DIR/gnupg + set GPG_TTY.
 #   --rbw           Bind $XDG_RUNTIME_DIR/rbw + the rbw binary.
 #                   Use sparingly; defeats most of the isolation goal.
-#   --agent-vault   Set HTTPS_PROXY/CA cert/session token for credential
-#                   injection on outbound HTTPS via the host's agent-vault.
-#                   Agent talks to APIs but never sees upstream tokens.
+#   --agent-vault   DEFAULT-ON since 2026-08-16, so this flag is now a no-op
+#                   kept for compat. Sets HTTPS_PROXY/CA cert/session token
+#                   for credential injection on outbound HTTPS via the host's
+#                   agent-vault: the agent talks to APIs but never sees the
+#                   upstream tokens. Opt OUT with --no-agent-vault.
 #   --dotfiles      Flip the config surface to READ-WRITE so the agent can
 #                   manage your dotfiles: chezmoi source + ~/.config + the
 #                   $HOME rc files + ~/bin. Supports the edit-source →
@@ -112,13 +114,16 @@ ALLOW_RBW=0
 # agent can escape the sandbox via `docker run -v /:/host`. Opt out per-run with
 # --no-docker for untrusted/unsupervised sessions.
 ALLOW_DOCKER=1
-# Default-OFF (flipped 2026-07-19, per user request: no egress proxying at
-# all). The MITM proxy broke real traffic — killed the native auto-updater's
-# downloads.claude.ai fetch (install_failed on every update), and previously
-# node-fetch SNI issues — so agents get direct egress by default. Opt in
-# per-invocation with --agent-vault when credential injection is wanted
-# (agent talks to APIs, never sees upstream tokens).
-ALLOW_AGENT_VAULT=0
+# Default-ON (flipped back 2026-08-16). Brokering is the whole point: the
+# agent talks to APIs and never sees the upstream tokens. Previously default-
+# OFF (551710a, 2026-07-19) because the MITM proxy broke real traffic — the
+# native auto-updater's downloads.claude.ai fetch (install_failed on every
+# update) and node-fetch SNI failures. BOTH are fixed and the fixes predate
+# the flip-off: the SNI 127.0.0.1->localhost rewrite (0843fa1, 2026-07-05)
+# and the downloads.claude.ai NO_PROXY exemption (fb0fda0, 2026-07-19) are
+# both live in the --agent-vault block below, so this is safe to re-enable.
+# Opt out per-invocation with --no-agent-vault (direct egress, keys in env).
+ALLOW_AGENT_VAULT=1
 ALLOW_DOTFILES=0
 # Default-on: plannotator's binds are narrow (3 dirs under $HOME, no
 # secrets), broadly useful (review / annotate flows), and harmless when
@@ -143,16 +148,17 @@ SELF_TEST=0
 AGENT=""
 
 # ─────────────────────── Auto-vault (self-acquire) ─────────────────────────
-# agent-vault is default-OFF (no egress proxying by default). Only when the
-# caller passes --agent-vault do we re-exec the whole shim under
+# agent-vault is default-ON (2026-08-16). We re-exec the whole shim under
 # `agent-vault vault run` to ACQUIRE a session — then the second pass sees the
 # proxy env and forwards it across bwrap's --clearenv (see the --agent-vault
-# block below). Without this, `claude --agent-vault` alone could only forward
-# an ambient session that a plain shell never has. The AGENT_VAULT_WRAPPED
-# sentinel breaks the loop if vault run can't provide a proxy; AGENT_UNSANDBOX
-# skips it; a missing agent-vault binary falls through (no hard dependency).
+# block below). Without this, the flag alone could only forward an ambient
+# session that a plain shell never has. Pass --no-agent-vault to skip. The
+# AGENT_VAULT_WRAPPED sentinel breaks the loop if vault run can't provide a
+# proxy; AGENT_UNSANDBOX skips it; a missing agent-vault binary falls through
+# (no hard dependency), so the broker being down degrades to direct egress
+# rather than blocking the agent from starting.
 if [[ -z "${AGENT_VAULT_WRAPPED:-}" && -z "${HTTPS_PROXY:-}" && -z "${AGENT_UNSANDBOX:-}" ]]; then
-    _want_vault=0
+    _want_vault=1
     for _a in "$@"; do
         case "$_a" in
             --agent-vault) _want_vault=1 ;;

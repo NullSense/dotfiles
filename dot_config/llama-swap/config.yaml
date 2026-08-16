@@ -60,9 +60,14 @@ macros:
 
 hooks:
   on_startup:
+    # ORDER MATTERS + these all pin themselves (ttl:0). 2026-08-16: preloading the two
+    # nemotron models FIRST made the 22.9 GB qwen3.8-27b @128k unstartable — it had to
+    # evict them mid-flight and lost the race ~12x in a row ("upstream command exited
+    # prematurely"), because evicted VRAM is not released synchronously. The big
+    # interactive model is preloaded FIRST so it wins the startup allocation; the small
+    # retrieval models load on demand (they are seconds to start, the 27B is ~32s).
     preload:
-      - nemotron-rerank-1b
-      - nemotron-embed-1b
+      - qwen3.8-27b-uncensored
       - tei-sparse
 
 models:
@@ -362,7 +367,10 @@ models:
     # swap-engine eviction: loading a model that needs the VRAM (any big MoE, which is
     # in no matrix set and therefore runs solo) still evicts this one, and the next
     # search then pays a ~50s cold start. See the VRAM budget note on `matrix` below.
-    ttl: 0
+    # 2026-08-16: ttl:0 -> 300. Pinned AND preloaded, it beat the 22.9 GB qwen3.8-27b to
+    # the VRAM every startup and left the 27B unstartable ("upstream command exited
+    # prematurely" x12). It loads in seconds on demand; the 27B takes ~32s.
+    ttl: 300
     name: "Nemotron-3-Embed-1B (vLLM NVFP4, 2048-dim)"
     # `embed` moved here from octen-embedding-4b on 2026-08-15 so the generic name means the
     # same model at :9292 and at litellm's :4000 (which already mapped embed → this model).
@@ -847,6 +855,80 @@ models:
 #   should be deleted once the migration they insure against is confirmed done and the hardware/
 #   dependency they'd roll back to no longer exists.
 #
+  # ── uncensored chat/agent — Qwen3.8-27B Uncensored (Heretic abliteration) ────────
+  #    Dense 27B hybrid (16 of 64 layers full-attention, rest Gated DeltaNet), Apache-2.0,
+  #    262k native ctx. Replaces the retired qwen3.6-35b-uncensored route (weights gone).
+  #    MEASURED here (bench/results/qwen38-speed.md, 2026-08-15, llama.cpp b10433):
+  #      no MTP        81 t/s freeform / 81 summ
+  #      MTP n-max 2  133 t/s freeform / 151 summ   <- +65% / +86%, the tuned optimum
+  #      n-max 3 121/148 · n-max 5 99/141 · n-max 8 97/148 — deeper drafts LOSE
+  #      (acceptance falls faster than the extra drafted tokens pay for).
+  #    ⚠ THAT SWEEP WAS UNGATED (--spec-draft-p-min defaults to 0.00 = draft ALWAYS, even
+  #    when the head has no confidence). That is exactly the regime where deeper n-max
+  #    loses, so "deeper LOSES" is a conclusion about ungated drafting, not about n-max.
+  #    2026-08-16, community sweeps on this same model (github.com/sudoingX/qwen38-mtp,
+  #    R9700 32GB + RX9070 pair, method = paired probe.py, medians of 3x3 prompts):
+  #      n-max 2 ungated        41.6 @0ctx · 37.2 @16K · 28.0 @65K · acc 0.73
+  #      n-max 4 + p-min 0.60   42.9 @0ctx · 38.5 @16K · 27.4 @65K · acc 0.86
+  #      n-max 4 + p-min 0.75   38.3 @0ctx · 36.6 @16K · 28.9 @65K · acc 0.91  <- deep ctx
+  #      n-max 8, any gate      loses everywhere
+  #    p-min is a CONFIDENCE GATE: the head stops drafting once its own probability drops
+  #    below the threshold, so a deeper n-max costs nothing on the rounds it would have
+  #    lost anyway — it drafts ~3.3 tokens/round at 0.86 acceptance instead of exactly 2.0
+  #    at 0.73. Gating is what makes n-max 4 safe; ungated n-max>=4 is the losing arm above.
+  #    CHOSEN HERE: n-max 4 + p-min 0.75. This client is Hermes at ~200k ctx, i.e. the DEEP
+  #    context column, where 0.75 wins (28.9 vs 27.4) and acceptance is highest (0.91) —
+  #    high acceptance also means less wasted verification work per accepted token.
+  #    Prefer 0.60 instead if the workload shifts to short prompts. NOT re-measured on this
+  #    box (user asked for config-only). To revert: n-max 3, drop --spec-draft-p-min.
+  #    Community RTX 5090 reference for this model @192k q8_0 KV: 148 avg / 203 peak t/s.
+  #    --kv-unified: default is "enabled only if slots is auto", and --parallel 1 makes
+  #    slots explicit, so it was OFF. One slot means one buffer either way; enabling it
+  #    just drops the per-slot reservation split.
+  #    MTP head is baked into this GGUF (no separate draft file). b10419+ REQUIRED for the
+  #    fused Gated DeltaNet kernel — b10331 silently disabled it, and since the Arch package
+  #    split you also need ggml-cuda installed or llama.cpp has NO gpu backend at all.
+  #    ctx 65536 + q8_0 KV = 20.2 GB measured (Hermes REQUIRES >=64k ctx, so 32k/18.8GB is
+#    not an option for that client). Leaves ~2.7 GB headroom with embed+sparse+dictation.
+  qwen3.8-27b-uncensored:
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-Q4_K_M.gguf --fit on --fit-target 1024 --fit-ctx 65536 --parallel 1 --kv-unified --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.75 --spec-draft-type-k q8_0 --spec-draft-type-v q8_0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    proxy: http://127.0.0.1:${PORT}
+    # ttl:0 = PINNED (never unloaded for being idle) — the interactive hermes workspace
+    # wants it hot; a cold load is ~32 s. This parks ~22.9 GB, so if you need that VRAM
+    # back for training/quant work set ttl back to 300 (or `curl localhost:9292/unload`).
+    # ttl:0 does NOT exempt it from set-based eviction when a conflicting model loads.
+    ttl: 0
+    name: "Qwen3.8-27B Uncensored (Heretic, Q4_K_M + MTP)"
+    aliases: [qwen38, qwen3.8-27b, "qwen3.8-27b-uncensored:think", "qwen3.8-27b-uncensored:fast"]
+    description: "chat·agent·uncensored · Qwen3.8-27B Heretic-abliterated, Q4_K_M + baked-in MTP (~18.8 GB @32k q8-KV). Refusals 98/100 -> 12/100, mean benchmark delta -0.5 (author self-reported). Thinking toggleable, default ON — use :fast for off. reasoning_effort xhigh|medium|low; do NOT leave the xhigh default, it overthinks badly."
+    metadata: { engine: "llama.cpp", hf: "JonathanColetti/Qwen3.8-27B-Uncensored", class: "chat·agent·uncensored", thinking: "toggle (default on; use :fast for off)", best_for: "uncensored chat, agentic tool use, long-context reasoning", tags: [chat, agent, uncensored, abliterated, local, qwen, mtp] }
+    # Sampling MUST be set here, not left to the GGUF defaults. /props showed the embedded
+    # generation_config gives temp 1.0/top_p 0.95/min_p 0.05 for BOTH aliases — i.e. :fast
+    # was running THINKING-mode sampling on non-thinking output and missing the
+    # presence_penalty 1.5 that Qwen's card specifies to stop non-thinking repetition.
+    # reasoning_effort must be nested in chat_template_kwargs: top-level reasoning_effort is
+    # silently DROPPED before b10434 (we're on b10433) — verified via /apply-template, the
+    # rendered prompt said "Reasoning effort is set to xhigh" either way.
+    filters:
+      setParamsByID:
+        "qwen3.8-27b-uncensored:think":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 0.0
+          chat_template_kwargs:
+            enable_thinking: true
+            reasoning_effort: medium
+        "qwen3.8-27b-uncensored:fast":
+          temperature: 0.7
+          top_p: 0.8
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 1.5
+          chat_template_kwargs:
+            enable_thinking: false
+
 matrix:
   vars:
     e: octen-embedding-4b      # embeddings (sift + oracle) — keep warm
@@ -869,6 +951,7 @@ matrix:
     # M (mineru) var REMOVED 2026-08-15 along with the model entry itself (see `mineru` comment
     # under models: — the entry booted a broken container on request, now fully disabled).
     G: glm-ocr                 # Documents OCR cascade, fallback 2 — vLLM, GPU_UTIL 0.15 (~4.8 GB RESERVED)
+    Q: qwen3.8-27b-uncensored  # uncensored 27B chat/agent, Q4_K_M + MTP n2 (~18.8 GB @32k q8-KV)
   # OCR evict costs are high for the same reason as x: the cost is reload-stalls per DOCUMENT,
   # not GB. A vault re-verify walks the cascade per scanned page; evicting mid-run re-pays a
   # full model load each time. vLLM gpu-memory-utilization is a FRACTION OF TOTAL (32 GB), so
@@ -899,6 +982,12 @@ matrix:
   # i.e. the whole card). Raising MAXLEN back to 65536 is a deliberate choice to evict
   # the retrieval models for an agentic run — see the header of vllm-nanbeige.
   sets:
+    # 27B uncensored @128k alongside LIGHT retrieval only: Q 22.9 + x 2.5 + t 0.4
+    # = 25.8 GB, + dictation 2.2 = 28.0, ~3.8 GB spare. The dense embed (n 3.8) and
+    # reranker (m 4.7) are deliberately EXCLUDED — at 128k they do not co-fit, and
+    # embed/rerank/generate are sequential in a RAG turn, so eviction costs one
+    # reload rather than concurrent VRAM. Drop ctx to 65536 if you want n resident.
+    sift-chat-27b: "Q & x & t"
     # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident
     # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(vLLM E4B
     # NVFP4+MTP, util 0.35) ~11.15 + tool 0.4 + 12B ~10 ≈ 31GB, close to the 32GB ceiling —

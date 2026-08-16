@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Hermes launcher shim for Zedra/phone terminals.
+# Ensures Hermes starts with Infisical-provided LiteLLM secrets and Agent Vault proxy env.
+set -euo pipefail
+
+REAL_HERMES="/home/nullsense/.local/bin/hermes"
+INFISICAL_BIN="/usr/bin/infisical"
+AGENT_VAULT_BIN="/usr/local/bin/agent-vault"
+
+# Avoid recursion/nesting if a child process calls hermes again from inside this wrapper.
+if [[ "${HERMES_ZEDRA_WRAPPED:-}" == "1" ]]; then
+  exec "$REAL_HERMES" "$@"
+fi
+
+export HERMES_ZEDRA_WRAPPED=1
+
+if [[ -x "$INFISICAL_BIN" && -x "$AGENT_VAULT_BIN" ]]; then
+  exec "$INFISICAL_BIN" run --env dev --path /litellm -- \
+    "$AGENT_VAULT_BIN" run --vault hermes -- \
+    "$REAL_HERMES" "$@"
+elif [[ -x "$INFISICAL_BIN" ]]; then
+  exec "$INFISICAL_BIN" run --env dev --path /litellm -- "$REAL_HERMES" "$@"
+elif [[ -x "$AGENT_VAULT_BIN" ]]; then
+  exec "$AGENT_VAULT_BIN" run --vault hermes -- "$REAL_HERMES" "$@"
+else
+  exec "$REAL_HERMES" "$@"
+fi

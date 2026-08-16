@@ -39,3 +39,8 @@ SECRETS.md
 # python build artifacts
 **/__pycache__
 **/*.pyc
+
+# Timestamped working-file backups (llama-swap/litellm config snapshots etc).
+# These are scratch, not configuration, and were being deployed as real targets.
+*.bak-*
+*.bak.*

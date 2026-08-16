@@ -20,7 +20,7 @@ LoadCredentialEncrypted=agent-vault-master:%h/.config/credstore.encrypted/agent-
 
 # --- Infisical credential store (agent-vault-infisical-enable) ---
 # Lets vaults use --credential-store=infisical. BOTH halves are TPM2-sealed:
-# this unit is tracked in a PUBLIC chezmoi repo, so a plaintext Environment=
+# this unit is tracked in the PUBLIC dotfiles repo, so a plaintext Environment=
 # line carrying the client ID would be published to GitHub.
 LoadCredentialEncrypted=infisical-client-id:%h/.config/credstore.encrypted/infisical-client-id.cred
 LoadCredentialEncrypted=infisical-client-secret:%h/.config/credstore.encrypted/infisical-client-secret.cred

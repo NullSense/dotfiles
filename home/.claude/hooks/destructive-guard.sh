@@ -7,7 +7,7 @@
 # returns exit 0 (allow) rather than failing.
 #
 # To inspect retired contents:
-#   git -C ~/.local/share/chezmoi log -p -- dot_claude/hooks/executable_destructive-guard.sh
+#   git -C ~/.dotfiles log -p --follow -- home/.claude/hooks/destructive-guard.sh
 #
 # dcg covers everything this script did plus DBs, k8s, docker, cloud,
 # terraform, supply-chain, AST-level interpreter escape detection. Per-rule

@@ -1,4 +1,4 @@
-# Managed by chezmoi (dot_config/systemd/user/stack-up.service).
+# Tracked in ~/.dotfiles/home/.config/systemd/user/stack-up.service.
 # Brings the local LLM serving stack up at LOGIN via ~/bin/stack — the single
 # source of truth: llama-swap (:9292) + litellm-db (:5433) + litellm gateway
 # (:4000) + the always-on vLLM E4B slot (:8001).

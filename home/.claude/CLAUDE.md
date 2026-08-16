@@ -11,7 +11,8 @@ repairs links and preserves conflicting files under `~/.local/state/dotfiles-bac
 
 - Never put plaintext credentials in this public repository. Use Infisical, Agent Vault, systemd
   encrypted credentials, or ignored local state.
-- MCP inventory lives at `~/.dotfiles/mcp/servers.yaml`; run `mcp-sync` after editing it.
+- Custom MCP inventory lives in `~/.config/litellm/config-mcp.yaml`; clients connect only to the
+  loopback LiteLLM MCP gateway at `http://127.0.0.1:4001/mcp/`.
 - New dotfiles go under the literal `home/` path, then run `~/.dotfiles/install.sh --install`.
 - Repository-only documentation and bootstrap tools stay outside `home/` and are not linked.
 

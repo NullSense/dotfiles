@@ -59,8 +59,20 @@ command -v chezmoi >/dev/null       || die "chezmoi not found"
 UNIT_SRC="$(chezmoi source-path "$UNIT_TARGET" 2>/dev/null)" \
     || die "agent-vault.service is not chezmoi-managed; patch it by hand"
 [[ -f "$UNIT_SRC" ]] || die "unit source not found: $UNIT_SRC"
-[[ -z "$(chezmoi status "$UNIT_TARGET" 2>/dev/null)" ]] \
-    || die "agent-vault.service has uncommitted drift between source and target; reconcile with 'chezmoi diff $UNIT_TARGET' first"
+# Drift check. Deliberately NOT `chezmoi status`-emptiness: on an interactive
+# TTY chezmoi can print notices to stdout that a non-TTY run never emits, which
+# made this fire spuriously. Look for real diff lines instead, and fall back to
+# a plain file compare (this unit is not a template, so that is exact).
+_drift="$(chezmoi diff "$UNIT_TARGET" 2>/dev/null | grep -E '^[+-][^+-]' || true)"
+if [[ -z "$_drift" ]] && ! diff -q "$UNIT_SRC" "$UNIT_TARGET" >/dev/null 2>&1; then
+    _drift="$(diff -u "$UNIT_SRC" "$UNIT_TARGET" 2>/dev/null | head -20)"
+fi
+if [[ -n "$_drift" ]]; then
+    printf '\n%sagent-vault.service differs between chezmoi source and target:%s\n\n' "$c_warn" "$c_off" >&2
+    printf '%s\n\n' "$_drift" >&2
+    die "reconcile that first (chezmoi diff / chezmoi apply / chezmoi re-add), then re-run"
+fi
+unset _drift
 info "unit source: $UNIT_SRC (clean)"
 
 if grep -q 'INFISICAL_URL' "$UNIT_SRC"; then

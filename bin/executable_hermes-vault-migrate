@@ -127,6 +127,44 @@ current_store="$(agent-vault vault credential-store show "$VAULT_DST" 2>/dev/nul
                  | sed -n 's/^Credential store:[[:space:]]*//p')"
 info "'$VAULT_DST' credential store is currently: ${current_store:-unknown}"
 
+# The broker itself must have an Infisical machine identity, or step 4 fails.
+# Check now rather than after we have already written secrets upstream.
+_probe_tok="$(agent-vault vault token --vault "$VAULT_SRC" 2>/dev/null || true)"
+if [[ -n "$_probe_tok" ]] \
+   && curl -fsS --max-time 5 -H "Authorization: Bearer $_probe_tok" \
+        "$AV_ADDR/v1/vaults/$VAULT_SRC/settings" 2>/dev/null \
+        | grep -q '"infisical_available":[[:space:]]*true'; then
+    info "broker has an Infisical machine identity (infisical_available=true)"
+else
+    cat >&2 <<'MSG'
+
+ERROR: the Agent Vault broker has no Infisical machine identity, so it cannot
+       connect a vault to Infisical (infisical_available=false).
+
+  This is an instance-level, one-time setup. Until it is done, step 4 fails.
+
+  1. Infisical → Organization → Access Control → Identities → Create identity
+     Name it e.g. agent-vault-broker, auth method Universal Auth.
+     Save the Client ID and Client Secret.
+  2. Grant it READ-ONLY access to the Hermes project
+     (Project → Access Control → Identities → add, Viewer role).
+  3. Seal both halves, then add them to the broker's unit:
+       read -rs ID;     printf '%s' "$ID"     | systemd-creds encrypt --user \
+           --with-key=tpm2+host --name=infisical-client-id - \
+           ~/.config/credstore.encrypted/infisical-client-id.cred
+       read -rs SECRET; printf '%s' "$SECRET" | systemd-creds encrypt --user \
+           --with-key=tpm2+host --name=infisical-client-secret - \
+           ~/.config/credstore.encrypted/infisical-client-secret.cred
+       unset ID SECRET
+     then systemctl --user daemon-reload && \
+          systemctl --user restart agent-vault.service
+  4. Re-run this script. It is idempotent — already-pushed secrets are skipped.
+
+MSG
+    die "broker not Infisical-enabled; see the steps above"
+fi
+unset _probe_tok
+
 # ── 2. backups ──────────────────────────────────────────────────────────────
 step "Backups"
 if [[ -f "$HOME/.agent-vault/agent-vault.db" ]]; then

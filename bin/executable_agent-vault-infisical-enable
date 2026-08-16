@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# agent-vault-infisical-enable — one-time: give the Agent Vault broker an
+# Infisical machine identity so vaults can use the `infisical` credential store.
+#
+# Until this runs, `agent-vault vault credential-store set <v> --kind=infisical`
+# fails with "Infisical is not configured on this Agent Vault instance", and
+# GET /v1/vaults/<v>/settings reports infisical_available:false.
+#
+# PREREQUISITE (browser, cannot be scripted):
+#   1. Infisical → Organization → Access Control → Identities → Create identity.
+#      Name it agent-vault-broker, auth method **Universal Auth**.
+#      Copy the Client ID and Client Secret.
+#   2. Give it **read-only** access to each project that will back a vault
+#      (Project → Access Control → Identities → add, Viewer role).
+#      Read-only is deliberate: Agent Vault never writes back, and a read-only
+#      identity caps the blast radius if the broker is ever compromised.
+#
+# WHAT THIS DOES:
+#   - Prompts silently for the Client ID and Client Secret (never echoed, never
+#     in argv, never in shell history).
+#   - Seals BOTH with systemd-creds --user --with-key=tpm2+host, same treatment
+#     as the master password. Both are sealed — not just the secret — because the
+#     unit lives in a PUBLIC chezmoi repo, so a plaintext Environment= line with
+#     the client ID would be published to GitHub.
+#   - Patches the chezmoi SOURCE of agent-vault.service, applies that one target,
+#     restarts the broker, and verifies infisical_available flips to true.
+#   - Restores the previous unit and restarts if verification fails.
+#
+# Usage: agent-vault-infisical-enable [--url https://eu.infisical.com]
+
+set -euo pipefail
+umask 077
+
+INFISICAL_URL="https://eu.infisical.com"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --url) INFISICAL_URL="${2:?--url needs a value}"; shift 2 ;;
+        -h|--help) sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; $d'; exit 0 ;;
+        *) echo "unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+
+readonly AV_ADDR="${AGENT_VAULT_ADDR:-http://127.0.0.1:14321}"
+readonly CRED_DIR="$HOME/.config/credstore.encrypted"
+readonly UNIT_TARGET="$HOME/.config/systemd/user/agent-vault.service"
+readonly STAMP="$(date +%Y%m%d-%H%M%S)"
+
+c_ok=$'\033[32m'; c_err=$'\033[31m'; c_warn=$'\033[33m'; c_off=$'\033[0m'
+[[ -t 1 ]] || { c_ok=""; c_err=""; c_warn=""; c_off=""; }
+step() { printf '\n%s==>%s %s\n' "$c_ok" "$c_off" "$*"; }
+info() { printf '    %s\n' "$*"; }
+die()  { printf '\n%sERROR:%s %s\n' "$c_err" "$c_off" "$*" >&2; exit 1; }
+
+export AGENT_VAULT_ADDR="$AV_ADDR"
+
+step "Preflight"
+command -v systemd-creds >/dev/null || die "systemd-creds not found"
+command -v chezmoi >/dev/null       || die "chezmoi not found"
+UNIT_SRC="$(chezmoi source-path "$UNIT_TARGET" 2>/dev/null)" \
+    || die "agent-vault.service is not chezmoi-managed; patch it by hand"
+[[ -f "$UNIT_SRC" ]] || die "unit source not found: $UNIT_SRC"
+[[ -z "$(chezmoi status "$UNIT_TARGET" 2>/dev/null)" ]] \
+    || die "agent-vault.service has uncommitted drift between source and target; reconcile with 'chezmoi diff $UNIT_TARGET' first"
+info "unit source: $UNIT_SRC (clean)"
+
+if grep -q 'INFISICAL_URL' "$UNIT_SRC"; then
+    info "unit already references INFISICAL_URL — will re-seal credentials and restart"
+fi
+
+step "Credentials"
+printf '    Client ID: ' >&2;     read -rs CLIENT_ID;     echo >&2
+printf '    Client Secret: ' >&2; read -rs CLIENT_SECRET; echo >&2
+[[ -n "$CLIENT_ID"     ]] || die "empty Client ID"
+[[ -n "$CLIENT_SECRET" ]] || die "empty Client Secret"
+
+mkdir -p "$CRED_DIR"
+printf '%s' "$CLIENT_ID" | systemd-creds encrypt --user --with-key=tpm2+host \
+    --name=infisical-client-id - "$CRED_DIR/infisical-client-id.cred" \
+    || die "failed to seal client id"
+printf '%s' "$CLIENT_SECRET" | systemd-creds encrypt --user --with-key=tpm2+host \
+    --name=infisical-client-secret - "$CRED_DIR/infisical-client-secret.cred" \
+    || die "failed to seal client secret"
+unset CLIENT_ID CLIENT_SECRET
+info "both halves sealed to TPM2 (PCR 7) + host key"
+
+# Round-trip check now, so a bad seal surfaces here and not as 243/CREDENTIALS.
+systemd-creds decrypt --user --name=infisical-client-id \
+    "$CRED_DIR/infisical-client-id.cred" - >/dev/null 2>&1 \
+    || die "sealed client id does not decrypt on this host"
+systemd-creds decrypt --user --name=infisical-client-secret \
+    "$CRED_DIR/infisical-client-secret.cred" - >/dev/null 2>&1 \
+    || die "sealed client secret does not decrypt on this host"
+info "both round-trip decrypt cleanly"
+
+step "Patching the unit"
+cp -a "$UNIT_SRC" "$UNIT_SRC.bak-infisical-$STAMP"
+info "source backed up → $(basename "$UNIT_SRC").bak-infisical-$STAMP"
+
+python3 - "$UNIT_SRC" "$INFISICAL_URL" <<'PY'
+import re, sys
+path, url = sys.argv[1], sys.argv[2]
+s = open(path).read()
+
+# Idempotent: strip any block we previously added, then re-add.
+s = re.sub(r'\n# --- Infisical credential store.*?# --- end Infisical ---\n', '\n', s, flags=re.S)
+
+block = f'''
+# --- Infisical credential store (agent-vault-infisical-enable) ---
+# Lets vaults use --credential-store=infisical. BOTH halves are TPM2-sealed:
+# this unit is tracked in a PUBLIC chezmoi repo, so a plaintext Environment=
+# line carrying the client ID would be published to GitHub.
+LoadCredentialEncrypted=infisical-client-id:%h/.config/credstore.encrypted/infisical-client-id.cred
+LoadCredentialEncrypted=infisical-client-secret:%h/.config/credstore.encrypted/infisical-client-secret.cred
+Environment=INFISICAL_URL={url}
+# --- end Infisical ---
+'''
+anchor = 'LoadCredentialEncrypted=agent-vault-master:'
+i = s.index(anchor)
+eol = s.index('\n', i)
+s = s[:eol + 1] + block + s[eol + 1:]
+
+# The Infisical SDK only reads these from the environment, so they must be
+# exported. Exporting inside `sh -c` (rather than via Environment=) keeps them
+# out of `systemctl show` and out of the unit file.
+old = ('ExecStart=/bin/sh -c \'cat "$CREDENTIALS_DIRECTORY/agent-vault-master" | '
+       '/usr/local/bin/agent-vault server --password-stdin --telemetry=false\'')
+new = ('ExecStart=/bin/sh -c \''
+       'export INFISICAL_UNIVERSAL_AUTH_CLIENT_ID="$(cat "$CREDENTIALS_DIRECTORY/infisical-client-id")"; '
+       'export INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET="$(cat "$CREDENTIALS_DIRECTORY/infisical-client-secret")"; '
+       'cat "$CREDENTIALS_DIRECTORY/agent-vault-master" | '
+       '/usr/local/bin/agent-vault server --password-stdin --telemetry=false\'')
+if old in s:
+    s = s.replace(old, new)
+elif 'INFISICAL_UNIVERSAL_AUTH_CLIENT_ID' not in s:
+    sys.exit('ExecStart line did not match the expected form; patch by hand')
+
+open(path, 'w').write(s)
+print('    unit source patched')
+PY
+
+chezmoi apply "$UNIT_TARGET" || die "chezmoi apply failed"
+info "applied to $UNIT_TARGET"
+
+step "Restarting the broker"
+rollback() {
+    printf '\n%s!! rolling back%s\n' "$c_warn" "$c_off" >&2
+    cp -a "$UNIT_SRC.bak-infisical-$STAMP" "$UNIT_SRC"
+    chezmoi apply "$UNIT_TARGET" >/dev/null 2>&1 || true
+    systemctl --user daemon-reload
+    systemctl --user restart agent-vault.service || true
+    die "restart or verification failed; unit restored. Check: journalctl --user -u agent-vault.service -n 40"
+}
+systemctl --user daemon-reload
+systemctl --user restart agent-vault.service || rollback
+
+for _ in $(seq 1 20); do
+    curl -fsS --max-time 2 "$AV_ADDR/health" >/dev/null 2>&1 && break
+    sleep 1
+done
+systemctl --user is-active --quiet agent-vault.service || rollback
+info "broker is up"
+
+step "Verifying"
+tok="$(agent-vault vault token --vault default 2>/dev/null || true)"
+[[ -n "$tok" ]] || rollback
+if curl -fsS --max-time 5 -H "Authorization: Bearer $tok" \
+     "$AV_ADDR/v1/vaults/default/settings" 2>/dev/null \
+     | grep -q '"infisical_available":[[:space:]]*true'; then
+    info "infisical_available = true"
+else
+    rollback
+fi
+
+cat <<EOF
+
+$(printf '%s' "$c_ok")Done — the broker can now back vaults with Infisical.$(printf '%s' "$c_off")
+
+Next:
+  hermes-vault-migrate --project-id <HERMES_PROJECT_ID>
+
+Commit the unit change (autoPush is off, nothing is public until you push):
+  chezmoi git -- add dot_config/systemd/user/agent-vault.service
+  chezmoi git -- commit -m 'feat(agent-vault): enable Infisical credential store'
+
+Rollback:
+  cp -a $UNIT_SRC.bak-infisical-$STAMP $UNIT_SRC
+  chezmoi apply $UNIT_TARGET
+  systemctl --user daemon-reload && systemctl --user restart agent-vault.service
+EOF

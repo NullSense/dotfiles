@@ -85,6 +85,39 @@ printf '    Client Secret: ' >&2; read -rs CLIENT_SECRET; echo >&2
 [[ -n "$CLIENT_ID"     ]] || die "empty Client ID"
 [[ -n "$CLIENT_SECRET" ]] || die "empty Client Secret"
 
+# Validate against Infisical BEFORE sealing/patching/restarting. Without this
+# a typo costs a full seal -> patch -> restart -> rollback cycle, and surfaces
+# only as a 401 buried in the journal. The secret is piped via stdin, never
+# argv, so it stays out of `ps`.
+_login="$(printf '{"clientId":"%s","clientSecret":"%s"}' "$CLIENT_ID" "$CLIENT_SECRET" \
+    | curl -sS --max-time 20 -X POST "$INFISICAL_URL/api/v1/auth/universal-auth/login" \
+        -H 'Content-Type: application/json' --data-binary @- 2>&1 || true)"
+if ! grep -q '"accessToken"' <<<"$_login"; then
+    _msg="$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' <<<"$_login" | head -1)"
+    cat >&2 <<MSG
+
+ERROR: Infisical rejected these credentials${_msg:+ — $_msg}.
+
+  Nothing was sealed, patched or restarted.
+
+  The most common cause: pasting the machine identity's ID instead of the
+  Universal Auth Client ID. They are different values.
+    - Identity ID  → shown under Details on the identity page. NOT this.
+    - Client ID    → shown inside the Universal Auth row under Authentication.
+
+  Also check:
+    - The Client Secret is shown ONCE at creation. If it was not copied,
+      generate a new one from the Universal Auth method's menu.
+    - The secret has not expired or hit its max-uses (both should be 0).
+    - --url matches your region (currently $INFISICAL_URL).
+
+MSG
+    unset CLIENT_ID CLIENT_SECRET _login
+    exit 1
+fi
+unset _login
+info "Infisical accepted the credentials"
+
 mkdir -p "$CRED_DIR"
 printf '%s' "$CLIENT_ID" | systemd-creds encrypt --user --with-key=tpm2+host \
     --name=infisical-client-id - "$CRED_DIR/infisical-client-id.cred" \

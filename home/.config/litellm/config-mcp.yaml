@@ -26,6 +26,38 @@ mcp_servers:
     transport: http
     url: "https://mcp.context7.com/mcp"
     access_groups: ["dev", "research"]
+  wikipedia:
+    description: "Wikipedia — article and revision search/read access through MediaWiki (research)."
+    # Wikipedia and Wikidata are complementary: this server reads encyclopedia
+    # articles; Wikidata below queries structured entities and relationships.
+    # Pin npx so a service restart cannot silently execute a newly published build.
+    # The older wikipedia-mcp 2.0.1 client receives Wikimedia 429s from Python
+    # requests on this host even while the API itself is healthy; the maintained
+    # MediaWiki server uses the current API path and defaults to English Wikipedia.
+    allow_all_keys: true
+    access_groups: ["research"]
+    transport: stdio
+    command: npx
+    args: ["-y", "@professional-wiki/mediawiki-mcp-server@0.17.0"]
+    env:
+      MCP_LOG_LEVEL: "warning"
+      MCP_CONTENT_MAX_BYTES: "50000"
+    # Anonymous Wikipedia must remain read-only even if upstream later changes
+    # which unauthenticated tools it advertises.
+    allowed_tools:
+      - compare-pages
+      - get-category-members
+      - get-file
+      - get-links-here
+      - get-page
+      - get-page-history
+      - get-pages
+      - get-recent-changes
+      - get-revision
+      - get-site-info
+      - parse-wikitext
+      - search-page
+      - search-page-by-prefix
   wikidata:
     description: "Wikidata — SPARQL plus entity and vector search, hosted public (research)."
     # Official WMDE Wikidata MCP — HOSTED, HTTP, fully public (no auth → nothing to shield),

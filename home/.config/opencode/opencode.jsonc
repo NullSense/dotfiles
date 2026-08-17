@@ -29,6 +29,9 @@
       "enabled": true
     }
   },
+  "permission": {
+    "litellm_hindsight_*": "deny"
+  },
   "plugin": [
     "@tarquinen/opencode-dcp@latest",
     "cc-safety-net"

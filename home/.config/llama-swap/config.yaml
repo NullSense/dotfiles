@@ -851,11 +851,13 @@ models:
   # ── Qwen3.8-27B NVFP4 — long-context, parallel, multimodal lane ─────────────
   # Pinned 5090-specific ModelOpt export from the user-selected deployment recipe
   # (weights revision 69274a0d8dff5dd35bcee8290612f71e03b6e981). Live on this
-  # desktop at 0.89: 18.51 GiB resident weights and 214,909 aggregate FP8-KV
-  # tokens. That admits two independent ~100K workers with ~14K aggregate reserve.
+  # desktop at 0.88: 18.51 GiB resident weights and 222,371 aggregate FP8-KV
+  # tokens. Three scheduler slots admit two independent ~100K workers plus about
+  # 22K aggregate reserve for a small Hindsight/background request. They do not
+  # guarantee a simultaneous 100K + 100K + 50K worst case.
   # Prefix caching can improve identical-prefix forks but is not capacity credit.
-  # Eager mode deliberately trades some peak throughput for the 0.44 GiB CUDA
-  # graph reservation that makes the two-worker context budget fit safely.
+  # Eager mode deliberately trades some peak throughput to avoid the CUDA graph
+  # reservation and preserve the long-context pool.
   qwen3.8-27b-nvfp4-long:
     cmd: >
       docker run --rm --name vllm-qwen38-long --init --gpus all
@@ -870,8 +872,8 @@ models:
       --quantization modelopt
       --kv-cache-dtype fp8
       --max-model-len 210432
-      --max-num-seqs 2
-      --gpu-memory-utilization 0.89
+      --max-num-seqs 3
+      --gpu-memory-utilization 0.88
       --enable-prefix-caching
       --reasoning-parser qwen3
       --enable-auto-tool-choice
@@ -884,8 +886,8 @@ models:
     ttl: 0
     name: "Qwen3.8-27B (vLLM NVFP4, long/parallel)"
     aliases: ["qwen3.8-27b-nvfp4-long:think", "qwen3.8-27b-nvfp4-long:fast"]
-    description: "chat·agent·vision · stock Qwen3.8 NVFP4, 210K max request, measured 214,909-token aggregate pool, two ~100K workers"
-    metadata: { engine: "vllm", hf: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090@69274a0", class: "chat·agent·vision", thinking: "low or off per request", aggregate_context: 214909, max_concurrency: 2, tags: [chat, agent, vision, local, qwen, nvfp4, long-context, parallel] }
+    description: "chat·agent·vision · stock Qwen3.8 NVFP4, 210K max request, measured 222,371-token aggregate pool, three scheduler slots"
+    metadata: { engine: "vllm", hf: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090@69274a0", class: "chat·agent·vision", thinking: "low or off per request", aggregate_context: 222371, max_concurrency: 3, tags: [chat, agent, vision, local, qwen, nvfp4, long-context, parallel] }
     filters:
       setParamsByID:
         "qwen3.8-27b-nvfp4-long:think":

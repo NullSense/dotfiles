@@ -1,0 +1,14 @@
+[Unit]
+Description=PostgreSQL readiness gate for LiteLLM
+Documentation=https://docs.docker.com/reference/cli/docker/compose/up/
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/Programming/llm-stack/stack/observability
+# docker.socket activates the system daemon. Compose does not return until the
+# litellm-db healthcheck reports PostgreSQL is accepting connections.
+ExecStart=/usr/bin/docker compose up --detach --wait --wait-timeout 90 litellm-db
+ExecStop=/usr/bin/docker compose stop litellm-db
+TimeoutStartSec=120
+TimeoutStopSec=30

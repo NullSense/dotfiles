@@ -1,13 +1,16 @@
 [Unit]
 Description=litellm MCP aggregation instance :4001
-After=network-online.target litellm.service
-Wants=network-online.target litellm.service
+After=litellm.service hindsight-hermes.service
+Wants=litellm.service hindsight-hermes.service
 
 [Service]
 Type=simple
 ExecStart=/home/nullsense/bin/llm-servers/litellm-mcp
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --retry 240 --retry-delay 2 --retry-connrefused --retry-all-errors --retry-max-time 570 --connect-timeout 2 --max-time 5 http://127.0.0.1:4001/health/liveliness
 Restart=on-failure
 RestartSec=5
+RestartSteps=4
+RestartMaxDelaySec=60
 KillMode=control-group
 # MCP tool discovery can legitimately take minutes with slow remotes
 TimeoutStartSec=600

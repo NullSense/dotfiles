@@ -9,7 +9,9 @@ Documentation=file://%h/dotfiles/arch-install/AGENT-VAULT.md
 # WantedBy=default.target and stay up across GUI restarts.
 
 [Service]
-Type=simple
+# Type=exec makes successful execve part of startup. This avoids Type=simple
+# racing encrypted-credential setup against the post-start readiness gate.
+Type=exec
 
 # systemd unseals this file via TPM2 at service start. Plaintext is mounted
 # to a tmpfs at $CREDENTIALS_DIRECTORY (mode 0500, owned by service user
@@ -31,12 +33,15 @@ Environment=INFISICAL_URL=https://eu.infisical.com
 # password never enters the service's environment block (so it never appears
 # in `systemctl show` or `journalctl` envblob dumps).
 ExecStart=/bin/sh -c 'export INFISICAL_UNIVERSAL_AUTH_CLIENT_ID="$(cat "$CREDENTIALS_DIRECTORY/infisical-client-id")"; export INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET="$(cat "$CREDENTIALS_DIRECTORY/infisical-client-secret")"; cat "$CREDENTIALS_DIRECTORY/agent-vault-master" | /usr/local/bin/agent-vault server --password-stdin --telemetry=false'
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --retry 30 --retry-delay 1 --retry-connrefused --retry-all-errors --retry-max-time 60 --connect-timeout 2 --max-time 5 http://127.0.0.1:14321/health
 
 # If the daemon crashes (OOM, panic), bring it back. systemd's default
 # StartLimitIntervalSec/StartLimitBurst caps will prevent a tight loop if
 # TPM unsealing fails persistently — service will fail-stopped after that.
 Restart=on-failure
 RestartSec=5
+RestartSteps=4
+RestartMaxDelaySec=60
 
 # Hardening: agent-vault doesn't need to touch most of the system. These
 # directives shrink the surface a compromised process could affect.

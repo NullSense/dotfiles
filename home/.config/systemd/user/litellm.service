@@ -1,14 +1,19 @@
 [Unit]
 Description=litellm model gateway :4000 (MCP-free profile — fast boot, always on)
-After=network-online.target docker.service
-# gateway DB (litellm-db :5433) is a docker container ensured by `stack up`; litellm
-# retries DB on its own, so no hard Requires=.
+Requires=litellm-db.service
+After=litellm-db.service
 
 [Service]
 Type=simple
 ExecStart=/home/nullsense/bin/llm-servers/litellm-gateway
+# Type=simple alone means "process forked", not "HTTP API ready". ExecStartPost
+# participates in systemd ordering, so downstream After=litellm.service units
+# wait for the real readiness endpoint.
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --retry 90 --retry-delay 1 --retry-connrefused --retry-all-errors --retry-max-time 180 --connect-timeout 2 --max-time 5 http://127.0.0.1:4000/health/liveliness
 Restart=on-failure
 RestartSec=3
+RestartSteps=4
+RestartMaxDelaySec=30
 # never orphan: kill the whole cgroup (infisical wrapper + litellm + MCP children)
 KillMode=control-group
 TimeoutStopSec=20

@@ -1,7 +1,7 @@
 [Unit]
 Description=Hindsight memory API for Hermes
-After=network-online.target litellm.service
-Wants=network-online.target litellm.service
+After=litellm.service
+Wants=litellm.service
 Before=hermes-gateway.service
 
 [Service]
@@ -12,8 +12,11 @@ EnvironmentFile=%h/.config/hindsight/hermes.env
 # plaintext exists only in this process environment; it never touches disk or
 # the command line.
 ExecStart=/usr/bin/bash -c 'export HINDSIGHT_API_LLM_API_KEY="$(/usr/bin/systemd-creds --user --name=hermes-litellm-key decrypt %h/.config/credstore.encrypted/hermes-litellm-key.cred -)"; exec /home/nullsense/.hermes/hermes-agent/venv/bin/hindsight-api --host 127.0.0.1 --port 9177 --workers 1 --no-access-log'
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --retry 90 --retry-delay 1 --retry-connrefused --retry-all-errors --retry-max-time 180 --connect-timeout 2 --max-time 5 http://127.0.0.1:9177/health/ready
 Restart=on-failure
 RestartSec=5
+RestartSteps=4
+RestartMaxDelaySec=60
 TimeoutStopSec=60
 
 [Install]

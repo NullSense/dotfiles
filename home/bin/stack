@@ -23,13 +23,16 @@ RUN="${RUN:-$HOME/.cache/llm-stack}"; mkdir -p "$RUN"
 
 # up = got any HTTP code (401 from litellm still means "alive"); 000 = not listening.
 is_up() { local c; c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$1" 2>/dev/null || true); [ -n "$c" ] && [ "$c" != "000" ]; }
-wait_tcp() { local h="${1%:*}" p="${1#*:}" i; for i in $(seq 1 "${2:-15}"); do (exec 3<>"/dev/tcp/$h/$p") 2>/dev/null && { exec 3>&- 3<&-; return 0; }; sleep 1; done; return 1; }
+wait_tcp() { local h="${1%:*}" p="${1#*:}" i; for ((i = 0; i < ${2:-15}; i++)); do (exec 3<>"/dev/tcp/$h/$p") 2>/dev/null && { exec 3>&- 3<&-; return 0; }; sleep 1; done; return 1; }
 kill_port() {  # kill whatever LISTENS on a TCP port — reliable, no fuser/pattern guessing
   local port="$1" pids
   pids=$(ss -tlnpH "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u)
   [ -n "$pids" ] || return 1
+  # Deliberate word splitting: ss may return more than one PID.
+  # shellcheck disable=SC2086
   kill $pids 2>/dev/null; sleep 1
   pids=$(ss -tlnpH "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u)
+  # shellcheck disable=SC2086
   [ -n "$pids" ] && kill -9 $pids 2>/dev/null || true
   return 0
 }
@@ -47,8 +50,11 @@ sweep_swap_children() {  # llama-swap spawns llama-server backends as its OWN ch
   for p in $swap_pids; do
     kids=$(pgrep -P "$p" 2>/dev/null || true)
     [ -n "$kids" ] || continue
+    # Deliberate word splitting: a parent can have several children.
+    # shellcheck disable=SC2086
     kill $kids 2>/dev/null || true; sleep 1
     kids=$(pgrep -P "$p" 2>/dev/null || true)
+    # shellcheck disable=SC2086
     [ -n "$kids" ] && kill -9 $kids 2>/dev/null || true
   done
 }
@@ -128,6 +134,35 @@ ensure_dashboards() {
     python3 "$HOME/Programming/llm-stack/stack/gen-glance-services.py" >/dev/null 2>&1 \
       && echo "  • glance service cards refreshed (auto-discovered)" || true
   fi
+}
+
+patch_litellm_prisma_client() {
+  # LiteLLM 1.97.0 writes a replacement query engine through the removed
+  # prisma-client-py private attribute `_Prisma__engine`. Prisma 0.15 exposes
+  # the supported `_engine` property setter instead. Keep this narrowly gated:
+  # one exact upstream line is repaired, an already-repaired/upstream-fixed
+  # install is accepted, and every unknown layout fails closed.
+  local client
+  client=$(find "$HOME/.local/share/uv/tools/litellm" \
+    -path '*/site-packages/litellm/proxy/db/prisma_client.py' -print -quit 2>/dev/null)
+  [ -n "$client" ] || { echo "  ⚠ LiteLLM Prisma client not found"; return 1; }
+  python3 - "$client" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+broken = "prisma_client._Prisma__engine = engine"
+fixed = "prisma_client._engine = engine"
+
+if text.count(broken) == 1:
+    path.write_text(text.replace(broken, fixed))
+    print("  ✓ repaired LiteLLM 1.97.0 Prisma engine setter compatibility")
+elif broken not in text and text.count(fixed) == 1:
+    print("  • LiteLLM Prisma engine setter already compatible")
+else:
+    raise SystemExit("LiteLLM Prisma client layout is unknown; refusing to patch")
+PY
 }
 
 case "${1:-status}" in
@@ -300,6 +335,7 @@ case "${1:-status}" in
             #     --with 'fastapi==0.136.3'
             #   stack db-init   # re-run after any --force reinstall (it wipes the generated prisma client)
     TB="$HOME/.local/share/uv/tools/litellm/bin"
+    patch_litellm_prisma_client
     SCHEMA=$(find "$HOME/.local/share/uv/tools/litellm" -path '*proxy_extras*schema.prisma' 2>/dev/null | head -1)
     [ -n "$SCHEMA" ] || { echo "  ⚠ litellm prisma schema not found — run the pinned install command in ~/bin/llm-servers/litellm-gateway"; exit 1; }
     PATH="$TB:$PATH" "$TB/prisma" generate --schema "$SCHEMA" 2>&1 | tail -2 || true

@@ -15,8 +15,7 @@
 # ⚠⚠ INSTALL LINE — reproduce EXACTLY. Do not `uv tool install litellm` bare. ⚠⚠
 #
 #   uv tool install --force 'litellm[proxy-runtime,caching,extra_proxy]==1.97.0' --with 'fastapi==0.136.3'
-#   cd ~/.local/share/uv/tools/litellm/lib/python3.13/site-packages/litellm/proxy \
-#     && ~/.local/share/uv/tools/litellm/bin/python -m prisma generate
+#   stack db-init
 #
 # Why each piece (all four were discovered the hard way on 2026-08-06, when the FIRST
 # restart in weeks failed — the long-running process had outlived a venv that could no
@@ -29,6 +28,9 @@
 #   prisma generate → installing the prisma PACKAGE is not enough; the client/binaries
 #                  are generated at install time. Without it: "Unable to find Prisma
 #                  binaries. Please run 'prisma generate' first."
+#   stack db-init → also applies the narrow LiteLLM 1.97.0 / Prisma 0.15
+#                  engine-setter compatibility repair; it fails closed if the
+#                  upstream source layout changes.
 #   proxy-runtime → adds the complete OpenTelemetry runtime used by callbacks: ["otel"]
 #   fastapi==0.136.3 → avoids the FastAPI 0.137 `_IncludedRouter` change that
 #                  crashes LiteLLM's pinned OTel FastAPI instrumentation.
@@ -41,6 +43,12 @@
 #                  Bisected 2026-08-06: present through 0.139.x, gone in 0.140.13+.
 #                  Re-test this pin on any litellm upgrade — it should eventually lift.
 set -euo pipefail
+
+# LiteLLM invokes the Prisma CLI as a subprocess when DATABASE_URL is set.
+# uv exposes the main `litellm` entry point globally but keeps dependency
+# executables inside the tool environment, so systemd's minimal PATH otherwise
+# makes an installed Prisma look missing and silently disables DB setup.
+export PATH="$HOME/.local/share/uv/tools/litellm/bin:$PATH"
 
 PORT="${LITELLM_PORT:-4000}"
 HOST="${LITELLM_HOST:-0.0.0.0}"

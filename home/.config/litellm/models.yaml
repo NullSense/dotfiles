@@ -962,6 +962,22 @@ model_list:
       quant: "Q4_K_M (~16.8 GB file, ~18.8 GB resident @32k q8-KV)"
       tags: ["chat", "agent", "local", "qwen", "uncensored", "abliterated", "mtp"]
       source_url: https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored
+- model_name: qwen3.8-27b-uncensored:think
+  litellm_params:
+    model: llamafile/qwen3.8-27b-uncensored:think
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+  model_info:
+    engine: "llama.cpp"
+    hf_repo: "JonathanColetti/Qwen3.8-27B-Uncensored"
+    mode: chat
+    supports_vision: true
+    supports_function_calling: true
+    max_input_tokens: 210432
+    max_output_tokens: 8192
+    metadata: { display_name: "Qwen3.8-27B Uncensored · thinking ON" }
 - model_name: qwen3.8-27b-uncensored:fast
   litellm_params:
     model: llamafile/qwen3.8-27b-uncensored:fast

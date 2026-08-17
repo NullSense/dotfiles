@@ -888,11 +888,14 @@ models:
   #    MTP head is baked into this GGUF (no separate draft file). b10419+ REQUIRED for the
   #    fused Gated DeltaNet kernel — b10331 silently disabled it, and since the Arch package
   #    split you also need ggml-cuda installed or llama.cpp has NO gpu backend at all.
-  #    ctx 65536 + q8_0 KV = 20.2 GB measured (Hermes REQUIRES >=64k ctx, so 32k/18.8GB is
-  #    not an option for that client). The matching f16 vision projector is required for
+  #    --fit-ctx is a FLOOR, not the allocated context. With the old 65536 floor, auto-fit
+  #    selected 200192 live tokens while LiteLLM advertised 210432 input + 8192 output.
+  #    Use 219136 (= 210432 + 8192 + 512 slack) so startup fails clearly instead of silently
+  #    under-provisioning the advertised route. --fit-target keeps a 1 GiB device margin.
+  #    The matching f16 vision projector is required for
   #    Qwen's native image input; llama.cpp otherwise rejects image_url with a 500.
   qwen3.8-27b-uncensored:
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-vision-f16.gguf --fit on --fit-target 1024 --fit-ctx 65536 --parallel 1 --kv-unified --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.75 --spec-draft-type-k q8_0 --spec-draft-type-v q8_0 --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-vision-f16.gguf --fit on --fit-target 1024 --fit-ctx 219136 --parallel 1 --kv-unified --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.75 --spec-draft-type-k q8_0 --spec-draft-type-v q8_0 --reasoning-effort medium --host 127.0.0.1 --port ${PORT} --jinja --metrics
     proxy: http://127.0.0.1:${PORT}
     # ttl:0 = PINNED (never unloaded for being idle) — the interactive hermes workspace
     # wants it hot; a cold load is ~32 s. This parks ~22.9 GB, so if you need that VRAM
@@ -907,9 +910,8 @@ models:
     # generation_config gives temp 1.0/top_p 0.95/min_p 0.05 for BOTH aliases — i.e. :fast
     # was running THINKING-mode sampling on non-thinking output and missing the
     # presence_penalty 1.5 that Qwen's card specifies to stop non-thinking repetition.
-    # reasoning_effort must be nested in chat_template_kwargs: top-level reasoning_effort is
-    # silently DROPPED before b10434 (we're on b10433) — verified via /apply-template, the
-    # rendered prompt said "Reasoning effort is set to xhigh" either way.
+    # b10453 accepts reasoning_effort directly. The server default is medium; callers may
+    # override it per request with low|medium|xhigh while :think only forces thinking on.
     filters:
       setParamsByID:
         "qwen3.8-27b-uncensored:think":
@@ -920,7 +922,6 @@ models:
           presence_penalty: 0.0
           chat_template_kwargs:
             enable_thinking: true
-            reasoning_effort: medium
         "qwen3.8-27b-uncensored:fast":
           temperature: 0.7
           top_p: 0.8

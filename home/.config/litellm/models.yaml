@@ -934,7 +934,7 @@ model_list:
   # ── uncensored chat/agent — Qwen3.8-27B Uncensored (Heretic), local llama.cpp ──
   #    Replaces the retired LuffyTheFox/Qwen3.6-35B-A3B-Uncensored entries (weights gone).
   #    Q4_K_M + baked-in MTP, measured 133 t/s freeform / 151 t/s summarize on the 5090
-  #    (llama-swap route qwen3.8-27b-uncensored, --spec-draft-n-max 2). Thinking default ON;
+  #    (llama-swap route qwen3.8-27b-uncensored, --spec-draft-n-max 4). Thinking default ON;
   #    :fast disables it. reasoning_effort xhigh|medium|low — xhigh overthinks badly, don't.
 - model_name: qwen3.8-27b-uncensored
   litellm_params:
@@ -957,9 +957,9 @@ model_list:
     max_output_tokens: 8192
     metadata:
       display_name: "Qwen3.8-27B Uncensored · Heretic (local, Q4_K_M + MTP)"
-      backend: "llama.cpp CUDA b10433 (RTX 5090) · Q4_K_M + MTP n-max 2, 32k q8-KV"
+      backend: "llama.cpp CUDA b10453 (RTX 5090) · Q4_K_M + MTP n-max 4, 219136 q8-KV"
       role: "uncensored/unaligned chat + agentic tool use"
-      quant: "Q4_K_M (~16.8 GB file, ~18.8 GB resident @32k q8-KV)"
+      quant: "Q4_K_M (~16.8 GB file; runtime VRAM includes 219136-token q8 KV + f16 vision projector)"
       tags: ["chat", "agent", "local", "qwen", "uncensored", "abliterated", "mtp"]
       source_url: https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored
 - model_name: qwen3.8-27b-uncensored:think

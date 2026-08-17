@@ -28,6 +28,8 @@ grep -Fq 'prisma_client._engine = engine' "$stack" \
     || fail 'stack db-init does not install the compatible Prisma engine setter'
 grep -Fq 'patch_litellm_prisma_client' "$stack" \
     || fail 'stack db-init does not own the LiteLLM Prisma compatibility repair'
+grep -Fq 'STACK_DB_INIT_INFISICAL' "$stack" \
+    || fail 'stack db-init does not acquire its database credential through Infisical'
 
 if grep -Eq 'After=.*(docker|network-online)\.service|After=.*network-online\.target' \
     "$units/litellm.service" "$units/litellm-mcp.service" "$units/hindsight-hermes.service"; then

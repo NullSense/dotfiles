@@ -334,6 +334,14 @@ case "${1:-status}" in
             #   uv tool install --force 'litellm[proxy-runtime,caching,extra_proxy]==1.97.0' \
             #     --with 'fastapi==0.136.3'
             #   stack db-init   # re-run after any --force reinstall (it wipes the generated prisma client)
+    if [[ -z ${DATABASE_URL:-} && ${STACK_DB_INIT_INFISICAL:-0} != 1 ]]; then
+      command -v infisical >/dev/null 2>&1 \
+        || { echo "  ⚠ DATABASE_URL is unset and Infisical is unavailable"; exit 1; }
+      export STACK_DB_INIT_INFISICAL=1
+      exec infisical run --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "$0" db-init
+    fi
+    [[ -n ${DATABASE_URL:-} ]] \
+      || { echo "  ⚠ Infisical did not provide DATABASE_URL for /litellm"; exit 1; }
     TB="$HOME/.local/share/uv/tools/litellm/bin"
     patch_litellm_prisma_client
     SCHEMA=$(find "$HOME/.local/share/uv/tools/litellm" -path '*proxy_extras*schema.prisma' 2>/dev/null | head -1)

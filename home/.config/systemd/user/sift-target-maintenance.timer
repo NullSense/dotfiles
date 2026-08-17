@@ -2,8 +2,9 @@
 Description=Daily bounded cleanup of Sift Cargo targets
 
 [Timer]
-OnBootSec=30min
-OnUnitActiveSec=1d
+# Keep cleanup predictable and recover missed runs after downtime. Monotonic
+# timers could remain active (elapsed) with no next activation after recovery.
+OnCalendar=*-*-* 04:00:00
 Persistent=true
 RandomizedDelaySec=1h
 

@@ -18,7 +18,9 @@ ExecStart=/usr/bin/ssh-agent -D -a %t/git-sign-agent.sock
 # its safety comes from being sign-only + never an authorized key, not a
 # passphrase. Generate with:
 #   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_sign -C "git signing key" -N ''
-ExecStartPost=/usr/bin/ssh-add %h/.ssh/id_ed25519_sign
+# Type=simple considers ssh-agent started before its socket is necessarily
+# connectable. Retry briefly instead of failing the whole unit on that race.
+ExecStartPost=/usr/bin/sh -c 'i=0; until /usr/bin/ssh-add %h/.ssh/id_ed25519_sign; do i=$$((i + 1)); [ "$$i" -lt 50 ] || exit 1; sleep 0.1; done'
 Restart=on-failure
 RestartSec=5
 

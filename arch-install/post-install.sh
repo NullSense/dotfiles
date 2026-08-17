@@ -2,6 +2,7 @@
 # Post-install setup for fresh Arch — runs ONCE after first boot as user.
 # Pre-req: archinstall completed, you're logged in, internet is up.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=== [1/11] (pacman config + service enables already handled by archinstall custom_commands) ==="
 
@@ -58,7 +59,7 @@ if ! swapon --show | grep -q '/swap/swapfile'; then
 fi
 swapon --show
 
-echo "=== [4/11] systemd timers (snapper, plocate, man-db, pkgfile, btrfs-balance) ==="
+echo "=== [4/11] systemd timers (snapper, plocate, man-db, pkgfile) ==="
 for t in man-db.timer plocate-updatedb.timer logrotate.timer \
          snapper-timeline.timer snapper-cleanup.timer pkgfile-update.timer; do
   sudo systemctl enable --now "$t" || true
@@ -76,28 +77,14 @@ sudo sed -i \
   -e 's/^NUMBER_LIMIT=.*/NUMBER_LIMIT="20"/' \
   /etc/snapper/configs/root || true
 
-# Weekly btrfs balance (reclaims fragmented metadata blocks)
-sudo tee /etc/systemd/system/btrfs-balance.service > /dev/null <<'BBS'
-[Unit]
-Description=Weekly btrfs balance (light)
-[Service]
-Type=oneshot
-Nice=19
-IOSchedulingClass=idle
-ExecStart=/usr/bin/btrfs balance start -dusage=50 -musage=70 /
-BBS
-sudo tee /etc/systemd/system/btrfs-balance.timer > /dev/null <<'BBT'
-[Unit]
-Description=Weekly btrfs balance
-[Timer]
-OnCalendar=weekly
-Persistent=true
-RandomizedDelaySec=1h
-[Install]
-WantedBy=timers.target
-BBT
+# Do not schedule automatic Btrfs balances. A balance is an exclusive,
+# resource-intensive operation and can prevent the Btrfs swapfile from being
+# activated during boot. Keep scrub/SMART maintenance automatic; run a
+# filtered balance manually only after inspecting `btrfs filesystem usage /`.
+sudo systemctl disable --now btrfs-balance.timer 2>/dev/null || true
+sudo rm -f /etc/systemd/system/btrfs-balance.timer \
+  /etc/systemd/system/btrfs-balance.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now btrfs-balance.timer
 
 # reflector config (Germany / Netherlands / France)
 sudo mkdir -p /etc/xdg/reflector
@@ -113,6 +100,14 @@ REF
 echo "=== [5/11] activate pre-enabled services + power-profiles-daemon ==="
 sudo systemctl start bluetooth NetworkManager || true
 sudo systemctl enable --now power-profiles-daemon.service
+
+# Keep the pre-login greeter on Wayland too. Weston is SDDM's documented
+# kiosk compositor; Hyprland/UWSM remains the authenticated desktop session.
+sudo "$SCRIPT_DIR/configure-sddm-wayland.sh" "$HOME"
+sudo install -m 0644 "$SCRIPT_DIR/99-xt3-webcam.rules" \
+  /etc/udev/rules.d/99-xt3-webcam.rules
+sudo udevadm verify /etc/udev/rules.d/99-xt3-webcam.rules
+sudo udevadm control --reload
 
 echo "=== [6/11] paru (AUR helper) ==="
 if ! command -v paru &>/dev/null; then
@@ -141,7 +136,6 @@ echo "=== [7c/11] Boot-order self-heal (resists Windows update boot hijacks) ===
 # every POST forever. This systemd oneshot runs at boot, checks if
 # 'Linux Boot Manager' is first, and if not, swaps it to first via
 # efibootmgr. Idempotent: silent and no-op when already correct.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 sudo install -m 755 "$SCRIPT_DIR/assert-boot-priority.sh" /usr/local/bin/assert-boot-priority
 sudo install -m 644 "$SCRIPT_DIR/assert-boot-priority.service" /etc/systemd/system/assert-boot-priority.service
 sudo systemctl daemon-reload
@@ -215,6 +209,12 @@ else
   echo "  helium-update missing after dotfiles install; skipping Helium install"
 fi
 
+# Maintenance jobs use persistent calendar timers. vLLM is intentionally
+# check-only: applying a new multi-gigabyte image and changing model pins stays
+# a deliberate operator action (`vllm-update --apply`).
+systemctl --user enable --now sift-target-maintenance.timer || true
+systemctl --user enable --now vllm-update.timer || true
+
 echo "=== [10.5/11] global git commit-msg hook to strip ALL AI attribution ==="
 # Belt-and-suspenders: even if Claude/Codex/OpenCode misbehave and add
 # Co-Authored-By: <bot> trailers despite settings, this hook strips them
@@ -237,7 +237,9 @@ git config --global core.hooksPath ~/.git-hooks
 
 echo "=== [11/11] docker group + default shell + udiskie + ssh-agent ==="
 sudo usermod -aG docker "$USER" || true
-sudo systemctl start docker.service || true
+# Socket activation keeps dockerd off the boot critical path.  The first
+# Docker client request starts docker.service on demand.
+sudo systemctl start docker.socket || true
 [[ "$SHELL" != */zsh ]] && chsh -s /usr/bin/zsh "$USER"
 
 # i2c group for ddcutil (real hardware brightness via DDC/CI)

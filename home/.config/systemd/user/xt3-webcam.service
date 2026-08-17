@@ -30,7 +30,7 @@ ExecStart=%h/.local/bin/xt3-webcam
 # gphoto2 holds the PTP session -> next start fails "PTP Device Busy" on every
 # op (not clearable by `gphoto2 --reset`; needs a camera power-cycle).
 ExecStopPost=-/usr/bin/pkill -f "gphoto2 --port .* --capture-movie"
-Restart=always
+Restart=on-failure
 # Exponential backoff 10s -> 120s. A FLAT retry is actively harmful here: each
 # attempt opens a fresh PTP session, and hammering a half-asleep camera every
 # ~11s is what kept it wedged in "PTP Device Busy" (observed 2026-08-06 10:19,
@@ -38,6 +38,3 @@ Restart=always
 RestartSec=10
 RestartSteps=5
 RestartMaxDelaySec=120
-
-[Install]
-WantedBy=default.target

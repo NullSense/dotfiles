@@ -8,20 +8,14 @@
 #
 # The pill shows df %used INSTANTLY (df is a statfs call, ~1ms). The tooltip's
 # ranked "top directories" list is EXPENSIVE (du walks the tree), so it is
-# computed off the hot path: the pill reads a cache file, and only kicks a
-# detached, flock-guarded `du` job when the cache is missing or older than
-# $TTL. So waybar never blocks on du; the breakdown just self-refreshes.
+# computed only when the user right-clicks the module.  Never launch a full
+# filesystem walk merely because Waybar started: on a cold Btrfs boot that can
+# contend with balance/swap activation and charge gigabytes of page cache to
+# waybar.service.
 set -u
 
-TTL=1800                       # cache lifetime, seconds (30 min)
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/waybar"
 mkdir -p "$CACHE_DIR"
-
-cache_age() {  # prints seconds since mtime, or a huge number if missing
-  local f=$1
-  [[ -f "$f" ]] || { echo 999999; return; }
-  echo $(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) ))
-}
 
 do_refresh() {  # <path> <label>  — heavy; runs under flock, writes <cache>
   local path=$1 label=$2
@@ -76,19 +70,12 @@ elif (( pcent >= 75 )); then cls="warn"
 else                         cls="ok"
 fi
 
-# Kick a background refresh if the breakdown cache is stale/missing.
-age=$(cache_age "$cache")
-if (( age > TTL )); then
-  setsid -f "$0" refresh "$path" "$label" >/dev/null 2>&1 || \
-    ( "$0" refresh "$path" "$label" & ) >/dev/null 2>&1
-fi
-
 if [[ -f "$cache" ]]; then
   breakdown=$(cat "$cache")
-  staleness=""
-  (( age > TTL )) && staleness="  <span color='#928374'>(refreshing…)</span>"
+  updated=$(date -r "$cache" '+%F %R' 2>/dev/null || echo unknown)
+  staleness="  <span color='#928374'>(cached ${updated})</span>"
 else
-  breakdown="  <span color='#928374'>computing…  (first run)</span>"
+  breakdown="  <span color='#928374'>not scanned yet</span>"
   staleness=""
 fi
 

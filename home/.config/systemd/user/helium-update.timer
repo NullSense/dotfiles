@@ -2,8 +2,10 @@
 Description=Weekly Helium AppImage update check
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=1w
+# A calendar timer always has a next activation after a user-manager restart.
+# The previous monotonic OnBootSec + OnUnitActiveSec combination could become
+# active (elapsed) with Next=infinity after login/session recovery.
+OnCalendar=Mon *-*-* 09:00:00
 Persistent=true
 RandomizedDelaySec=1h
 

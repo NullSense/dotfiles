@@ -22,6 +22,16 @@ push deliberately; a push publishes immediately to a public repository. Pause
 before pushing ONLY if it would bundle unrelated drift, include secrets, rewrite pushed history,
 or land on a protected branch with no feature branch.
 
+## Privilege elevation
+- This workstation uses a bounded 15-minute global sudo timestamp so one explicit `sudo -v`
+  authentication can cover concurrent trusted agent maintenance. Agents must use `sudo -n`; if
+  the ticket is absent or expired, stop and ask the user to run `sudo -v` in their own terminal.
+- Do not use repeated `pkexec` or `run0` calls for agent automation: separate agent processes can
+  still trigger separate graphical Polkit prompts. Group related privileged changes into one
+  reviewed operation where practical, and never start parallel authentication prompts.
+- Never read, pipe, log, or store the user's password. Never enable passwordless sudo or an
+  infinite timestamp. Revoke the global ticket early with `sudo -K` after maintenance.
+
 ## Keybindings
 Before binding any shortcut (Hyprland/app/shell), grep the config for the exact modifier+key and
 confirm it's free; also scan `hyprctl binds` live. If taken, don't clobber — pick a free mnemonic

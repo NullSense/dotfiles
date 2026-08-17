@@ -895,7 +895,7 @@ models:
   #    The matching f16 vision projector is required for
   #    Qwen's native image input; llama.cpp otherwise rejects image_url with a 500.
   qwen3.8-27b-uncensored:
-    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-vision-f16.gguf --fit on --fit-target 1024 --fit-ctx 219136 --parallel 1 --kv-unified --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.75 --spec-draft-type-k q8_0 --spec-draft-type-v q8_0 --reasoning-effort medium --host 127.0.0.1 --port ${PORT} --jinja --metrics
+    cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-Q4_K_M.gguf --mmproj /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-vision-f16.gguf --fit on --fit-target 1024 --fit-ctx 219136 --parallel 1 --kv-unified --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --spec-type draft-mtp --spec-draft-n-max 4 --spec-draft-p-min 0.75 --spec-draft-type-k q8_0 --spec-draft-type-v q8_0 --reasoning-effort low --host 127.0.0.1 --port ${PORT} --jinja --metrics
     proxy: http://127.0.0.1:${PORT}
     # ttl:0 = PINNED (never unloaded for being idle) — the interactive hermes workspace
     # wants it hot; a cold load is ~32 s. This parks ~22.9 GB, so if you need that VRAM
@@ -910,7 +910,7 @@ models:
     # generation_config gives temp 1.0/top_p 0.95/min_p 0.05 for BOTH aliases — i.e. :fast
     # was running THINKING-mode sampling on non-thinking output and missing the
     # presence_penalty 1.5 that Qwen's card specifies to stop non-thinking repetition.
-    # b10453 accepts reasoning_effort directly. The server default is medium; callers may
+    # b10453 accepts reasoning_effort directly. The server default is low; callers may
     # override it per request with low|medium|xhigh while :think only forces thinking on.
     filters:
       setParamsByID:

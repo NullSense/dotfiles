@@ -38,8 +38,14 @@ grep -Fq -- '--mmproj /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-2
 grep -Fq -- '--fit-ctx 219136' "$swap" \
     || fail 'Qwen llama-swap route must reserve input + output + slack context'
 
-grep -Fq -- '--reasoning-effort medium' "$swap" \
-    || fail 'Qwen llama-swap route must default to medium reasoning effort'
+grep -Fq -- '--reasoning-effort low' "$swap" \
+    || fail 'Qwen llama-swap route must default to low reasoning effort'
+
+[[ $(yq -r '.agent.reasoning_effort // ""' "$hermes_config") == low ]] \
+    || fail 'Hermes must default Qwen requests to low reasoning effort'
+
+[[ $(yq -r '.providers["qwen38-uncensored"].extra_body.reasoning_effort // ""' "$hermes_config") == low ]] \
+    || fail 'Hermes Qwen provider must default requests to low reasoning effort'
 
 [[ $(yq -r '.model.supports_vision // false' "$hermes_config") == true ]] \
     || fail 'Hermes must route the custom Qwen provider through native vision'

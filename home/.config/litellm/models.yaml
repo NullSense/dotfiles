@@ -898,6 +898,32 @@ model_list:
       role: "Sift agentic RAG and tool use (thinking enabled per request, no reload)"
       tags: ["sift", "agent", "rag", "tools", "local", "nanbeige", "vllm", "32k"]
 
+  # ── OpenCode Go subscription -> Agent Vault / Infisical credential ──────────
+  # Hermes delegates through Headroom and LiteLLM using model names under this
+  # namespace. The wildcard suffix is preserved verbatim for OpenCode's dynamic
+  # model inventory; start with chat-completions models (DeepSeek/GLM/Kimi/MiMo).
+  # Qwen/MiniMax use Anthropic Messages and GPT/Grok use Responses upstream, so
+  # those transports need separate aliases and canaries before use.
+- model_name: opencode-go/*
+  litellm_params:
+    model: openai/*
+    api_base: https://opencode.ai/zen/go/v1
+    api_key: "os.environ/OPENCODE_GO_API_KEY"
+    extra_headers:
+      HTTP-Referer: https://hermes-agent.nousresearch.com
+      X-Title: Hermes Agent
+      User-Agent: HermesAgent
+    tags: ["delegation", "cloud", "opencode-go", "subscription"]
+  model_info:
+    engine: "opencode-go"
+    mode: chat
+    supports_function_calling: true
+    metadata:
+      display_name: "OpenCode Go · dynamic chat-completions inventory"
+      backend: "Headroom -> LiteLLM -> OpenCode Go"
+      role: "Hermes delegated subagents via the OpenCode Go subscription"
+      tags: ["delegation", "cloud", "opencode-go", "subscription"]
+
   # ── too big for 12 GB → cloud in both environments ─────────────────────────────
 - model_name: anthropic/claude-sonnet-5
   litellm_params:

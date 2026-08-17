@@ -74,6 +74,43 @@ install.sh            conservative per-file symlink installer
 - LiteLLM on loopback port 4001 is the single MCP gateway for local clients.
 - Hermes Gateway receives its Agent Vault token and non-proxyable local or
   WebSocket credentials through systemd encrypted credentials.
-- Hindsight uses the local LiteLLM gateway and the shared `hermes` bank.
+- Hindsight is self-hosted for Hermes. The API listens on loopback port 9177,
+  uses the local LiteLLM gateway for inference, and has one canonical bank:
+  `hermes`.
+
+## Hindsight memory
+
+Hindsight has four installed access paths with distinct responsibilities:
+
+- Hermes's native `local_external` provider performs automatic retain and
+  recall against the `hermes` bank in hybrid mode.
+- LiteLLM MCP exposes `retain`, `recall`, and `reflect` to MCP clients through
+  the loopback MCP gateway on port 4001.
+- The official `hindsight` CLI in `~/.local/bin/` provides bank, memory,
+  entity, operation, and mental-model administration.
+- The control-plane UI is available at <http://127.0.0.1:19177> while
+  `hindsight-hermes-ui.service` is active.
+
+The API, MCP gateway, Hermes gateway, and UI are user services:
+
+```bash
+systemctl --user is-active hindsight-hermes.service litellm-mcp.service \
+  hermes-gateway.service hindsight-hermes-ui.service
+hindsight --version
+hindsight bank list
+hindsight bank stats hermes
+hindsight mental-model list hermes
+```
+
+The MCP is intentionally the small agent-facing surface; use the CLI for
+administration. Hindsight's optional upstream `hindsight-self-hosted` skill is
+not installed because Hermes's native provider and MCP already own runtime
+memory behavior. Installing that skill later would add agent usage guidance,
+not another memory database.
+
+Auto-consolidation and observations are enabled. Do not run routine manual
+consolidation when there are no pending operations, and do not treat duplicate
+entity labels as duplicate memories. Hindsight currently has no supported
+entity-merge command.
 
 See `arch-install/AGENTS.md` for the concise operational map.

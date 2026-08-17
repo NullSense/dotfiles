@@ -54,6 +54,18 @@ hermes mcp list
 
 `scripts/install-system-tuning.sh` writes reviewed files under `/etc` using
 sudo. It is intentionally explicit and is never run by the dotfile installer.
+It also installs the NetworkManager Docker-bridge exclusions, enables
+`systemd-resolved`, and restarts Tailscale after the resolver stub is active.
+
+After applying it, verify the network without a standalone probe script:
+
+```bash
+readlink -f /etc/resolv.conf
+resolvectl status
+tailscale status
+ip -brief address show docker0
+systemctl --user is-active litellm.service llama-swap.service
+```
 
 ## Safety
 

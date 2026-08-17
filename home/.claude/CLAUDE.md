@@ -41,6 +41,17 @@ Taken (non-exhaustive): SUPER+ALT+ C=Capture · D=Dictation · V=Voice menu · R
 ## Testing
 Fix a bug → write a regression test immediately (TDD preferred).
 
+## Ephemeral scripts and artifacts
+- Investigation scripts, probes, one-off migrations, temporary fixtures, debug harnesses, and
+  generated reports are ephemeral by default. Delete them before finishing the task.
+- A new script may remain only when it has a named recurring caller or is wired into an existing
+  test, install, or operations interface. "Might be useful later" is not sufficient.
+- Prefer adding reusable behavior to the existing owning module over creating another standalone
+  helper. Migrate any unique coverage, then delete superseded or overlapping scripts.
+- Before committing, review every newly added executable and scratch artifact. Explicitly remove
+  those used only during the investigation and report any intentionally retained script with its
+  owner and invocation path.
+
 ## Documentation and web research — never answer third-party facts from memory
 - **Known libraries, SDKs, CLIs, and developer tools → Context7 MCP first.** Resolve the library ID,
   verify it against the project-pinned version, then fetch a narrow topic (1–2k tokens; 5k+ for

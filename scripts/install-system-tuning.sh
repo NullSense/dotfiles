@@ -6,14 +6,18 @@
 # inlined system configuration changes. Keeping /etc writes out of the home
 # link installer prevents accidental ownership changes to package-owned paths.
 #
-# Files are written with `sudo tee` so they are owned root:root by
-# construction (no post-hoc chown drift). Requires sudo (interactive apply).
+# Inlined files are written with `sudo tee`; reviewed repository sources are
+# copied with `sudo install`. Both paths produce root-owned files. Requires
+# sudo (interactive apply).
 #
 # DELIBERATELY EXCLUDED (managed by their proper owners — do not add here):
 #   /etc/pam.d/sddm                 -> owned by the `sddm` pacman package
 #   /etc/sddm.conf.d/00-omarchy.conf -> deployed/managed by omarchy
 #
 set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 
 if ! command -v sudo >/dev/null 2>&1; then
     echo "install-system-tuning: sudo not found; cannot deploy /etc files" >&2
@@ -31,6 +35,21 @@ write_root_file() {
     sudo chmod "$mode" "$dest"
     echo "   installed $dest ($mode)"
 }
+
+# install_root_file <source> <dest> <mode> — preserve a reviewed repository
+# source instead of duplicating its content in this installer.
+install_root_file() {
+    local source="$1" dest="$2" mode="$3"
+    sudo install -D -o root -g root -m "$mode" "$source" "$dest"
+    echo "   installed $dest ($mode)"
+}
+
+install_root_file \
+    "$REPO_ROOT/arch-install/etc/NetworkManager/conf.d/10-docker-bridges-unmanaged.conf" \
+    /etc/NetworkManager/conf.d/10-docker-bridges-unmanaged.conf 0644
+install_root_file \
+    "$REPO_ROOT/arch-install/etc/NetworkManager/conf.d/20-systemd-resolved.conf" \
+    /etc/NetworkManager/conf.d/20-systemd-resolved.conf 0644
 
 write_root_file /etc/systemd/network/00-wol.link 644 <<'WOL_EOF'
 # Enable Wake-on-LAN (magic packet) for the wired NIC.
@@ -239,8 +258,19 @@ sudo udevadm control --reload
 sudo udevadm trigger --subsystem-match=block --action=change >/dev/null 2>&1 || true
 sudo udevadm trigger --subsystem-match=net   --action=change >/dev/null 2>&1 || true
 
+# NetworkManager and tailscaled otherwise race to rewrite /etc/resolv.conf.
+# Restart tailscaled after the stub link exists so it selects split-DNS mode.
+echo ":: Activating NetworkManager + Tailscale DNS coexistence…"
+sudo systemctl stop tailscaled.service
+sudo systemctl enable --now systemd-resolved.service
+sudo ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+sudo systemctl restart NetworkManager.service
+sudo systemctl start tailscaled.service
+sudo tailscale set --accept-dns=true
+sudo tailscale up
+
 # logind/sleep drop-ins are read at login / suspend time respectively — no safe
 # live reload (restarting systemd-logind can disrupt the session). They take
 # effect on next login / next suspend. The system-sleep hook is active as soon
 # as it is in place.
-echo ":: Done. logind/sleep settings apply on next login/suspend."
+echo ":: Done. Network DNS is active; logind/sleep settings apply on next login/suspend."

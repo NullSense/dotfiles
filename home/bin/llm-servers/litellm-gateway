@@ -14,7 +14,7 @@
 #
 # ⚠⚠ INSTALL LINE — reproduce EXACTLY. Do not `uv tool install litellm` bare. ⚠⚠
 #
-#   uv tool install --force 'litellm[proxy,caching,extra_proxy]==1.95.0' --with 'fastapi<0.140'
+#   uv tool install --force 'litellm[proxy-runtime,caching,extra_proxy]==1.97.0' --with 'fastapi==0.136.3'
 #   cd ~/.local/share/uv/tools/litellm/lib/python3.13/site-packages/litellm/proxy \
 #     && ~/.local/share/uv/tools/litellm/bin/python -m prisma generate
 #
@@ -29,7 +29,10 @@
 #   prisma generate → installing the prisma PACKAGE is not enough; the client/binaries
 #                  are generated at install time. Without it: "Unable to find Prisma
 #                  binaries. Please run 'prisma generate' first."
-#   fastapi<0.140 → UPSTREAM CONSTRAINT BUG. litellm 1.95.0 declares
+#   proxy-runtime → adds the complete OpenTelemetry runtime used by callbacks: ["otel"]
+#   fastapi==0.136.3 → avoids the FastAPI 0.137 `_IncludedRouter` change that
+#                  crashes LiteLLM's pinned OTel FastAPI instrumentation.
+#                  LiteLLM 1.97.0 still declares
 #                  `fastapi>=0.136.3,<1.0`, but FastAPI removed
 #                  `fastapi.dependencies.utils.get_flat_dependant` in 0.140.x, which
 #                  litellm/proxy/management_endpoints/management_v1/common.py imports at
@@ -43,10 +46,20 @@ PORT="${LITELLM_PORT:-4000}"
 HOST="${LITELLM_HOST:-0.0.0.0}"
 CFG="${LITELLM_CFG:-$HOME/.config/litellm/config.yaml}"
 
-# tracing → otel-lgtm collector (house standard gRPC :4317; collector takes 4317/4318)
-export LITELLM_OTEL_V2=true OTEL_EXPORTER="${OTEL_EXPORTER:-otlp_grpc}" \
-  OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4317}" \
-  OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-litellm}" OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
+# Tracing is useful only when the optional local collector exists. Leaving the
+# exporter enabled against a closed port creates an endless retry loop in both
+# LiteLLM instances. `stack obs` can start the collector before restarting the
+# gateways; LITELLM_OTEL_ENABLED=1 is the explicit override for remote targets.
+if [[ ${LITELLM_OTEL_ENABLED:-auto} == 1 ]] ||
+   { [[ ${LITELLM_OTEL_ENABLED:-auto} == auto ]] &&
+     (exec 3<>/dev/tcp/127.0.0.1/4317) 2>/dev/null; }; then
+  export LITELLM_OTEL_V2=true OTEL_EXPORTER="${OTEL_EXPORTER:-otlp_grpc}" \
+    OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4317}" \
+    OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-litellm}" OTEL_ENVIRONMENT_NAME="${OTEL_ENV:-local}"
+  unset OTEL_SDK_DISABLED
+else
+  export LITELLM_OTEL_V2=false OTEL_SDK_DISABLED=true
+fi
 # THE SWITCH: development=LOCAL (llama-swap), production=CLOUD (OpenRouter).
 export LITELLM_ENVIRONMENT="${LITELLM_ENVIRONMENT:-development}"
 

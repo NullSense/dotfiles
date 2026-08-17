@@ -1,0 +1,18 @@
+[Unit]
+Description=Hindsight control-plane web UI for Hermes
+After=hindsight-hermes.service
+Requires=hindsight-hermes.service
+PartOf=hindsight-hermes.service
+
+[Service]
+Type=simple
+Environment=HINDSIGHT_CP_DATAPLANE_API_URL=http://127.0.0.1:9177
+ExecStartPre=/usr/bin/bash -c 'for i in {1..180}; do /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:9177/health/ready >/dev/null && exit 0; sleep 1; done; exit 1'
+ExecStart=/usr/bin/node %h/.local/share/hindsight-control-plane/node_modules/@vectorize-io/hindsight-control-plane/bin/cli.js --port 19177 --hostname 127.0.0.1 --api-url http://127.0.0.1:9177
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=240
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

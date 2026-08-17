@@ -899,12 +899,12 @@ model_list:
       tags: ["sift", "agent", "rag", "tools", "local", "nanbeige", "vllm", "32k"]
 
   # ── too big for 12 GB → cloud in both environments ─────────────────────────────
-- model_name: anthropic/claude-3.5-sonnet
+- model_name: anthropic/claude-sonnet-5
   litellm_params:
-    model: openrouter/anthropic/claude-3.5-sonnet
+    model: openrouter/anthropic/claude-sonnet-5
     api_key: "os.environ/OPENROUTER_API_KEY"
-    input_cost_per_token: 3e-06
-    output_cost_per_token: 1.5e-05
+    input_cost_per_token: 2e-06
+    output_cost_per_token: 1e-05
     tags:
     - "code"
     - "cloud"
@@ -914,17 +914,18 @@ model_list:
     engine: "openrouter"
     mode: chat
     supports_function_calling: true
-    input_cost_per_token: 0.000003       # $3 / 1M in
-    output_cost_per_token: 0.000015      # $15 / 1M out
-    max_input_tokens: 200000
-    max_output_tokens: 8192
+    supports_vision: true
+    input_cost_per_token: 0.000002       # $2 / 1M in
+    output_cost_per_token: 0.00001       # $10 / 1M out
+    max_input_tokens: 1000000
+    max_output_tokens: 128000
     metadata:
-      display_name: "Claude 3.5 Sonnet · anthropic/claude-3.5-sonnet (cloud, code)"
-      backend: "OpenRouter · anthropic/claude-3.5-sonnet"
+      display_name: "Claude Sonnet 5 · anthropic/claude-sonnet-5 (cloud, code)"
+      backend: "OpenRouter · anthropic/claude-sonnet-5"
       vram: "0 (hosted)"
       role: "too big for 12 GB → cloud in both dev and prod"
       tags: ["code", "cloud", "anthropic", "strong"]
-      source_url: https://openrouter.ai/anthropic/claude-3.5-sonnet
+      source_url: https://openrouter.ai/anthropic/claude-sonnet-5
 
 # ── Router aliases: legacy short names → new HF-identity model_names ─────────────
 # hidden: true = excluded from /v1/models, /v1/model/info, /v1/model_group/info.
@@ -997,7 +998,10 @@ router_settings:
       model: "google/gemma-4-E4B-it:Q8_0"
       hidden: true
     "code-big":
-      model: "anthropic/claude-3.5-sonnet"
+      model: "anthropic/claude-sonnet-5"
+      hidden: true
+    "anthropic/claude-3.5-sonnet":
+      model: "anthropic/claude-sonnet-5"
       hidden: true
     # embed alias (optional identity name for discoverability; sift contract stays "embed")
     "Octen/Octen-Embedding-4B":

@@ -1,0 +1,19 @@
+[Unit]
+Description=Headroom full proxy for Hermes
+Documentation=https://headroomlabs-ai.github.io/headroom/proxy/
+After=graphical-session.target litellm.service
+Wants=litellm.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Programming/llm-stack/stack/observability
+ExecStart=/usr/bin/docker compose --profile headroom up --no-deps headroom
+ExecStop=/usr/bin/docker compose --profile headroom stop headroom
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=30
+
+[Install]
+WantedBy=graphical-session.target

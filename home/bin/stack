@@ -296,12 +296,12 @@ case "${1:-status}" in
             # litellm virtual keys (/key/generate, llm-vkey) need these. Install prep — ALL extras
             # the gateway needs (prisma=DB/keys, diskcache=exact response cache, opentelemetry=otel
             # tracing). Use the FULL line on every (re)install; `--force` drops anything omitted:
-            #   uv tool install 'litellm[proxy]' --with prisma --with diskcache \
-            #     --with opentelemetry-api --with opentelemetry-sdk --with opentelemetry-exporter-otlp --force
+            #   uv tool install --force 'litellm[proxy-runtime,caching,extra_proxy]==1.97.0' \
+            #     --with 'fastapi==0.136.3'
             #   stack db-init   # re-run after any --force reinstall (it wipes the generated prisma client)
     TB="$HOME/.local/share/uv/tools/litellm/bin"
     SCHEMA=$(find "$HOME/.local/share/uv/tools/litellm" -path '*proxy_extras*schema.prisma' 2>/dev/null | head -1)
-    [ -n "$SCHEMA" ] || { echo "  ⚠ litellm prisma schema not found — run: uv tool install 'litellm[proxy]' --with prisma --with diskcache --with opentelemetry-api --with opentelemetry-sdk --with opentelemetry-exporter-otlp --force"; exit 1; }
+    [ -n "$SCHEMA" ] || { echo "  ⚠ litellm prisma schema not found — run the pinned install command in ~/bin/llm-servers/litellm-gateway"; exit 1; }
     PATH="$TB:$PATH" "$TB/prisma" generate --schema "$SCHEMA" 2>&1 | tail -2 || true
     DATABASE_URL="${DATABASE_URL:-postgresql://litellm@127.0.0.1:5433/litellm}" \
       PATH="$TB:$PATH" "$TB/prisma" db push --schema "$SCHEMA" --skip-generate --accept-data-loss 2>&1 | tail -2

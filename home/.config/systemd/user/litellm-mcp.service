@@ -1,6 +1,7 @@
 [Unit]
-Description=litellm MCP aggregation instance :4001 (optional profile — `stack mcp`)
+Description=litellm MCP aggregation instance :4001
 After=network-online.target litellm.service
+Wants=network-online.target litellm.service
 
 [Service]
 Type=simple
@@ -14,4 +15,5 @@ TimeoutStopSec=20
 Environment=PATH=/home/nullsense/bin:/home/nullsense/.local/bin:/home/nullsense/.local/share/mise/shims:/usr/local/bin:/usr/bin
 WorkingDirectory=/home/nullsense
 
-# NOT WantedBy anything — started explicitly by `stack mcp`, stays optional.
+[Install]
+WantedBy=default.target

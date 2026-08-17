@@ -899,12 +899,11 @@ model_list:
       tags: ["sift", "agent", "rag", "tools", "local", "nanbeige", "vllm", "32k"]
 
   # ── OpenCode Go subscription -> Agent Vault / Infisical credential ──────────
-  # Hermes delegates through Headroom and LiteLLM using model names under this
-  # namespace. The wildcard suffix is preserved verbatim for OpenCode's dynamic
-  # model inventory; start with chat-completions models (DeepSeek/GLM/Kimi/MiMo).
-  # Qwen/MiniMax use Anthropic Messages and GPT/Grok use Responses upstream, so
-  # those transports need separate aliases and canaries before use.
-- model_name: opencode-go/*
+  # OpenCode's inventory spans three incompatible wire protocols. Keep those
+  # protocols explicit in the model namespace so unknown/new model IDs fail
+  # closed instead of being guessed onto the Chat Completions route.
+
+- model_name: opencode-go-chat/*
   litellm_params:
     model: openai/*
     api_base: https://opencode.ai/zen/go/v1
@@ -913,16 +912,50 @@ model_list:
       HTTP-Referer: https://hermes-agent.nousresearch.com
       X-Title: Hermes Agent
       User-Agent: HermesAgent
-    tags: ["delegation", "cloud", "opencode-go", "subscription"]
+    tags: ["delegation", "cloud", "opencode-go", "chat-completions"]
   model_info:
     engine: "opencode-go"
     mode: chat
     supports_function_calling: true
     metadata:
-      display_name: "OpenCode Go · dynamic chat-completions inventory"
-      backend: "Headroom -> LiteLLM -> OpenCode Go"
-      role: "Hermes delegated subagents via the OpenCode Go subscription"
-      tags: ["delegation", "cloud", "opencode-go", "subscription"]
+      display_name: "OpenCode Go · Chat Completions"
+      backend: "Headroom -> LiteLLM -> OpenCode Go Chat Completions"
+      role: "DeepSeek, GLM, Kimi, MiMo, and Hy delegated work"
+      tags: ["delegation", "cloud", "opencode-go", "chat-completions"]
+
+- model_name: opencode-go-messages/*
+  litellm_params:
+    model: anthropic/*
+    api_base: https://opencode.ai/zen/go
+    api_key: "os.environ/OPENCODE_GO_API_KEY"
+    tags: ["delegation", "cloud", "opencode-go", "anthropic-messages"]
+  model_info:
+    engine: "opencode-go"
+    mode: chat
+    supports_function_calling: true
+    metadata:
+      display_name: "OpenCode Go · Anthropic Messages"
+      backend: "Headroom -> LiteLLM -> OpenCode Go Anthropic Messages"
+      role: "Qwen and MiniMax delegated work"
+      tags: ["delegation", "cloud", "opencode-go", "anthropic-messages"]
+
+- model_name: opencode-go-responses/*
+  litellm_params:
+    # The openai/responses/ prefix activates LiteLLM's Chat-to-Responses bridge.
+    # model_info.mode alone is descriptive and does not select that transport.
+    model: openai/responses/*
+    api_base: https://opencode.ai/zen/go/v1
+    api_key: "os.environ/OPENCODE_GO_API_KEY"
+    tags: ["delegation", "cloud", "opencode-go", "responses"]
+  model_info:
+    engine: "opencode-go"
+    mode: responses
+    supports_function_calling: true
+    metadata:
+      display_name: "OpenCode Go · Responses"
+      backend: "Headroom -> LiteLLM -> OpenCode Go Responses"
+      role: "GPT and Grok delegated work"
+      tags: ["delegation", "cloud", "opencode-go", "responses"]
 
   # ── too big for 12 GB → cloud in both environments ─────────────────────────────
 - model_name: anthropic/claude-sonnet-5
@@ -957,6 +990,120 @@ model_list:
 # hidden: true = excluded from /v1/models, /v1/model/info, /v1/model_group/info.
 # Callers using the old names still route correctly; the hub shows only HF-identity names.
 # (Confirmed syntax: litellm docs/proxy/load_balancing "Hide Alias Models")
+  # ── primary local agent — Qwen3.8-27B stock NVFP4, vLLM ──────────────
+  # Two request slots share a measured 214,909-token FP8 KV pool. The :think
+  # alias enables low-effort thinking; :fast disables thinking without loading
+  # different weights. Vision and function calling were canaried on this host.
+- model_name: qwen3.8-27b-nvfp4-long
+  litellm_params:
+    model: hosted_vllm/qwen3.8-27b-nvfp4-long
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["local", "qwen", "nvfp4", "vision", "parallel"]
+  model_info:
+    engine: "vllm"
+    hf_repo: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"
+    mode: chat
+    supports_vision: true
+    supports_function_calling: true
+    max_input_tokens: 202240
+    max_output_tokens: 8192
+    metadata:
+      display_name: "Qwen3.8-27B NVFP4 · long/parallel"
+      backend: "vLLM 0.27.1 · RTX 5090 · FP8 KV"
+      role: "primary private local agent; two independent ~100K workers"
+      tags: ["chat", "agent", "vision", "local", "qwen", "nvfp4", "long-context", "parallel"]
+- model_name: qwen3.8-27b-nvfp4-long:think
+  litellm_params:
+    model: hosted_vllm/qwen3.8-27b-nvfp4-long:think
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+  model_info:
+    engine: "vllm"
+    hf_repo: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"
+    mode: chat
+    supports_vision: true
+    supports_function_calling: true
+    max_input_tokens: 202240
+    max_output_tokens: 8192
+    metadata: { display_name: "Qwen3.8-27B NVFP4 · low thinking" }
+- model_name: qwen3.8-27b-nvfp4-long:fast
+  litellm_params:
+    model: hosted_vllm/qwen3.8-27b-nvfp4-long:fast
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+  model_info:
+    engine: "vllm"
+    hf_repo: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"
+    mode: chat
+    supports_vision: true
+    supports_function_calling: true
+    max_input_tokens: 202240
+    max_output_tokens: 8192
+    metadata: { display_name: "Qwen3.8-27B NVFP4 · thinking off" }
+
+  # ── single-request speed lane — Qwen3.8-27B NVFP4 + DSpark ─────
+  # DSpark drafts seven tokens for an eight-token verification window. This
+  # route is intentionally limited to 32K and one request; use the vLLM lane
+  # for vision-sensitive work and concurrent long-context agents.
+- model_name: qwen3.8-27b-nvfp4-dspark
+  litellm_params:
+    model: openai/qwen3.8-27b-nvfp4-dspark
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+    tags: ["local", "qwen", "nvfp4", "dspark"]
+  model_info:
+    engine: "sglang"
+    hf_repo: "RadixArk/Qwen3.8-27B-NVFP4"
+    mode: chat
+    supports_vision: true
+    supports_function_calling: true
+    max_input_tokens: 24576
+    max_output_tokens: 8192
+    metadata:
+      display_name: "Qwen3.8-27B NVFP4 + DSpark · single-request speed lane"
+      backend: "SGLang · DSpark gamma 7 / verify width 8"
+      role: "short interactive text and tool work"
+      tags: ["chat", "agent", "local", "qwen", "nvfp4", "dspark"]
+- model_name: qwen3.8-27b-nvfp4-dspark:think
+  litellm_params:
+    model: openai/qwen3.8-27b-nvfp4-dspark:think
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+  model_info:
+    engine: "sglang"
+    mode: chat
+    supports_vision: true
+    supports_function_calling: true
+    max_input_tokens: 24576
+    max_output_tokens: 8192
+    metadata: { display_name: "Qwen3.8-27B DSpark · low thinking" }
+- model_name: qwen3.8-27b-nvfp4-dspark:fast
+  litellm_params:
+    model: openai/qwen3.8-27b-nvfp4-dspark:fast
+    api_base: http://127.0.0.1:9292/v1
+    api_key: "none"
+    input_cost_per_token: 0
+    output_cost_per_token: 0
+  model_info:
+    engine: "sglang"
+    mode: chat
+    supports_vision: true
+    supports_function_calling: true
+    max_input_tokens: 24576
+    max_output_tokens: 8192
+    metadata: { display_name: "Qwen3.8-27B DSpark · thinking off" }
+
   # ── uncensored chat/agent — Qwen3.8-27B Uncensored (Heretic), local llama.cpp ──
   #    Replaces the retired LuffyTheFox/Qwen3.6-35B-A3B-Uncensored entries (weights gone).
   #    Q4_K_M + baked-in MTP, measured 133 t/s freeform / 151 t/s summarize on the 5090

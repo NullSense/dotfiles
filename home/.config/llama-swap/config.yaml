@@ -32,12 +32,10 @@ startPort: 9300           # ${PORT} auto-increments from here per model
 # All three are in the `sift-serve` matrix set, so co-residency is permitted and they
 # will not swap each other out. ~11 GB held from boot (n 3.8 + m 4.7 + x 2.5).
 #
-# tei-sparse IS preloaded. Do not "optimise" it out on the strength of
-# SIFT_SPARSE_ENABLED being unset in sift's .env: that env only seeds the NODE DEFAULT
-# CONTRACT — the Contract an UNCONFIGURED pipeline inherits (sift-api/src/main.rs).
-# Whether a query actually runs hybrid is decided PER PIPELINE by that pipeline's own
-# sparse leg, and configured pipelines set sparse_enabled: true themselves (see
-# sift config/pipeline.example.json). The env is not the switch it looks like.
+# tei-sparse used to preload alongside the Q4 chat model. The NVFP4 vLLM route
+# reserves 89% of VRAM for its measured two-worker KV pool, so that combination
+# is no longer safe. Sparse retrieval remains available on demand; llama-swap
+# deliberately evicts Qwen for it and restores Qwen on the next agent request.
 # ── vLLM sleep-mode swapping (2026-08-06) ─────────────────────────────────────────
 # `vllm-wrapper` is llama-swap's own helper (v243+, cmd/vllm-wrapper) for driving
 # vLLM's /sleep + /wake_up from cmd/cmdStop instead of killing the container. It is
@@ -60,15 +58,10 @@ macros:
 
 hooks:
   on_startup:
-    # ORDER MATTERS + these all pin themselves (ttl:0). 2026-08-16: preloading the two
-    # nemotron models FIRST made the 22.9 GB qwen3.8-27b @128k unstartable — it had to
-    # evict them mid-flight and lost the race ~12x in a row ("upstream command exited
-    # prematurely"), because evicted VRAM is not released synchronously. The big
-    # interactive model is preloaded FIRST so it wins the startup allocation; the small
-    # retrieval models load on demand (they are seconds to start, the 27B is ~32s).
+    # Keep only the primary interactive model resident. Sift retrieval models load
+    # on demand and are mutually exclusive with this two-worker 27B allocation.
     preload:
-      - qwen3.8-27b-uncensored
-      - tei-sparse
+      - qwen3.8-27b-nvfp4-long
 
 models:
   # ── embeddings: sift + oracle. On-demand, evicts when idle (was ttl:0 always-on). ──
@@ -855,6 +848,133 @@ models:
 #   should be deleted once the migration they insure against is confirmed done and the hardware/
 #   dependency they'd roll back to no longer exists.
 #
+  # ── Qwen3.8-27B NVFP4 — long-context, parallel, multimodal lane ─────────────
+  # Pinned 5090-specific ModelOpt export from the user-selected deployment recipe
+  # (weights revision 69274a0d8dff5dd35bcee8290612f71e03b6e981). Live on this
+  # desktop at 0.89: 18.51 GiB resident weights and 214,909 aggregate FP8-KV
+  # tokens. That admits two independent ~100K workers with ~14K aggregate reserve.
+  # Prefix caching can improve identical-prefix forks but is not capacity credit.
+  # Eager mode deliberately trades some peak throughput for the 0.44 GiB CUDA
+  # graph reservation that makes the two-worker context budget fit safely.
+  qwen3.8-27b-nvfp4-long:
+    cmd: >
+      docker run --rm --name vllm-qwen38-long --init --gpus all
+      --ipc host --network host --security-opt no-new-privileges
+      -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
+      -e VLLM_NO_USAGE_STATS=1
+      -v /home/nullsense/.lmstudio/models/gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090:/models/target:ro
+      vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
+      /models/target
+      --served-model-name qwen3.8-27b-nvfp4-long
+      --host 127.0.0.1 --port ${PORT}
+      --quantization modelopt
+      --kv-cache-dtype fp8
+      --max-model-len 210432
+      --max-num-seqs 2
+      --gpu-memory-utilization 0.89
+      --enable-prefix-caching
+      --reasoning-parser qwen3
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_xml
+      --trust-remote-code
+      --enforce-eager
+    cmdStop: docker stop -t 20 vllm-qwen38-long
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: qwen3.8-27b-nvfp4-long
+    ttl: 0
+    name: "Qwen3.8-27B (vLLM NVFP4, long/parallel)"
+    aliases: ["qwen3.8-27b-nvfp4-long:think", "qwen3.8-27b-nvfp4-long:fast"]
+    description: "chat·agent·vision · stock Qwen3.8 NVFP4, 210K max request, measured 214,909-token aggregate pool, two ~100K workers"
+    metadata: { engine: "vllm", hf: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090@69274a0", class: "chat·agent·vision", thinking: "low or off per request", aggregate_context: 214909, max_concurrency: 2, tags: [chat, agent, vision, local, qwen, nvfp4, long-context, parallel] }
+    filters:
+      setParamsByID:
+        "qwen3.8-27b-nvfp4-long:think":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 0.0
+          reasoning_effort: low
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: false
+        "qwen3.8-27b-nvfp4-long:fast":
+          temperature: 0.7
+          top_p: 0.8
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 1.5
+          chat_template_kwargs:
+            enable_thinking: false
+            preserve_thinking: false
+
+  # ── Qwen3.8-27B NVFP4 + DSpark — fast single-request lane ──────────────────
+  # Official RadixArk target/draft pair. The draft emits seven candidates, giving
+  # an eight-token verification window; there is no validated k=16 SGLang pair.
+  # Live measurement on this 32 GB desktop found only 56,796 aggregate tokens at
+  # mem-fraction=0.94, and even that left too little Triton workspace for a tiny
+  # request. ReplaySSM cannot help: this image explicitly rejects GDN + DSpark
+  # (its DSpark implementation permits ReplaySSM only for KDA models). Keep this
+  # as a short, one-request speed lane; use the separate non-speculative vLLM
+  # route for parallel long-context workers and vision-sensitive work.
+  qwen3.8-27b-nvfp4-dspark:
+    cmd: >
+      docker run --rm --name sglang-qwen38-dspark --init --gpus all
+      --ipc host --network host --security-opt no-new-privileges
+      -v /home/nullsense/.lmstudio/models/RadixArk/Qwen3.8-27B-NVFP4:/models/target:ro
+      -v /home/nullsense/.lmstudio/models/RadixArk/Qwen3.8-27B-DSpark:/models/draft:ro
+      lmsysorg/sglang@sha256:e35dfb0beaf6b1fb6619ae0dac9474b5cdda24b81cee7202316e371301425e46
+      python3 -m sglang.launch_server
+      --trust-remote-code
+      --model-path /models/target
+      --served-model-name qwen3.8-27b-nvfp4-dspark
+      --host 127.0.0.1 --port ${PORT}
+      --context-length 32768
+      --kv-cache-dtype fp8_e4m3
+      --mem-fraction-static 0.91
+      --attention-backend flashinfer
+      --chunked-prefill-size 2048
+      --mamba-radix-cache-strategy extra_buffer_lazy
+      --mamba-ssm-dtype bfloat16
+      --max-mamba-cache-size 4
+      --max-running-requests 1
+      --cuda-graph-max-bs-decode 1
+      --mm-feature-transport cpu
+      --speculative-algorithm DSPARK
+      --speculative-draft-model-path /models/draft
+      --speculative-draft-attention-backend flashinfer
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_coder
+    cmdStop: docker stop -t 20 sglang-qwen38-dspark
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: qwen3.8-27b-nvfp4-dspark
+    ttl: 300
+    name: "Qwen3.8-27B (SGLang NVFP4 + DSpark)"
+    aliases: ["qwen3.8-27b-nvfp4-dspark:think", "qwen3.8-27b-nvfp4-dspark:fast"]
+    description: "chat·agent·vision · official NVFP4 target with seven-token DSpark draft, 32K single-request speed lane"
+    metadata: { engine: "sglang", hf: "RadixArk/Qwen3.8-27B-NVFP4", class: "chat·agent·vision", thinking: "low or off per request", tags: [chat, agent, vision, local, qwen, nvfp4, dspark] }
+    filters:
+      setParamsByID:
+        "qwen3.8-27b-nvfp4-dspark:think":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 0.0
+          reasoning_effort: low
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: false
+        "qwen3.8-27b-nvfp4-dspark:fast":
+          temperature: 0.7
+          top_p: 0.8
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 1.5
+          chat_template_kwargs:
+            enable_thinking: false
+            preserve_thinking: false
+
   # ── uncensored chat/agent — Qwen3.8-27B Uncensored (Heretic abliteration) ────────
   #    Dense 27B hybrid (16 of 64 layers full-attention, rest Gated DeltaNet), Apache-2.0,
   #    262k native ctx. Replaces the retired qwen3.6-35b-uncensored route (weights gone).
@@ -922,6 +1042,7 @@ models:
           presence_penalty: 0.0
           chat_template_kwargs:
             enable_thinking: true
+            preserve_thinking: false
         "qwen3.8-27b-uncensored:fast":
           temperature: 0.7
           top_p: 0.8
@@ -930,6 +1051,7 @@ models:
           presence_penalty: 1.5
           chat_template_kwargs:
             enable_thinking: false
+            preserve_thinking: false
 
 matrix:
   vars:

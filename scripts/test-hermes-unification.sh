@@ -143,10 +143,9 @@ fi
 test ! -s "$test_root/misuse.out"
 grep -q 'dotenv provider, not a command wrapper' "$test_root/misuse.err"
 
-# Help must be side-effect-free. It used to treat --help as a key alias and
-# mint a LiteLLM virtual key before failing to store it.
-env -i HOME="$fake_home" PATH=/usr/bin:/bin \
-    "$repo/home/bin/llm-vkey" --help >"$test_root/llm-vkey-help.out"
-grep -q '^usage: llm-vkey ' "$test_root/llm-vkey-help.out"
+# Virtual-key administration must not be exposed through a shell helper that
+# places administrator or newly minted keys in process arguments.
+test ! -e "$repo/home/bin/llm-vkey"
+! grep -q 'llm-vkey' "$repo/home/bin/stack"
 
 echo 'Hermes launch and parity contracts pass'

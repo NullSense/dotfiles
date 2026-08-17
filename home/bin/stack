@@ -293,7 +293,7 @@ case "${1:-status}" in
     printf "  %-12s %s\n" "rewrite" "$(curl -s --max-time 2 http://127.0.0.1:9292/running 2>/dev/null | grep -q rewrite && echo 'loaded (llama-swap)' || echo 'idle — llama-swap loads on demand')"
     ;;
   db-init)  # one-time per machine (or after a litellm upgrade): prisma client + LiteLLM_* tables.
-            # litellm virtual keys (/key/generate, llm-vkey) need these. Install prep — ALL extras
+            # LiteLLM virtual-key APIs need these. Install prep — ALL extras
             # the gateway needs (prisma=DB/keys, diskcache=exact response cache, opentelemetry=otel
             # tracing). Use the FULL line on every (re)install; `--force` drops anything omitted:
             #   uv tool install --force 'litellm[proxy-runtime,caching,extra_proxy]==1.97.0' \
@@ -305,7 +305,7 @@ case "${1:-status}" in
     PATH="$TB:$PATH" "$TB/prisma" generate --schema "$SCHEMA" 2>&1 | tail -2 || true
     DATABASE_URL="${DATABASE_URL:-postgresql://litellm@127.0.0.1:5433/litellm}" \
       PATH="$TB:$PATH" "$TB/prisma" db push --schema "$SCHEMA" --skip-generate --accept-data-loss 2>&1 | tail -2
-    echo "  ✓ prisma generated + LiteLLM_* tables ready — 'stack restart' then llm-vkey works"
+    echo "  ✓ prisma generated + LiteLLM_* tables ready — restart LiteLLM before using key APIs"
     ;;
   logs) journalctl --user -f -u litellm -u llama-swap -u litellm-mcp ;;  # systemd-owned now; old nohup logs remain in $RUN/*.log
   *) echo "usage: stack {up|gateway|mcp [on|off]|dash|pro|obs|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;

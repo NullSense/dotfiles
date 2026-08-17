@@ -23,6 +23,11 @@ fi
 # "later" hook and nags every shell. False positive — silence it.
 export _ZO_DOCTOR=0
 
+# Plannotator's CLI does not persist a browser in ~/.plannotator/config.json;
+# it reads PLANNOTATOR_BROWSER (or a one-shot --browser flag). Pin the live
+# Helium launcher so agent-started review sessions never fall back to Chromium.
+export PLANNOTATOR_BROWSER="$HOME/.local/bin/helium"
+
 # Omarchy — pinned to a release tag at ~/.local/share/omarchy.
 # OMARCHY_PATH is read by every omarchy-* script for theme paths, defaults,
 # and template rendering. PATH gets the omarchy bin dir prepended so all

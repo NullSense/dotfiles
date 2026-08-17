@@ -77,7 +77,7 @@ mcp_servers:
     allow_all_keys: true
   hindsight:
     description: "Hindsight — Hermes long-term memory bank (retain, recall, reflect only)."
-    url: "http://127.0.0.1:9177/mcp/hermes/"
+    url: "http://127.0.0.1:9177/mcp/hermes-restore-20260817/"
     transport: "http"
     allow_all_keys: true
     access_groups: ["memory"]

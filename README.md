@@ -48,6 +48,15 @@ The repository is public. Never commit credentials. Runtime secrets belong in
 Infisical, Agent Vault, systemd encrypted credentials, or ignored local state.
 Pre-commit and pre-push hooks run Gitleaks and TruffleHog.
 
+## Regression checks
+
+`tests/` contains only recurring checks for tracked behavior. Run the complete
+set through this documented interface instead of adding one-off runner scripts:
+
+```bash
+for test_file in ~/.dotfiles/tests/*.sh; do "$test_file"; done
+```
+
 ## Layout
 
 ```text

@@ -1,0 +1,8 @@
+name: native-delegation
+version: 1.0.0
+description: "Route broad non-personal technical work to native OpenCode or Codex subscription workers before local perusal."
+author: NullSense
+hooks:
+  - pre_tool_call
+provides_tools:
+  - native_delegate

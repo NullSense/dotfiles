@@ -24,6 +24,92 @@ RUN="${RUN:-$HOME/.cache/llm-stack}"; mkdir -p "$RUN"
 # up = got any HTTP code (401 from litellm still means "alive"); 000 = not listening.
 is_up() { local c; c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$1" 2>/dev/null || true); [ -n "$c" ] && [ "$c" != "000" ]; }
 wait_tcp() { local h="${1%:*}" p="${1#*:}" i; for ((i = 0; i < ${2:-15}; i++)); do (exec 3<>"/dev/tcp/$h/$p") 2>/dev/null && { exec 3>&- 3<&-; return 0; }; sleep 1; done; return 1; }
+
+# llama-swap v250 hot reload is not request-safe: both --watch-config and
+# SIGHUP swap routers and immediately tear down the old one.  Read the
+# authoritative in-flight snapshot before using systemd's normal SIGTERM path,
+# which stops accepting new HTTP work and drains existing requests first.
+llama_swap_is_idle() {
+  local snapshot
+  snapshot=$(
+    { curl -sN --max-time 3 http://127.0.0.1:9292/api/events 2>/dev/null || true; } \
+      | awk '/^data:.*"type":"inflight"/ { sub(/^data:/, ""); print; exit }'
+  )
+  [ -n "$snapshot" ] || return 1
+  jq -e 'select(.type == "inflight") | .data | fromjson | ((.requests // []) | length == 0)' \
+    >/dev/null <<<"$snapshot"
+}
+
+wait_llama_swap_idle() {
+  local timeout="${1:-180}" i
+  for ((i = 0; i < timeout; i++)); do
+    llama_swap_is_idle && return 0
+    sleep 1
+  done
+  echo "  ⚠ llama-swap still has an active request after ${timeout}s; refusing restart" >&2
+  return 1
+}
+
+restart_llama_swap() {
+  command -v yq >/dev/null 2>&1 || { echo "  ⚠ yq is required to validate $LSWAP_CFG" >&2; return 1; }
+  yq '.' "$LSWAP_CFG" >/dev/null
+  wait_llama_swap_idle "${LLAMA_SWAP_DRAIN_TIMEOUT:-180}"
+  systemctl --user restart llama-swap
+  wait_tcp 127.0.0.1:9292 15
+  echo "  ↻ llama-swap restarted after the inference lane drained"
+}
+
+diagnostic_canary() {
+  # Resolve only the scoped LiteLLM key inside the short-lived Python process;
+  # never place it in argv, a temp file, or this shell's exported environment.
+  STACK_CANARY_MODEL="${STACK_CANARY_MODEL:-qwen3.8-27b-nvfp4-long:fast}" \
+    python3 - "$HOME/.local/libexec/hermes-secret-env" <<'PY'
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+helper = subprocess.run(
+    [sys.argv[1]], check=True, text=True, stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE, timeout=35,
+)
+key = next(
+    (line.partition("=")[2] for line in helper.stdout.splitlines()
+     if line.startswith("LITELLM_API_KEY=")),
+    "",
+)
+if not key:
+    raise SystemExit("stack canary: secret helper did not provide LITELLM_API_KEY")
+
+model = os.environ["STACK_CANARY_MODEL"]
+payload = json.dumps({
+    "model": model,
+    "messages": [{"role": "user", "content": "Reply exactly OK."}],
+    "max_tokens": 8,
+    "temperature": 0,
+    "metadata": {"tags": ["client:stack", "role:diagnostic"]},
+}).encode()
+request = urllib.request.Request(
+    "http://127.0.0.1:8787/v1/chat/completions",
+    data=payload,
+    headers={
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "x-litellm-tags": "client:stack,role:diagnostic",
+    },
+)
+try:
+    with urllib.request.urlopen(request, timeout=180) as response:
+        data = json.load(response)
+except urllib.error.HTTPError as exc:
+    raise SystemExit(f"stack canary: HTTP {exc.code}: {exc.read(300).decode(errors='replace')}")
+
+content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+print(f"  ✓ Headroom → LiteLLM → {model}: {content.strip()[:80]}")
+PY
+}
 kill_port() {  # kill whatever LISTENS on a TCP port — reliable, no fuser/pattern guessing
   local port="$1" pids
   pids=$(ss -tlnpH "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u)
@@ -248,24 +334,28 @@ case "${1:-status}" in
     ensure_obs
     echo "  observability up · Grafana → :3000 · Langfuse → :3002  (stop with: stack mon-down)"
     ;;
-  restart)  # restart WHAT'S RUNNING, nothing else: try-restart is a no-op for inactive
+  llama-reload)
+    systemctl --user is-active -q llama-swap \
+      || { echo "  ⚠ llama-swap is not running" >&2; exit 1; }
+    restart_llama_swap
+    ;;
+  canary)
+    diagnostic_canary
+    ;;
+  restart)  # restart WHAT'S RUNNING, nothing else: inactive units stay inactive
     # units, so a gateway-only setup stays gateway-only and mcp/obs are never dragged in.
     any=0
-    for u in llama-swap litellm litellm-mcp; do
+    if systemctl --user is-active -q llama-swap; then
+      restart_llama_swap
+      any=1
+    fi
+    for u in litellm litellm-mcp; do
       if systemctl --user is-active -q "$u"; then
         systemctl --user try-restart "$u" && echo "  ↻ $u restarted" || echo "  ⚠ $u restart failed"
         any=1
       fi
     done
     [ "$any" = 1 ] || { echo "  • nothing running — start with: stack up"; exit 0; }
-    # llama-swap restart drops resident models; re-warm the ttl:0 rewrite slot (dictation
-    # + Sift share it) the same way `up` does. Non-blocking.
-    if systemctl --user is-active -q llama-swap; then
-      ( curl -s -o /dev/null --max-time 120 http://127.0.0.1:9292/v1/chat/completions \
-          -H 'Content-Type: application/json' \
-          -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
-          && echo "  ▶ rewrite re-warmed via llama-swap" || true ) &
-    fi
     ;;
   status)
     command -v llms >/dev/null && llms
@@ -302,5 +392,5 @@ case "${1:-status}" in
     echo "  ✓ prisma generated + LiteLLM_* tables ready — restart LiteLLM before using key APIs"
     ;;
   logs) journalctl --user -f -u litellm -u llama-swap -u litellm-mcp ;;  # systemd-owned now; old nohup logs remain in $RUN/*.log
-  *) echo "usage: stack {up|gateway|mcp [on|off]|dash|pro|obs|down|mon-down|restart|status|logs|db-init}"; exit 1 ;;
+  *) echo "usage: stack {up|gateway|mcp [on|off]|dash|obs|down|mon-down|llama-reload|canary|restart|status|logs|db-init}"; exit 1 ;;
 esac

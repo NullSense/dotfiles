@@ -10,6 +10,7 @@ litellm_config="$repo_root/home/.config/litellm/config.yaml"
 litellm_mcp_config="$repo_root/home/.config/litellm/config-mcp.yaml"
 litellm_models="$repo_root/home/.config/litellm/models.yaml"
 llama_swap_config="$repo_root/home/.config/llama-swap/config.yaml"
+llama_swap_unit="$units/llama-swap.service"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -44,6 +45,19 @@ if grep -Eq 'stack pro|vllm-diffusiongemma|summarize-pro' \
     "$stack" "$litellm_models" "$llama_swap_config"; then
     fail 'retired premium summarizer machinery returned'
 fi
+
+grep -Fq -- '--watch-config' "$llama_swap_unit" \
+    && fail 'llama-swap unsafe automatic config reload is enabled'
+grep -Fq 'TimeoutStopSec=60' "$llama_swap_unit" \
+    || fail 'llama-swap stop timeout does not cover its graceful drain budget'
+grep -Fq '/api/events' "$stack" \
+    || fail 'stack has no authoritative llama-swap in-flight check'
+grep -Fq 'wait_llama_swap_idle' "$stack" \
+    || fail 'stack does not drain llama-swap before a controlled restart'
+grep -Fq 'role:diagnostic' "$stack" \
+    || fail 'stack canary lacks a LiteLLM diagnostic role tag'
+grep -Fq 'dash|pro|obs' "$stack" \
+    && fail 'retired stack pro command remains advertised'
 
 if grep -Eq 'After=.*(docker|network-online)\.service|After=.*network-online\.target' \
     "$units/litellm.service" "$units/litellm-mcp.service" "$units/hindsight-hermes.service"; then

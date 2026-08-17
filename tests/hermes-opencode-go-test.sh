@@ -60,6 +60,29 @@ grep -Fq 'OPENCODE_GO_API_KEY:-agent-vault-managed' "$helper" \
     || fail 'Hermes must preserve context when a compression summary fails'
 grep -Fqx 'HINDSIGHT_API_REFLECT_MAX_CONTEXT_TOKENS=50000' "$hindsight_env" \
     || fail 'Hindsight reflection must fit inside the 50K scheduling reserve'
+grep -Fqx 'HINDSIGHT_API_LLM_DEFAULT_HEADERS='\''{"x-litellm-tags":"client:hermes,role:hindsight"}'\''' "$hindsight_env" \
+    || fail 'Hindsight requests lack their LiteLLM role tag'
+
+[[ $(yq -r '.custom_providers[] | select(.name == "qwen38-nvfp4") | .extra_headers."x-litellm-tags"' "$hermes_config") == 'client:hermes,role:main' ]] \
+    || fail 'Hermes main requests lack their LiteLLM role tag'
+[[ $(yq -r '.auxiliary.compression.extra_body.metadata.tags | join(",")' "$hermes_config") == 'client:hermes,role:compaction' ]] \
+    || fail 'Hermes compaction requests lack their LiteLLM role tag'
+[[ $(yq -r '.auxiliary.background_review.extra_body.metadata.tags | join(",")' "$hermes_config") == 'client:hermes,role:background_review' ]] \
+    || fail 'Hermes background-review requests lack their LiteLLM role tag'
+[[ $(yq -r '.platform_toolsets.cli | index("web")' "$hermes_config") == null ]] \
+    || fail 'Unavailable native web/Firecrawl tool remains enabled for CLI'
+[[ $(yq -r '.platform_toolsets.telegram | index("web")' "$hermes_config") == null ]] \
+    || fail 'Unavailable native web/Firecrawl tool remains enabled for Telegram'
+[[ $(yq -r '.platform_toolsets.cli | index("headroom")' "$hermes_config") != null ]] \
+    || fail 'Headroom CCR retrieval is not enabled for CLI'
+[[ $(yq -r '.platform_toolsets.telegram | index("headroom")' "$hermes_config") != null ]] \
+    || fail 'Headroom CCR retrieval is not enabled for Telegram'
+[[ $(yq -r '.platform_toolsets.cli | index("native_delegation")' "$hermes_config") != null ]] \
+    || fail 'Native delegation is not enabled for CLI'
+[[ $(yq -r '.platform_toolsets.telegram | index("native_delegation")' "$hermes_config") != null ]] \
+    || fail 'Native delegation is not enabled for Telegram'
+[[ $(yq -r '.plugins.enabled | index("native-delegation")' "$hermes_config") != null ]] \
+    || fail 'Native delegation policy plugin is not enabled'
 
 grep -Fq 'opencode-go/deepseek-v4-flash' "$hermes_soul" \
     || fail 'Hermes delegation policy omits the easy OpenCode route'
@@ -67,5 +90,8 @@ grep -Fq 'opencode-go/glm-5.3' "$hermes_soul" \
     || fail 'Hermes delegation policy omits the complex OpenCode route'
 grep -Fq 'they do not get Hindsight' "$hermes_soul" \
     || fail 'Hermes delegation policy omits the Hindsight privacy boundary'
+# shellcheck disable=SC2016 -- literal Markdown backticks are intentional.
+grep -Fq '`native_delegate` is the first meaningful action' "$hermes_soul" \
+    || fail 'Hermes does not enforce delegate-first for broad technical work'
 
 printf 'PASS: Hermes private-local and native-remote delegation contract\n'

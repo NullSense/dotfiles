@@ -12,9 +12,9 @@ fail() {
 }
 
 for alias in \
-    qwen3.8-27b-uncensored \
-    qwen3.8-27b-uncensored:think \
-    qwen3.8-27b-uncensored:fast
+    qwen3.8-27b-nvfp4-long \
+    qwen3.8-27b-nvfp4-long:think \
+    qwen3.8-27b-nvfp4-long:fast
 do
     # shellcheck disable=SC2016
     count=$(yq -r --arg alias "$alias" \
@@ -29,28 +29,26 @@ do
     # shellcheck disable=SC2016
     max_input=$(yq -r --arg alias "$alias" \
         '.model_list[] | select(.model_name == $alias) | .model_info.max_input_tokens' "$models")
-    [[ $max_input == 210432 ]] || fail "$alias must advertise the 210432-token input budget"
+    [[ $max_input == 202240 ]] || fail "$alias must advertise 202240 input tokens plus the 8192-token output reserve"
 done
 
-grep -Fq -- '--mmproj /home/nullsense/.lmstudio/models/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF/Qwen3.8-27B-Uncensored-vision-f16.gguf' "$swap" \
-    || fail 'Qwen llama-swap route does not load its vision projector'
-
-grep -Fq -- '--fit-ctx 219136' "$swap" \
-    || fail 'Qwen llama-swap route must reserve input + output + slack context'
-
-grep -Fq -- '--reasoning-effort low' "$swap" \
-    || fail 'Qwen llama-swap route must default to low reasoning effort'
+grep -Fq -- '--max-model-len 210432' "$swap" \
+    || fail 'Qwen NVFP4 route must allocate the 210432-token engine window'
+grep -Fq -- '--max-num-seqs 3' "$swap" \
+    || fail 'Qwen NVFP4 route must retain three scheduler slots'
+grep -Fq -- '--kv-cache-dtype fp8' "$swap" \
+    || fail 'Qwen NVFP4 route must use FP8 KV for the long-context budget'
 
 [[ $(yq -r '.agent.reasoning_effort // ""' "$hermes_config") == low ]] \
     || fail 'Hermes must default Qwen requests to low reasoning effort'
 
-[[ $(yq -r '.providers["qwen38-uncensored"].extra_body.reasoning_effort // ""' "$hermes_config") == low ]] \
+[[ $(yq -r '.providers["qwen38-nvfp4"].extra_body.reasoning_effort // ""' "$hermes_config") == low ]] \
     || fail 'Hermes Qwen provider must default requests to low reasoning effort'
 
 [[ $(yq -r '.model.supports_vision // false' "$hermes_config") == true ]] \
     || fail 'Hermes must route the custom Qwen provider through native vision'
 
-[[ $(yq -r '.model.context_length // 0' "$hermes_config") == 210432 ]] \
-    || fail 'Hermes must use the advertised 210432-token input budget'
+[[ $(yq -r '.model.context_length // 0' "$hermes_config") == 202240 ]] \
+    || fail 'Hermes must reserve 8192 output tokens inside the 210432-token engine window'
 
 printf 'PASS: Hermes Qwen multimodal alias contract\n'

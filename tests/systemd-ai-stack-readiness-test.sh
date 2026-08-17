@@ -11,6 +11,7 @@ litellm_mcp_config="$repo_root/home/.config/litellm/config-mcp.yaml"
 litellm_models="$repo_root/home/.config/litellm/models.yaml"
 llama_swap_config="$repo_root/home/.config/llama-swap/config.yaml"
 llama_swap_unit="$units/llama-swap.service"
+hermes_config=${HERMES_CONFIG:-$HOME/.hermes/config.yaml}
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -82,5 +83,8 @@ for dependency in agent-vault.service hindsight-hermes.service headroom-hermes.s
     grep -Eq "^After=.*${dependency}([[:space:]]|$)" "$gateway" \
         || fail "Hermes is not ordered after $dependency"
 done
+
+[[ $(yq -r '.display.busy_input_mode // ""' "$hermes_config") == queue ]] \
+    || fail 'Hermes must queue follow-up input instead of interrupting long-running turns'
 
 printf 'PASS: systemd AI-stack readiness contract\n'

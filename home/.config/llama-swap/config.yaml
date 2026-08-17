@@ -834,10 +834,11 @@ models:
   # ── Qwen3.8-27B NVFP4 — long-context, parallel, multimodal lane ─────────────
   # Pinned 5090-specific ModelOpt export from the user-selected deployment recipe
   # (weights revision 69274a0d8dff5dd35bcee8290612f71e03b6e981). Live on this
-  # desktop at 0.88: 18.51 GiB resident weights and 222,371 aggregate FP8-KV
-  # tokens. Three scheduler slots admit two independent ~100K workers plus about
-  # 22K aggregate reserve for a small Hindsight/background request. They do not
-  # guarantee a simultaneous 100K + 100K + 50K worst case.
+  # desktop at 0.88: 18.51 GiB resident weights and 211,924 aggregate FP8-KV
+  # tokens. Three scheduler slots can admit one ~150K interactive worker plus a
+  # conservative ~50K Hindsight/background reserve, or two independent ~100K
+  # workers with only ~12K left. They do not guarantee a simultaneous
+  # 100K + 100K + 50K worst case.
   # Prefix caching can improve identical-prefix forks but is not capacity credit.
   # Eager mode deliberately trades some peak throughput to avoid the CUDA graph
   # reservation and preserve the long-context pool.
@@ -869,8 +870,8 @@ models:
     ttl: 0
     name: "Qwen3.8-27B (vLLM NVFP4, long/parallel)"
     aliases: ["qwen3.8-27b-nvfp4-long:think", "qwen3.8-27b-nvfp4-long:fast"]
-    description: "chat·agent·vision · stock Qwen3.8 NVFP4, 210K max request, measured 222,371-token aggregate pool, three scheduler slots"
-    metadata: { engine: "vllm", hf: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090@69274a0", class: "chat·agent·vision", thinking: "low or off per request", aggregate_context: 222371, max_concurrency: 3, tags: [chat, agent, vision, local, qwen, nvfp4, long-context, parallel] }
+    description: "chat·agent·vision · stock Qwen3.8 NVFP4, 210K max request, measured 211,924-token aggregate pool, three scheduler slots"
+    metadata: { engine: "vllm", hf: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090@69274a0", class: "chat·agent·vision", thinking: "low or off per request", aggregate_context: 211924, max_concurrency: 3, tags: [chat, agent, vision, local, qwen, nvfp4, long-context, parallel] }
     filters:
       setParamsByID:
         "qwen3.8-27b-nvfp4-long:think":

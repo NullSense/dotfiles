@@ -950,9 +950,11 @@ model_list:
 # Callers using the old names still route correctly; the hub shows only HF-identity names.
 # (Confirmed syntax: litellm docs/proxy/load_balancing "Hide Alias Models")
   # ── primary local agent — Qwen3.8-27B stock NVFP4, vLLM ──────────────
-  # Two request slots share a measured 214,909-token FP8 KV pool. The :think
-  # alias enables low-effort thinking; :fast disables thinking without loading
-  # different weights. Vision and function calling were canaried on this host.
+  # Three scheduler slots share the current measured 211,924-token FP8 KV pool.
+  # Budget one roughly 150K interactive request plus a 50K background reserve,
+  # or two roughly 100K workers with only about 12K left. The :think alias
+  # enables low-effort thinking; :fast disables thinking without loading different
+  # weights. Vision and function calling were canaried on this host.
 - model_name: qwen3.8-27b-nvfp4-long
   litellm_params:
     model: hosted_vllm/qwen3.8-27b-nvfp4-long
@@ -972,7 +974,7 @@ model_list:
     metadata:
       display_name: "Qwen3.8-27B NVFP4 · long/parallel"
       backend: "vLLM 0.27.1 · RTX 5090 · FP8 KV"
-      role: "primary private local agent; two independent ~100K workers"
+      role: "primary private local agent; 211,924-token aggregate KV shared by three scheduler slots"
       tags: ["chat", "agent", "vision", "local", "qwen", "nvfp4", "long-context", "parallel"]
 - model_name: qwen3.8-27b-nvfp4-long:think
   litellm_params:

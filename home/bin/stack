@@ -5,7 +5,7 @@
 #   litellm       :4000 — OpenAI gateway (logical names → local/cloud; traces → :4318 collector)
 #   glance        :8088 — dashboard (systemd --user unit)
 #   uptime-kuma   :3009 — uptime/SLA (docker container)
-# llama-swap frees VRAM on idle, so the LLM half is on-demand. Observability + dashboards are
+# llama-swap owns on-demand model lifecycle. Observability + dashboards are
 # monitoring — `up` ensures them, `down` LEAVES them. See ~/notes/LLM-STACK.md.
 #
 # Secrets: litellm's cloud routes need OPENROUTER_API_KEY + LITELLM_MASTER_KEY, injected from
@@ -40,10 +40,8 @@ kill_port() {  # kill whatever LISTENS on a TCP port — reliable, no fuser/patt
 sweep_swap_children() {  # llama-swap spawns llama-server backends as its OWN children; `down`
   # kills only the :9292 listener (llama-swap itself), orphaning those children — they reparent
   # to systemd, keep pinning VRAM, and the next llama-swap can't see them (/running lies). Kill
-  # the subtree FIRST, while llama-swap is alive so we can find them. This now includes the dictation
-  # rewriter (the `rewrite` E4B model) — as of 2026-07-20 it's a llama-swap-managed vLLM container
-  # (name vllm-gemma4b), not a standalone systemd service; the `down` case also `docker stop`s it
-  # explicitly since a --rm container can outlive the reaped `docker run` client.
+  # the subtree FIRST, while llama-swap is alive so we can find them. A --rm model container can
+  # outlive a reaped `docker run` client, so the `down` case also stops known legacy containers.
   local swap_pids p kids
   swap_pids=$(ss -tlnpH "sport = :9292" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u)
   [ -n "$swap_pids" ] || swap_pids=$(pgrep -x llama-swap 2>/dev/null || true)
@@ -180,26 +178,14 @@ case "${1:-status}" in
       || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
     ensure_gateway_env   # THE SWITCH → gateway.env (systemd can't see caller exports)
     systemctl --user start litellm && echo "  ▶ litellm gateway → :4000 (systemd · MCP-free profile, binds in seconds)"
-    # Dictation rewrite backend is llama-swap `rewrite` (vLLM E4B NVFP4 + MTP, thinking off) — the
-    # STANDALONE fixed-:8001 vLLM container was retired 2026-07-20 (its boot race dropped dictation;
-    # the :8083 hyprwhspr-rewrite-e4b.service dupe also removed). The SAME vLLM engine is now a normal
-    # llama-swap-managed model on a dynamic port; everything flows through llama-swap: hyprwhspr-ai
-    # dictation, litellm summarize-cheap + rewrite-fast, and Sift's decompose/agent routes. `rewrite`
-    # is ttl:0 (resident) but lazy-load-on-first-request, so fire one warm request THROUGH
-    # llama-swap right after `stack up`. Non-blocking. Wait for :9292 to bind first —
-    # systemd start returns before llama-swap listens, and a refused connection here
-    # used to false-fail the warm.
-    ( wait_tcp 127.0.0.1:9292 20 && curl -s -o /dev/null --max-time 120 http://127.0.0.1:9292/v1/chat/completions \
-        -H 'Content-Type: application/json' \
-        -d '{"model":"rewrite","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' \
-        && echo "  ▶ rewrite warmed via llama-swap → :9292 (vLLM E4B NVFP4+MTP · dictation/Sift RAG)" \
-        || echo "  ⚠ rewrite warm request failed — check llama-swap logs" ) &
-    echo "  ▶ rewrite warming via llama-swap (:9292, background, vLLM cold start ~40s)…"
+    # Do not warm a model here. Hermes and hyprwhspr-ai share the resident Qwen 3.8 route;
+    # warming the retired E4B rewrite path would evict or contend with that resident model.
+    # Each real caller is responsible for selecting its current logical route on demand.
     # Dashboards (glance :8088 + uptime-kuma :3009) are monitoring, not serving → opt-in.
     # `STACK_DASH=1 stack up` (or run `stack dash`) brings them up. Keeps `stack up` minimal:
     # just the gateway + always-on light models; heavy/monitoring bits load on demand.
     if [ "${STACK_DASH:-0}" = 1 ]; then ensure_dashboards; fi
-    echo "  stack up (minimal). gateway → :4000 · rewrite/E4B → llama-swap :9292  (obs off: 'stack obs' · dashboards off: 'stack dash')"
+    echo "  stack up (minimal). gateway → :4000 · model router → :9292  (obs off: 'stack obs' · dashboards off: 'stack dash')"
     ;;
   dash) ensure_dashboards; echo "  dashboards up → glance :8088 · uptime-kuma :3009"; ;;
   gateway)  # JUST the litellm router (:4000) — NO models, 0 GB VRAM. It's a pure OpenAI proxy:
@@ -213,7 +199,7 @@ case "${1:-status}" in
       || echo "  ⚠ litellm-db not ready — virtual keys (/key/generate) may fail until it is"
     ensure_gateway_env
     systemctl --user start litellm && echo "  ▶ litellm gateway → :4000 (systemd)"
-    echo "  gateway up → :4000 (no models · 'stack up' adds llama-swap + vLLM E4B)"
+    echo "  gateway up → :4000 (no models · 'stack up' adds the on-demand llama-swap router)"
     ;;
   mcp)  # OPTIONAL MCP-aggregation litellm instance (:4001, config-mcp.yaml). Slow to boot BY
     # NATURE (tool discovery across every MCP server before uvicorn binds) — which is exactly

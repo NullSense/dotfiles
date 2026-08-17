@@ -1,27 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    "~/.config/opencode/local-model-rules.md"
-  ],
-  "provider": {
-    "llama-local": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "llama.cpp (Qwen3.6-35B-A3B APEX-MTP local)",
-      "options": {
-        "baseURL": "http://127.0.0.1:8080/v1",
-        "apiKey": "sk-local"
-      },
-      "models": {
-        "qwen3.6-35b-a3b-apex": {
-          "name": "Qwen3.6 35B-A3B APEX-MTP (local)",
-          "limit": {
-            "context": 131072,
-            "output": 32768
-          }
-        }
-      }
-    }
-  },
   "mcp": {
     "litellm": {
       "type": "remote",
@@ -33,7 +11,7 @@
     "litellm_hindsight_*": "deny"
   },
   "plugin": [
-    "@tarquinen/opencode-dcp@latest",
-    "cc-safety-net"
+    "@tarquinen/opencode-dcp@3.1.15",
+    "cc-safety-net@2.0.6"
   ]
 }

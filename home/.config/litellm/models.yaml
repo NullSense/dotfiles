@@ -1050,7 +1050,7 @@ model_list:
 
   # ── single-request speed lane — Qwen3.8-27B NVFP4 + DSpark ─────
   # DSpark drafts seven tokens for an eight-token verification window. This
-  # route is intentionally limited to 32K and one request; use the vLLM lane
+  # route is intentionally limited to 16K and one request; use the vLLM lane
   # for vision-sensitive work and concurrent long-context agents.
 - model_name: qwen3.8-27b-nvfp4-dspark
   litellm_params:
@@ -1066,8 +1066,8 @@ model_list:
     mode: chat
     supports_vision: true
     supports_function_calling: true
-    max_input_tokens: 24576
-    max_output_tokens: 8192
+    max_input_tokens: 12288
+    max_output_tokens: 4096
     metadata:
       display_name: "Qwen3.8-27B NVFP4 + DSpark · single-request speed lane"
       backend: "SGLang · DSpark gamma 7 / verify width 8"
@@ -1085,8 +1085,8 @@ model_list:
     mode: chat
     supports_vision: true
     supports_function_calling: true
-    max_input_tokens: 24576
-    max_output_tokens: 8192
+    max_input_tokens: 12288
+    max_output_tokens: 4096
     metadata: { display_name: "Qwen3.8-27B DSpark · low thinking" }
 - model_name: qwen3.8-27b-nvfp4-dspark:fast
   litellm_params:
@@ -1100,8 +1100,8 @@ model_list:
     mode: chat
     supports_vision: true
     supports_function_calling: true
-    max_input_tokens: 24576
-    max_output_tokens: 8192
+    max_input_tokens: 12288
+    max_output_tokens: 4096
     metadata: { display_name: "Qwen3.8-27B DSpark · thinking off" }
 
   # ── uncensored chat/agent — Qwen3.8-27B Uncensored (Heretic), local llama.cpp ──

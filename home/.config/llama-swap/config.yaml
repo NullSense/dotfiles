@@ -911,11 +911,12 @@ models:
   # ── Qwen3.8-27B NVFP4 + DSpark — fast single-request lane ──────────────────
   # Official RadixArk target/draft pair. The draft emits seven candidates, giving
   # an eight-token verification window; there is no validated k=16 SGLang pair.
-  # Live measurement on this 32 GB desktop found only 56,796 aggregate tokens at
-  # mem-fraction=0.94, and even that left too little Triton workspace for a tiny
-  # request. ReplaySSM cannot help: this image explicitly rejects GDN + DSpark
+  # At mem-fraction=0.91 the first real request still failed a 512 MiB CUDA
+  # allocation. The conservative 0.89 profile exposes 21,639 aggregate tokens
+  # and passed a forced function-call canary. ReplaySSM cannot help: this image
+  # explicitly rejects GDN + DSpark
   # (its DSpark implementation permits ReplaySSM only for KDA models). Keep this
-  # as a short, one-request speed lane; use the separate non-speculative vLLM
+  # as a 16K, one-request speed lane; use the separate non-speculative vLLM
   # route for parallel long-context workers and vision-sensitive work.
   qwen3.8-27b-nvfp4-dspark:
     cmd: >
@@ -929,9 +930,9 @@ models:
       --model-path /models/target
       --served-model-name qwen3.8-27b-nvfp4-dspark
       --host 127.0.0.1 --port ${PORT}
-      --context-length 32768
+      --context-length 16384
       --kv-cache-dtype fp8_e4m3
-      --mem-fraction-static 0.91
+      --mem-fraction-static 0.89
       --attention-backend flashinfer
       --chunked-prefill-size 2048
       --mamba-radix-cache-strategy extra_buffer_lazy
@@ -951,7 +952,7 @@ models:
     ttl: 300
     name: "Qwen3.8-27B (SGLang NVFP4 + DSpark)"
     aliases: ["qwen3.8-27b-nvfp4-dspark:think", "qwen3.8-27b-nvfp4-dspark:fast"]
-    description: "chat·agent·vision · official NVFP4 target with seven-token DSpark draft, 32K single-request speed lane"
+    description: "chat·agent·vision · official NVFP4 target with seven-token DSpark draft, conservative 16K single-request speed lane"
     metadata: { engine: "sglang", hf: "RadixArk/Qwen3.8-27B-NVFP4", class: "chat·agent·vision", thinking: "low or off per request", tags: [chat, agent, vision, local, qwen, nvfp4, dspark] }
     filters:
       setParamsByID:

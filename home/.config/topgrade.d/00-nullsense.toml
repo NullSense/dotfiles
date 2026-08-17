@@ -1,0 +1,26 @@
+[misc]
+# Keep Topgrade interactive. Arch package upgrades may prompt through paru, and
+# retry decisions remain with the operator.
+no_self_update = true
+notify_end = "on_failure"
+cleanup = false
+
+# These automatic steps are unsafe or duplicate another owner on this host:
+# - containers would pull every discovered image, including large model images;
+# - git_repos would mutate dirty/shared worktrees;
+# - stack resolves to our LLM helper, not Haskell Stack;
+# - mise and uv are mise/pacman-managed rather than self-managed;
+# - pnpm currently belongs to the retained Proto toolchain used by Sift;
+# - Go caches/tools are maintained explicitly.
+disable = [
+  "containers",
+  "git_repos",
+  "stack",
+  "mise",
+  "uv",
+  "pnpm",
+  "go",
+]
+
+[linux]
+arch_package_manager = "paru"

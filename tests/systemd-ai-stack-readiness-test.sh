@@ -6,6 +6,10 @@ units="$repo_root/home/.config/systemd/user"
 compose=${LLM_STACK_COMPOSE:-$HOME/Programming/llm-stack/stack/observability/docker-compose.yml}
 litellm_launcher="$repo_root/home/bin/llm-servers/litellm-gateway"
 stack="$repo_root/home/bin/stack"
+litellm_config="$repo_root/home/.config/litellm/config.yaml"
+litellm_mcp_config="$repo_root/home/.config/litellm/config-mcp.yaml"
+litellm_models="$repo_root/home/.config/litellm/models.yaml"
+llama_swap_config="$repo_root/home/.config/llama-swap/config.yaml"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -30,6 +34,16 @@ grep -Fq 'patch_litellm_prisma_client' "$stack" \
     || fail 'stack db-init does not own the LiteLLM Prisma compatibility repair'
 grep -Fq 'STACK_DB_INIT_INFISICAL' "$stack" \
     || fail 'stack db-init does not acquire its database credential through Infisical'
+
+for config in "$litellm_config" "$litellm_mcp_config"; do
+    grep -Eq '^[[:space:]]*store_model_in_db:[[:space:]]*false([[:space:]]|$)' "$config" \
+        || fail "$(basename "$config") does not keep YAML authoritative"
+done
+
+if grep -Eq 'stack pro|vllm-diffusiongemma|summarize-pro' \
+    "$stack" "$litellm_models" "$llama_swap_config"; then
+    fail 'retired premium summarizer machinery returned'
+fi
 
 if grep -Eq 'After=.*(docker|network-online)\.service|After=.*network-online\.target' \
     "$units/litellm.service" "$units/litellm-mcp.service" "$units/hindsight-hermes.service"; then

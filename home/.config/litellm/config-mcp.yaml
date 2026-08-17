@@ -121,4 +121,4 @@ litellm_settings:
 
 general_settings:
   database_url: "os.environ/DATABASE_URL"       # litellm-db (:5433) — /key/generate + spend tracking
-  store_model_in_db: true                       # persist model groups → Model Hub can list them
+  store_model_in_db: false                      # YAML owns MCP/settings; DB still owns keys/spend

@@ -631,30 +631,13 @@ models:
   # explicitly in aliases: for UI visibility. See docs/CAPABILITIES.md for the full table.
   # ──────────────────────────────────────────────────────────────────────────────────────
 
-  # ── summarize: VRAM-ADAPTIVE summariser — diffusiongemma when there's room, else E4B ──
-  # The `cmd` measures live free VRAM at load and execs the biggest summariser that fits
-  # (diffusiongemma-26B vLLM ~22GB → gemma-4-E4B llama.cpp ~6GB → fail-to-cloud). Adapts to any
-  # game automatically. SHORT ttl so an idle summariser evicts fast and re-checks VRAM next load.
-  # cmdStop stops whichever backend it picked (docker container OR llama-server PID).
-  summarize:
-    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-summarize-auto
-    cmdStop: /home/nullsense/bin/llm-servers/llama-summarize-stop ${PID}
-    proxy: http://127.0.0.1:${PORT}
-    useModelName: summarize   # both backends serve as "summarize"; pin the upstream name so the
-                              # summarize-cheap alias (or any) doesn't 404 the vLLM served-model-name
-    ttl: 120
-    name: "Summarize (VRAM-adaptive: diffusiongemma ⟂ E4B)"
-    aliases: [summarize-cheap]
-    description: "summarize · picks diffusiongemma-26B (vLLM NVFP4, ~22GB, best quality+speed) when VRAM is free, else gemma-4-E4B (llama.cpp, ~6GB, game-friendly); fails so the caller falls back to cloud if neither fits. Thresholds env-overridable (SUMMARIZE_DIFF_MIN_MB / _E4B_MIN_MB); diffusion gpu-util derived from free VRAM."
-    metadata: { engine: "vllm⟂llama.cpp", hf: "nvidia/diffusiongemma-26B-A4B-it-NVFP4 ⟂ google/gemma-4-E4B-it", class: summarize, thinking: "off", best_for: "VRAM-adaptive bulk summaries alongside gaming", tags: [summarize, adaptive, local, vllm, diffusion, gemma] }
-
   # ── summarization: cheap bulk model (direct E4B; also dictation rewrite / escalation) ──
   gemma-4-e4b:
     cmd: env PORT=${PORT} MODE=sum /home/nullsense/bin/llm-servers/llama-gemma4b
     proxy: http://127.0.0.1:${PORT}
     ttl: 300
     name: "Gemma-4 E4B-it (QAT UD-Q4_K_XL)"
-    aliases: [gemma4-e4b, gemma-e4b, "gemma-4-e4b:think", "gemma-4-e4b:fast"]
+    aliases: [summarize, summarize-cheap, gemma4-e4b, gemma-e4b, "gemma-4-e4b:think", "gemma-4-e4b:fast"]
     description: "summarize · Gemma-4 E4B QAT UD-Q4_K_XL — fast, faithful bulk summaries (0% fabrication on the oracle set), near-BF16 quality at 4.0GB. Thinking toggleable (default off). oracle's cheap-first summariser."
     metadata: { engine: "llama.cpp", hf: "google/gemma-4-E4B-it", class: summarize, thinking: "toggle (default off)", best_for: "faithful extractive summaries, instruction-following, dictation rewrite", tags: [summarize, instruct, local, gemma, faithful] }
     filters:

@@ -206,7 +206,7 @@ model_list:
 
   # ── summarize-cheap: bulk summaries (oracle cheap-first) ───────────────────────
 - model_name: summarize-cheap
-  litellm_params:                      # DEV → llama-swap :9292 'summarize' (VRAM-adaptive: diffusiongemma-26B when GPU free, else llama.cpp E4B). vLLM NVFP4 :8001 slot retired 2026-07-20. diffusiongemma is the opt-in summarize-pro premium tier.
+  litellm_params:                      # DEV → llama-swap :9292 'summarize' → Gemma-4 E4B llama.cpp.
     model: openai/summarize
     api_base: http://127.0.0.1:9292/v1
     api_key: "EMPTY"
@@ -219,26 +219,23 @@ model_list:
     - "faithful"
     - "cheap"
   model_info:
-    engine: "vllm⟂llama.cpp"
-    hf_repo: "nvidia/diffusiongemma-26B-A4B-it-NVFP4 ⟂ google/gemma-4-E4B-it"
+    engine: "llama.cpp"
+    hf_repo: "google/gemma-4-E4B-it"
     supported_environments: ["development"]
     mode: chat
     supports_function_calling: true
     input_cost_per_token: 0
     output_cost_per_token: 0
-    max_input_tokens: 210432
+    max_input_tokens: 65536
     max_output_tokens: 8192
     metadata:
-      display_name: "Summarize-cheap · VRAM-adaptive (diffusiongemma ⟂ E4B, llama-swap dev)"
-      backend: "llama-swap :9292 'summarize' — live free-VRAM check at load picks diffusiongemma-26B (vLLM NVFP4, ~22GB) when GPU free, else gemma-4-E4B (llama.cpp Q4, ~6GB, game-friendly); short ttl re-checks each load"
-      quant: "diffusiongemma NVFP4 (Blackwell FP4) / E4B QAT Q4"
-      vram: "~22 GB (diffusion) or ~6 GB (E4B) — chosen by live free VRAM at load"
-      tokens_per_second: "diffusion ≈650 single / E4B ≈202 (benchmarked, same-judge)"
-      quality_overall: 4.38
-      faithfulness: 4.75
-      fabrication_pct: 0
-      tags: ["summarization", "local", "adaptive", "diffusion", "gemma", "faithful", "cheap"]
-      source_url: https://huggingface.co/google/diffusiongemma-26B-A4B-it
+      display_name: "Summarize-cheap · Gemma-4 E4B (llama-swap dev)"
+      backend: "llama-swap :9292 'summarize' alias → gemma-4-e4b (llama.cpp CUDA, on demand)"
+      quant: "E4B QAT UD-Q4_K_XL"
+      vram: "~4–6 GB"
+      tokens_per_second: "≈202 (benchmarked, same-judge)"
+      tags: ["summarization", "local", "gemma", "faithful", "cheap"]
+      source_url: https://huggingface.co/google/gemma-4-E4B-it
 - model_name: summarize-cheap
   litellm_params:                      # PROD → cloud DeepSeek-v4-flash (frees VRAM)
     model: openrouter/deepseek/deepseek-v4-flash
@@ -442,44 +439,6 @@ model_list:
       note: "reasoning/agentic specialist — thinking mode default ON (T=0.6 top_p=0.95; agentic T=1.0); slow decode, not for rewrite/summ"
       tags: ["reasoning", "agent", "local", "nanbeige"]
       source_url: https://huggingface.co/Nanbeige/Nanbeige4.2-3B
-
-  # ── summarize-pro: PREMIUM on-demand tier — diffusiongemma, opened via `stack pro` ──
-  #    Discrete text-DIFFUSION LM (nvidia/diffusiongemma-26B-A4B-it-NVFP4, MoE 3.8B-active).
-  #    Serves on :8002 ONLY while the premium window is open (`stack pro on`), which EVICTS
-  #    the always-on E4B (:8001) — they can't coexist (~19GB + ~15GB > 32GB). `stack pro off`
-  #    restores E4B. Returns a connection error when the window is closed — deliberate: this is
-  #    an explicit, human-opened tier, not an auto-swap (evicting the summariser+dictation slot
-  #    per request would be too disruptive). Apps still just hit the gateway with `summarize-pro`.
-- model_name: summarize-pro
-  litellm_params:
-    model: openai/diffusiongemma                # → vLLM diffusiongemma served-name (on-demand :8002)
-    api_base: http://127.0.0.1:8002/v1
-    api_key: "none"
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-    tags:
-    - "summarization"
-    - "local"
-    - "diffusion"
-    - "premium"
-  model_info:
-    engine: "vllm"
-    hf_repo: "nvidia/diffusiongemma-26B-A4B-it-NVFP4"
-    supported_environments: ["development"]
-    mode: chat
-    supports_function_calling: true
-    input_cost_per_token: 0
-    output_cost_per_token: 0
-    max_input_tokens: 210432
-    max_output_tokens: 8192
-    metadata:
-      display_name: "Summarize-pro · DiffusionGemma-26B-A4B (local, on-demand via `stack pro`)"
-      backend: "vLLM 0.24 · nvidia/diffusiongemma-26B-A4B-it-NVFP4 (block-diffusion · V2 runner · TRITON attn · thinking-off)"
-      quant: "NVFP4 (modelopt_fp4)"
-      vram: "~19GB @ util 0.60 — EVICTS the E4B slot (:8001) while the window is open"
-      note: "On-demand premium: `stack pro on` opens the window (summarize-cheap + dictation go down), `stack pro off` restores E4B"
-      tags: ["summarization", "local", "diffusion", "premium"]
-      source_url: https://huggingface.co/nvidia/diffusiongemma-26B-A4B-it-NVFP4
 
   # ── oracle-llm: NER arbitration / span-refine / local reasoning ───────────────
 - model_name: oracle-llm
@@ -1226,9 +1185,6 @@ router_settings:
     # "the summarize model with the summarize prompt". `math` is llama-swap-only (vibethinker-3b).
     "summarize":
       model: "google/gemma-4-E4B-it"
-      hidden: true
-    "summarize-pro":
-      model: "yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GGUF"
       hidden: true
     "rewrite":
       model: "rewrite-fast"

@@ -75,7 +75,7 @@
         // process monitor can't tell you.
         "exec": "$HOME/.config/waybar/gpu-status.sh",
         "return-type": "json",
-        "interval": 5,
+        "interval": 15,
         "format": "{}",
         "tooltip": true,
         "escape": false,
@@ -90,7 +90,7 @@
         // can rank top-RSS processes.
         "exec": "$HOME/.config/waybar/mem-status.sh",
         "return-type": "json",
-        "interval": 5,
+        "interval": 30,
         "format": "{}",
         "tooltip": true,
         "escape": false,
@@ -173,12 +173,13 @@
     // primary hint is the armed window's border gradient (see
     // ~/bin/hypr-preselect); this pill is the peripheral-vision confirmation,
     // and sits next to the submap module because both show transient modal
-    // state. Signal-driven only (interval 0): hypr-preselect sends RTMIN+14 on
-    // every arm/clear, so there is no polling cost while disarmed.
+    // state. Signal-driven only: `once` performs the initial render and
+    // hypr-preselect sends RTMIN+14 on every arm/clear. Waybar treats numeric
+    // zero as a tight polling loop, so it must not be used here.
     "custom/preselect": {
         "exec": "~/bin/hypr-preselect status",
         "return-type": "json",
-        "interval": 0,
+        "interval": "once",
         "signal": 14,
         "tooltip": true
     },

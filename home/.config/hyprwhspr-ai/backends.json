@@ -1,5 +1,5 @@
 {
-  "active": "rewrite",
+  "active": "qwen-long-fast",
   "backends": {
     "lmstudio": {
       "kind": "lmstudio",
@@ -31,6 +31,11 @@
       "kind": "llama-server",
       "base_url": "http://127.0.0.1:9292",
       "model": "rewrite"
+    },
+    "qwen-long-fast": {
+      "kind": "llama-server",
+      "base_url": "http://127.0.0.1:9292",
+      "model": "qwen3.8-27b-nvfp4-long:fast"
     },
     "nanbeige": {
       "kind": "llama-server",

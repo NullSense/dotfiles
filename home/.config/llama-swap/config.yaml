@@ -843,29 +843,10 @@ models:
   # Eager mode deliberately trades some peak throughput to avoid the CUDA graph
   # reservation and preserve the long-context pool.
   qwen3.8-27b-nvfp4-long:
-    cmd: >
-      docker run --rm --name vllm-qwen38-long --init --gpus all
-      --ipc host --network host --security-opt no-new-privileges
-      -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
-      -e VLLM_NO_USAGE_STATS=1
-      -v /home/nullsense/.lmstudio/models/gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090:/models/target:ro
-      vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
-      /models/target
-      --served-model-name qwen3.8-27b-nvfp4-long
-      --host 127.0.0.1 --port ${PORT}
-      --quantization modelopt
-      --kv-cache-dtype fp8
-      --max-model-len 210432
-      --max-num-seqs 3
-      --gpu-memory-utilization 0.88
-      --enable-prefix-caching
-      --reasoning-parser qwen3
-      --enable-auto-tool-choice
-      --tool-call-parser qwen3_xml
-      --trust-remote-code
-      --enforce-eager
+    cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-qwen38
     cmdStop: docker stop -t 20 vllm-qwen38-long
     proxy: http://127.0.0.1:${PORT}
+    checkEndpoint: /health
     useModelName: qwen3.8-27b-nvfp4-long
     ttl: 0
     name: "Qwen3.8-27B (vLLM NVFP4, long/parallel)"

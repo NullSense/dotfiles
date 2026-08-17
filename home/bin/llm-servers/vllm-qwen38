@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Primary Qwen3.8 NVFP4 server. llama-swap owns process lifecycle and supplies
+# PORT; this wrapper owns the engine flags and shared cache contract.
+
+set -euo pipefail
+
+: "${PORT:=9316}"
+MODEL="${MODEL:-$HOME/.lmstudio/models/gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090}"
+SERVED_NAME="${SERVED_NAME:-qwen3.8-27b-nvfp4-long}"
+CONTAINER_NAME="${CONTAINER_NAME:-vllm-qwen38-long}"
+VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967}"
+
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-210432}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.88}"
+PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:512}"
+# Consumed by the sourced common helper.
+# shellcheck disable=SC2034
+VLLM_HF_CACHE_MODE=none
+# Consumed by the sourced common helper.
+# shellcheck disable=SC2034
+VLLM_HOST_NET=1
+
+# shellcheck disable=SC1091
+source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
+
+docker_args=(
+  run --rm --name "$CONTAINER_NAME" --init --gpus all
+  --ipc host --security-opt no-new-privileges
+  "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}"
+  "$VLLM_IMAGE"
+  --model "$MODEL"
+  --served-model-name "$SERVED_NAME"
+  --host 127.0.0.1 --port "$PORT"
+  --quantization modelopt
+  --kv-cache-dtype fp8
+  --max-model-len "$MAX_MODEL_LEN"
+  --max-num-seqs "$MAX_NUM_SEQS"
+  --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
+  --enable-prefix-caching
+  --enable-chunked-prefill
+  --reasoning-parser qwen3
+  --enable-auto-tool-choice
+  --tool-call-parser qwen3_xml
+  --trust-remote-code
+  --enforce-eager
+)
+
+if [[ "${VLLM_DRY_RUN:-0}" == 1 ]]; then
+  printf '%q ' docker "${docker_args[@]}"
+  printf '\n'
+  exit 0
+fi
+
+exec docker "${docker_args[@]}"

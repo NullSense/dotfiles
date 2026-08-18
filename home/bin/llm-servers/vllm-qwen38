@@ -12,6 +12,11 @@ VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai@sha256:0a51ea5b4ae2dc5d81890e5173f542
 
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-210432}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"
+# vLLM V1 continuously batches decode work with chunked prefills. Its 2,048
+# token default favors decode latency but makes a fresh 100K+ Hermes prompt pay
+# excessive scheduler overhead. 8,192 is the balanced interactive setting:
+# faster TTFT without the decode spikes and activation workspace of 16,384.
+MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-8192}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.88}"
 PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:512}"
 # Consumed by the sourced common helper.
@@ -36,6 +41,7 @@ docker_args=(
   --kv-cache-dtype fp8
   --max-model-len "$MAX_MODEL_LEN"
   --max-num-seqs "$MAX_NUM_SEQS"
+  --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS"
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
   --enable-prefix-caching
   --enable-chunked-prefill

@@ -848,6 +848,11 @@ models:
     proxy: http://127.0.0.1:${PORT}
     checkEndpoint: /health
     useModelName: qwen3.8-27b-nvfp4-long
+    # The built-in limit is 10, but Hermes can briefly exceed that with its main
+    # turn, compaction, background review, Hindsight, and queued child work. vLLM
+    # still admits only three scheduler slots; this only keeps excess callers in
+    # llama-swap's bounded wait queue instead of returning an immediate 429.
+    concurrencyLimit: 24
     ttl: 0
     name: "Qwen3.8-27B (vLLM NVFP4, long/parallel)"
     aliases: ["qwen3.8-27b-nvfp4-long:think", "qwen3.8-27b-nvfp4-long:fast"]

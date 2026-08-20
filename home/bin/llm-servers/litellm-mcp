@@ -18,7 +18,25 @@ export PATH="$HOME/.local/share/mise/installs/node/latest/bin:$PATH"
 
 # agent-vault proxy for the stdio MCP subprocesses litellm spawns (NOT litellm
 # core egress) — fetched HERE because systemd units never inherit direnv env.
-if command -v agent-vault >/dev/null 2>&1 && _AVT="$(agent-vault vault token --vault default 2>/dev/null)" && [ -n "$_AVT" ]; then
+#
+# PREFERRED: a LONG-LIVED agent token (agent-vault agent create litellm-mcp
+# --vault default:proxy --token-only) stored at ~/.agent-vault/litellm-mcp-token.
+# Agent tokens never expire, so a long-running service can't silently outlive
+# its credential. Mint/re-mint with:
+#   agent-vault agent create litellm-mcp --vault default:proxy --token-only \
+#     > ~/.agent-vault/litellm-mcp-token
+# (re-create to rotate; the old token is then invalid.)
+#
+# FALLBACK: a 7d session token (--ttl 604800, the max; the default 24h TTL
+# outlives a long-lived service and every vault-shielded MCP call 407s after
+# ~1d — observed 2026-08-19: context7/exa dead, token from 2d ago).
+_AV_TOKEN_FILE="$HOME/.agent-vault/litellm-mcp-token"
+if [ -r "$_AV_TOKEN_FILE" ] && _AVT="$(cat "$_AV_TOKEN_FILE" 2>/dev/null)" && [[ "$_AVT" == av_agt_* ]]; then
+  :  # long-lived agent token — no expiry
+elif command -v agent-vault >/dev/null 2>&1 && _AVT="$(agent-vault vault token --vault default --ttl 604800 2>/dev/null)"; then
+  echo "⚠ agent token missing — using 7d session token for litellm-mcp" >&2
+fi
+if [ -n "${_AVT:-}" ]; then
   export AV_HTTPS_PROXY="http://${_AVT}:default@127.0.0.1:14322"
   export AV_CA="$HOME/.agent-vault/mitm-ca.pem"
   # LiteLLM itself owns the hosted MCP connections. Route those through Agent

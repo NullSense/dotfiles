@@ -963,6 +963,11 @@ model_list:
     input_cost_per_token: 0
     output_cost_per_token: 0
     tags: ["local", "qwen", "nvfp4", "vision", "parallel"]
+    # A llama-swap 429 means the local queue is full, not a transient upstream
+    # failure. Router/client retries multiplied every rejected request threefold.
+    num_retries: 0
+    max_retries: 0
+    timeout: 600
   model_info:
     engine: "vllm"
     hf_repo: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"
@@ -983,6 +988,9 @@ model_list:
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    num_retries: 0
+    max_retries: 0
+    timeout: 600
   model_info:
     engine: "vllm"
     hf_repo: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"
@@ -999,6 +1007,9 @@ model_list:
     api_key: "none"
     input_cost_per_token: 0
     output_cost_per_token: 0
+    num_retries: 0
+    max_retries: 0
+    timeout: 600
   model_info:
     engine: "vllm"
     hf_repo: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"

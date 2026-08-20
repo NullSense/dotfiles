@@ -84,9 +84,11 @@ litellm_settings:
   # Task prompts (dotprompt): summarize/rewrite/extract → config/prompts/<id>.prompt.
   # Global dir form (NOT per-prompt prompt_directory, which crashes boot). Reference via prompt_id.
   global_prompt_directory: "/home/nullsense/Programming/llm-stack/config/prompts"
-  callbacks: ["otel"]           # emit OTLP traces of every LLM call → the OTEL_ENDPOINT
-                                # collector (local: otel-lgtm :4318 / langfuse via fan-out).
-                                # Env set by `stack`: LITELLM_OTEL_V2/OTEL_EXPORTER/OTEL_ENDPOINT.
+  # LiteLLM 1.97.0's OTEL callback assumes MCP responses are dict-like; valid
+  # list/CallToolResult responses therefore log AttributeError after successful
+  # tool calls. Keep OTEL on the :4000 model gateway, but disable it here until
+  # the MCP response handler is fixed upstream.
+  callbacks: []
   num_retries: 2
   request_timeout: 600          # local models + cold-swap loads can be slow
   drop_params: true             # tolerate clients sending params a backend doesn't support

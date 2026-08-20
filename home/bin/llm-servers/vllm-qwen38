@@ -17,7 +17,10 @@ MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"
 # excessive scheduler overhead. 8,192 is the balanced interactive setting:
 # faster TTFT without the decode spikes and activation workspace of 16,384.
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-8192}"
-GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.88}"
+# Target roughly 230K FP8-KV tokens for the shared foreground + background-
+# review scheduler while retaining driver/display headroom on the RTX 5090.
+# Keep this below vLLM's hard ceiling rather than reserving all VRAM.
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.91}"
 PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:512}"
 # Consumed by the sourced common helper.
 # shellcheck disable=SC2034

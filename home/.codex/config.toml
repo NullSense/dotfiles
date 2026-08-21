@@ -149,7 +149,7 @@ source = "https://github.com/tanlethanh/zedra-plugin.git"
 url = "http://127.0.0.1:4001/mcp/"
 
 [mcp_servers.serena]
-enabled = false
+enabled = true
 startup_timeout_sec = 15
 command = "serena"
 args = ["start-mcp-server", "--project-from-cwd", "--context=agent"]

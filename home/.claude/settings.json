@@ -7,6 +7,11 @@
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
     "CLAUDE_CODE_TMPDIR": "/home/nullsense/.cache/claude-tmp"
   },
+  "deniedMcpServers": [
+    {
+      "serverName": "serena"
+    }
+  ],
   "permissions": {
     "allow": [
       "Read(~/Programming/**)",

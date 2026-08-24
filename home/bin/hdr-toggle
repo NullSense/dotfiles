@@ -1,12 +1,8 @@
 #!/bin/sh
-# Toggle DP-1 (AORUS FO32U2 OLED HDR1000) between SDR-with-auto-HDR and
-# always-on HDR. cm_auto_hdr in looknfeel.conf already auto-switches per
-# fullscreen surface, so the "off" state here is the smart default; "on"
-# forces HDR for everything (useful for HDR colorpicker work, mastering,
-# or apps that don't tag their surface as HDR but should be).
-#
-# State file /tmp/hdr-state holds "on" when forced; absent/anything-else
-# means default. Hyprland's `hyprctl keyword` rewrites the live config.
+# Toggle the AORUS FO32U2 OLED between SDR and forced hardware HDR output.
+# Resolve the live connector because a shortened `desc:` selector is accepted
+# by Hyprland but matches nothing. Hyprland itself is the source of truth for
+# state; a temporary state file can drift from the actual output.
 #
 # `cm, hdr` (BT.2100 PQ with textbook D65) is used instead of `cm, hdredid`
 # because the FO32U2's EDID-claimed primaries skew warm — using them as the
@@ -16,17 +12,96 @@
 
 set -eu
 
-# Match the AORUS by description, not port name — cable can be on any DP port
-# (monitors.conf / hypr-monitor-dualmode use the same desc: matching).
-MON="desc:AORUS FO32U2"
-STATE=/tmp/hdr-state
+HYPRCTL=${HDR_HYPRCTL:-hyprctl}
+NOTIFY_SEND=${HDR_NOTIFY_SEND:-notify-send}
+COLORTEMP_CTL=${HDR_COLORTEMP_CTL:-"$HOME/bin/colortemp-ctl"}
+MODETEST=${HDR_MODETEST:-modetest}
+MODEL=${HDR_MONITOR_MODEL:-AORUS FO32U2}
 
-if [ "$(cat "$STATE" 2>/dev/null)" = "on" ]; then
-    hyprctl keyword monitor "$MON, 3840x2160@240, 0x0, 2.0, bitdepth, 10" >/dev/null
-    rm -f "$STATE"
-    notify-send -u low "HDR" "Auto (SDR desktop, HDR on fullscreen)"
+if [ "${AQ_NO_ATOMIC:-0}" = 1 ]; then
+    "$NOTIFY_SEND" -u critical "HDR unavailable" \
+        "Restart the Hyprland session first; its legacy DRM backend cannot send hardware HDR metadata"
+    exit 1
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+    printf 'hdr-toggle: jq is required\n' >&2
+    exit 1
+fi
+
+monitor_data=$(
+    "$HYPRCTL" -j monitors all | jq -er --arg model "$MODEL" '
+        [ .[]
+          | select(((.disabled // false) | not))
+          | select(.model == $model or (.description | contains($model)))
+        ] as $matches
+        | if ($matches | length) != 1 then empty else $matches[0] end
+        | [ .name, (.width | tostring), (.height | tostring),
+            (.refreshRate | tostring), (.x | tostring), (.y | tostring),
+            (.scale | tostring), .colorManagementPreset ]
+        | @tsv
+    '
+) || {
+    "$NOTIFY_SEND" -u critical "HDR unavailable" "$MODEL is not uniquely connected"
+    exit 1
+}
+
+tab=$(printf '\t')
+IFS="$tab" read -r output width height refresh x y scale current_preset <<EOF
+$monitor_data
+EOF
+
+case "$current_preset" in
+    hdr|hdredid)
+        target_preset=srgb
+        ;;
+    *)
+        target_preset=hdr
+        "$COLORTEMP_CTL" default
+        "$HYPRCTL" keyword decoration:screen_shader '[[EMPTY]]' >/dev/null
+        ;;
+esac
+
+monitor_spec="$output, ${width}x${height}@${refresh}, ${x}x${y}, $scale, bitdepth, 10, cm, $target_preset"
+"$HYPRCTL" keyword monitor "$monitor_spec" >/dev/null
+
+actual_preset=$(
+    "$HYPRCTL" -j monitors all |
+        jq -r --arg output "$output" '.[] | select(.name == $output) | .colorManagementPreset'
+)
+if [ "$actual_preset" != "$target_preset" ]; then
+    "$NOTIFY_SEND" -u critical "HDR switch failed" "$output remained in $actual_preset"
+    exit 1
+fi
+
+if [ "$target_preset" = hdr ]; then
+    # Hyprland's internal preset can change even when the NVIDIA atomic commit
+    # fails. Do not leave the desktop PQ-encoded into an SDR signal: require
+    # the connector's live KMS Colorspace property to confirm BT.2020 RGB.
+    kms_colorspace=$(
+        "$MODETEST" -M nvidia-drm -c 2>/dev/null | awk -v output="$output" '
+            $0 ~ "connected[[:space:]]+" output { in_output = 1; next }
+            in_output && /Colorspace:/ {
+                getline
+                getline
+                getline
+                sub(/^[[:space:]]*value:[[:space:]]*/, "")
+                print
+                exit
+            }
+            in_output && /^[0-9]+[[:space:]]/ { exit }
+        '
+    )
+    if [ "$kms_colorspace" != 9 ]; then
+        fallback_spec="$output, ${width}x${height}@${refresh}, ${x}x${y}, $scale, bitdepth, 10, cm, srgb"
+        "$HYPRCTL" keyword monitor "$fallback_spec" >/dev/null
+        "$COLORTEMP_CTL" auto
+        "$NOTIFY_SEND" -u critical "HDR signal rejected" \
+            "NVIDIA left $output in SDR; restored correct colors automatically"
+        exit 1
+    fi
+    "$NOTIFY_SEND" -u normal "HDR on" "$output · hardware HDR signal · 10-bit BT.2020/PQ"
 else
-    hyprctl keyword monitor "$MON, 3840x2160@240, 0x0, 2.0, bitdepth, 10, cm, hdr" >/dev/null
-    echo on >"$STATE"
-    notify-send -u low "HDR" "Forced on (whole desktop)"
+    "$COLORTEMP_CTL" auto
+    "$NOTIFY_SEND" -u low "HDR off" "$output · sRGB desktop · scheduled night color restored"
 fi

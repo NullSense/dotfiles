@@ -100,7 +100,7 @@ shell_snapshot = true
 hooks = true
 
 [agents]
-max_concurrent_threads_per_session = 8
+max_concurrent_threads_per_session = 12
 
 [plugins."github@openai-curated"]
 enabled = true

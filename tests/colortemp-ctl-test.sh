@@ -7,8 +7,8 @@ AUTOSTART="$ROOT/home/.config/hypr/autostart.conf"
 WAYBAR="$ROOT/home/.config/waybar/config.jsonc"
 SERVICE="$ROOT/home/.config/systemd/user/colortemp.service"
 TIMER="$ROOT/home/.config/systemd/user/colortemp.timer"
-HYPRSUNSET_OVERRIDE="$ROOT/home/.config/systemd/user/hyprsunset.service.d/override.conf"
-HYPRSUNSET_LINK="$ROOT/home/.config/systemd/user/graphical-session.target.wants/hyprsunset.service"
+SHADER_TEMPLATE="$ROOT/home/.config/hypr/shaders/colortemp.frag.in"
+SERVICE_LINK="$ROOT/home/.config/systemd/user/graphical-session.target.wants/colortemp.service"
 TIMER_LINK="$ROOT/home/.config/systemd/user/graphical-session.target.wants/colortemp.timer"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -36,6 +36,8 @@ mkdir -p "$TMP/state/runtime"
 export COLORTEMP_HYPRCTL="$TMP/hyprctl"
 export COLORTEMP_HOUR=12
 export COLORTEMP_STATE_DIR="$TMP/state/runtime"
+export COLORTEMP_SHADER_DIR="$TMP/state/shaders"
+export COLORTEMP_SHADER_TEMPLATE="$SHADER_TEMPLATE"
 export COLORTEMP_TEST_STATE="$TMP/state"
 export PATH="$TMP:$PATH"
 
@@ -56,13 +58,15 @@ assert_eq 6500K "$($CTL get)" "missing state follows daytime schedule"
 $CTL warmer
 assert_eq 6400K "$($CTL get)" "scrolling down changes temperature by 100K"
 assert_eq 1 "$(command_count)" "one transition uses one compositor IPC call"
-assert_eq 'hyprsunset temperature 6400' "$(tail -n 1 "$TMP/state/commands")" \
-    "warm adjustment uses hyprsunset CTM"
+assert_eq "keyword decoration:screen_shader $TMP/state/shaders/6400.frag" \
+    "$(tail -n 1 "$TMP/state/commands")" "warm adjustment loads its generated shader"
+grep -Fq 'const float temperature = 6400.0;' "$TMP/state/shaders/6400.frag"
 
 $CTL cooler
 assert_eq 6500K "$($CTL get)" "scrolling up returns to neutral"
-assert_eq 'hyprsunset identity' "$(tail -n 1 "$TMP/state/commands")" \
-    "6500K default uses an exact identity matrix"
+assert_eq "keyword decoration:screen_shader $TMP/state/shaders/6500.frag" \
+    "$(tail -n 1 "$TMP/state/commands")" "6500K default loads the identity shader"
+grep -Fq 'temperature >= 6500.0' "$TMP/state/shaders/6500.frag"
 
 $CTL cooler
 assert_eq 6500K "$($CTL get)" "6500K is the neutral ceiling"
@@ -98,23 +102,24 @@ grep -Fq 'on-scroll-down": "$HOME/bin/colortemp-ctl warmer"' "$WAYBAR"
 grep -Fq 'on-click": "$HOME/bin/colortemp-ctl default"' "$WAYBAR"
 grep -Fq '100K' "$WAYBAR"
 grep -Fq 'native gamut' "$WAYBAR"
-grep -Fq 'Hyprland CTM' "$WAYBAR"
-grep -Fq 'Requires=hyprsunset.service' "$SERVICE"
-grep -Fq 'After=hyprsunset.service' "$SERVICE"
+grep -Fq 'Hyprland screen shader' "$WAYBAR"
+grep -Fq 'Screenshots and recordings include the effect' "$WAYBAR"
 grep -Fq 'ExecStart=%h/bin/colortemp-ctl auto' "$SERVICE"
-grep -Fq 'ExecStart=/usr/bin/hyprsunset --identity' "$HYPRSUNSET_OVERRIDE"
-grep -Fq 'ExecStartPost=%h/bin/colortemp-ctl auto' "$HYPRSUNSET_OVERRIDE"
+grep -Fq 'WantedBy=graphical-session.target' "$SERVICE"
 grep -Fq 'OnCalendar=*-*-* 06,19:00:00' "$TIMER"
-assert_eq /usr/lib/systemd/user/hyprsunset.service "$(readlink "$HYPRSUNSET_LINK")" \
-    "graphical session starts the CTM owner"
+assert_eq ../colortemp.service "$(readlink "$SERVICE_LINK")" \
+    "graphical session applies the current shader"
 assert_eq ../colortemp.timer "$(readlink "$TIMER_LINK")" \
     "graphical session enables the day/night schedule"
 
-if grep -Eq '^exec-once.*hyprsunset' "$AUTOSTART"; then
-    fail "hyprsunset must have exactly one systemd-owned daemon"
+grep -Fq '#version 300 es' "$SHADER_TEMPLATE"
+grep -Fq 'precision highp float' "$SHADER_TEMPLATE"
+
+if grep -Eqi 'hyprsunset|gbmonctl|ddcutil|colour-mode|rgb-(red|green|blue)|kelvin_to_rgb' "$CTL" "$SERVICE" "$AUTOSTART"; then
+    fail "runtime temperature control must use only the verified screen shader"
 fi
-if grep -Eqi 'gbmonctl|ddcutil|colour-mode|rgb-(red|green|blue)|kelvin_to_rgb' "$CTL"; then
-    fail "runtime temperature control must not mutate monitor hardware settings"
+if find "$ROOT/home/.config/systemd/user" -path '*hyprsunset*' -print -quit | grep -q .; then
+    fail "broken hyprsunset service integration remains"
 fi
 
 printf 'PASS: colortemp-ctl\n'

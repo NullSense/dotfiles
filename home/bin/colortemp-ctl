@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Stable Waybar interface for compositor-level night color. The monitor stays
-# in its native-gamut 6500K hardware baseline; Hyprland owns the smooth CTM.
+# in its native-gamut 6500K hardware baseline; Hyprland owns the output shader.
 
 set -eu
 
@@ -8,6 +8,8 @@ HYPRCTL=${COLORTEMP_HYPRCTL:-hyprctl}
 STATE_DIR=${COLORTEMP_STATE_DIR:-${XDG_STATE_HOME:-"$HOME/.local/state"}/colortemp}
 STATE_FILE="$STATE_DIR/kelvin"
 LOCK_FILE="$STATE_DIR/lock"
+SHADER_TEMPLATE=${COLORTEMP_SHADER_TEMPLATE:-"$HOME/.config/hypr/shaders/colortemp.frag.in"}
+SHADER_DIR=${COLORTEMP_SHADER_DIR:-${XDG_RUNTIME_DIR:-"$STATE_DIR"}/colortemp-shaders}
 SIGNAL_NUM=13
 MIN_K=2500
 MAX_K=6500
@@ -51,26 +53,32 @@ notify_waybar() {
     systemctl --user kill --kill-whom=main --signal=RTMIN+"$SIGNAL_NUM" waybar.service 2>/dev/null || true
 }
 
-send_ctm() {
+send_shader() {
     target=$1
 
     if ! command -v "$HYPRCTL" >/dev/null 2>&1; then
         printf 'colortemp-ctl: hyprctl is not available\n' >&2
         return 1
     fi
-
-    if [ "$target" -eq "$MAX_K" ]; then
-        set -- hyprsunset identity
-    else
-        set -- hyprsunset temperature "$target"
+    if [ ! -r "$SHADER_TEMPLATE" ]; then
+        printf 'colortemp-ctl: shader template is not available: %s\n' "$SHADER_TEMPLATE" >&2
+        return 1
     fi
 
-    # A Type=simple hyprsunset service can be active a few milliseconds before
-    # its IPC socket is ready. Normal scrolls succeed on the first attempt.
+    mkdir -p "$SHADER_DIR"
+    shader_file="$SHADER_DIR/$target.frag"
+    if [ ! -r "$shader_file" ]; then
+        temporary_shader="$shader_file.tmp.$$"
+        sed "s/@KELVIN@/${target}.0/g" "$SHADER_TEMPLATE" >"$temporary_shader"
+        mv "$temporary_shader" "$shader_file"
+    fi
+
+    # The graphical-session oneshot can race Hyprland's command socket during
+    # login. Normal scrolls succeed on the first attempt.
     attempt=1
-    while ! "$HYPRCTL" "$@" >/dev/null 2>&1; do
+    while ! "$HYPRCTL" keyword decoration:screen_shader "$shader_file" >/dev/null 2>&1; do
         if [ "$attempt" -ge 25 ]; then
-            printf 'colortemp-ctl: hyprsunset IPC did not become ready\n' >&2
+            printf 'colortemp-ctl: Hyprland IPC did not become ready\n' >&2
             return 1
         fi
         attempt=$((attempt + 1))
@@ -80,7 +88,7 @@ send_ctm() {
 
 apply_kelvin() {
     target=$1
-    send_ctm "$target"
+    send_shader "$target"
     printf '%s\n' "$target" >"$STATE_FILE"
 }
 
@@ -127,8 +135,8 @@ case "$command_name" in
         transition_to "$MAX_K"
         ;;
     auto)
-        # Force restores the scheduled transform after login, daemon restart,
-        # or output hotplug even when the persisted value already matches.
+        # Force restores the scheduled shader after login, config reload, or
+        # output hotplug even when the persisted value already matches.
         transition_to "$(scheduled_kelvin)" true
         ;;
     *)

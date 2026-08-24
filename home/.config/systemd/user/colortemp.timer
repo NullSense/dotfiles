@@ -1,5 +1,5 @@
 [Unit]
-Description=Schedule Hyprland CTM day and night color temperature
+Description=Schedule Hyprland screen-shader day and night color temperature
 PartOf=graphical-session.target
 
 [Timer]

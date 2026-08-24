@@ -1,0 +1,27 @@
+// Generated per temperature by colortemp-ctl. The formula matches the
+// black-body approximation used by hyprsunset; 6500K is exact identity.
+#version 300 es
+
+precision highp float;
+in vec2 v_texcoord;
+layout(location = 0) out vec4 fragColor;
+uniform sampler2D tex;
+
+const float temperature = @KELVIN@;
+
+vec3 temperatureScale() {
+    if (temperature >= 6500.0)
+        return vec3(1.0);
+
+    float scaled = temperature / 100.0;
+    float green = clamp(99.4708025861 * log(scaled) - 161.1195681661, 0.0, 255.0);
+    float blue = scaled <= 19.0 ? 0.0 :
+        clamp(138.5177312231 * log(scaled - 10.0) - 305.0447927307, 0.0, 255.0);
+    return vec3(1.0, green / 255.0, blue / 255.0);
+}
+
+void main() {
+    vec4 pixel = texture(tex, v_texcoord);
+    pixel.rgb *= temperatureScale();
+    fragColor = pixel;
+}

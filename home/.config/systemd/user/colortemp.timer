@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule monitor-side day and night color temperature
+PartOf=graphical-session.target
+
+[Timer]
+OnCalendar=*-*-* 06,19:00:00
+Persistent=true
+Unit=colortemp.service
+
+[Install]
+WantedBy=graphical-session.target

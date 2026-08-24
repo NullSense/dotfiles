@@ -318,7 +318,7 @@
         "exec": "$HOME/bin/colortemp-ctl get",
         "interval": 5,
         "signal": 13,
-        "tooltip-format": "Night color — per-output Hyprland CTM (hyprsunset)\nApplies to every connected monitor; not captured in screenshots.\n   scroll        ±100K (2500K–6500K)\n   left-click    toggle 4000K / 6500K\n   right-click   force 4000K\n   middle-click  neutral 6500K\nAuto 19:00→06:00 via ~/.config/hypr/hyprsunset.conf",
+        "tooltip-format": "Night color — Gigabyte USB hardware RGB\nChanges the monitor itself; screenshots stay neutral.\n   scroll        ±100K (2500K–6500K)\n   left-click    toggle 4000K / 6500K\n   right-click   force 4000K\n   middle-click  neutral 6500K\nAuto 19:00→06:00 via systemd user timer",
         "on-scroll-up": "$HOME/bin/colortemp-ctl +100",
         "on-scroll-down": "$HOME/bin/colortemp-ctl -100",
         "on-click": "$HOME/bin/colortemp-ctl toggle",

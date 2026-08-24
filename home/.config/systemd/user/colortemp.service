@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply monitor-side color temperature
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/colortemp-ctl auto
+
+[Install]
+WantedBy=graphical-session.target

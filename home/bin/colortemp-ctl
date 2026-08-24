@@ -1,110 +1,169 @@
 #!/usr/bin/env sh
-# Waybar controller for hyprsunset's per-output color transform.
-#
-# The daemon applies one CTM to every connected Wayland output, including
-# outputs hot-plugged after startup. This wrapper owns only the user-facing
-# policy: 100K scroll steps, a 2500K floor, neutral day mode at 6500K, and a
-# 4000K night preset.
+# Waybar controller for monitor-side color temperature on compatible Gigabyte
+# displays. The USB OSD protocol changes the panel's own RGB gains, so the
+# result is not baked into screenshots and does not depend on GPU CTM support.
 
 set -eu
 
-HYPRCTL=${COLORTEMP_HYPRCTL:-hyprctl}
+GBMONCTL=${COLORTEMP_GBMONCTL:-gbmonctl}
+STATE_DIR=${COLORTEMP_STATE_DIR:-${XDG_STATE_HOME:-"$HOME/.local/state"}/colortemp}
+STATE_FILE="$STATE_DIR/kelvin"
+LOCK_FILE="$STATE_DIR/lock"
 MIN_K=2500
 DAY_K=6500
 NIGHT_K=4000
 SIGNAL_NUM=13
 
 usage() {
-    printf 'usage: %s get|+K|-K|toggle|night|day\n' "$0" >&2
+    printf 'usage: %s get|+K|-K|toggle|night|day|auto\n' "$0" >&2
     exit 2
 }
 
-get_identity() {
-    "$HYPRCTL" hyprsunset identity get 2>/dev/null
+has_device() {
+    if [ -n "${COLORTEMP_DEVICE_AVAILABLE:-}" ]; then
+        [ "$COLORTEMP_DEVICE_AVAILABLE" = 1 ]
+        return
+    fi
+
+    for device_info in /sys/class/hidraw/hidraw*/device/uevent; do
+        [ -r "$device_info" ] || continue
+        if grep -q '^HID_ID=.*:00000BDA:00001100$' "$device_info"; then
+            return 0
+        fi
+    done
+    return 1
 }
 
-get_kelvin() {
-    "$HYPRCTL" hyprsunset temperature 2>/dev/null
+scheduled_kelvin() {
+    hour=${COLORTEMP_HOUR:-$(date +%H)}
+    hour=${hour#0}
+    [ -n "$hour" ] || hour=0
+
+    if [ "$hour" -ge 19 ] || [ "$hour" -lt 6 ]; then
+        printf '%s\n' "$NIGHT_K"
+    else
+        printf '%s\n' "$DAY_K"
+    fi
+}
+
+read_kelvin() {
+    if [ -r "$STATE_FILE" ]; then
+        kelvin=$(sed -n '1p' "$STATE_FILE")
+        case "$kelvin" in
+            ''|*[!0-9]*) kelvin= ;;
+        esac
+        if [ -n "$kelvin" ] && [ "$kelvin" -ge "$MIN_K" ] && [ "$kelvin" -le "$DAY_K" ]; then
+            printf '%s\n' "$kelvin"
+            return
+        fi
+    fi
+    scheduled_kelvin
+}
+
+kelvin_to_rgb() {
+    awk -v kelvin="$1" '
+        function clamp(value) {
+            if (value < 0) return 0
+            if (value > 255) return 255
+            return value
+        }
+        BEGIN {
+            temperature = kelvin / 100
+            if (temperature <= 66) {
+                red = 255
+                green = 99.4708025861 * log(temperature) - 161.1195681661
+                if (temperature <= 19)
+                    blue = 0
+                else
+                    blue = 138.5177312231 * log(temperature - 10) - 305.0447927307
+            } else {
+                red = 329.698727446 * exp(-0.1332047592 * log(temperature - 60))
+                green = 288.1221695283 * exp(-0.0755148492 * log(temperature - 60))
+                blue = 255
+            }
+            printf "%d %d %d\n", int(clamp(red) / 2.55 + 0.5), int(clamp(green) / 2.55 + 0.5), int(clamp(blue) / 2.55 + 0.5)
+        }
+    '
 }
 
 notify_waybar() {
     pkill -RTMIN+"$SIGNAL_NUM" waybar 2>/dev/null || true
 }
 
-set_day() {
-    # Keep the daemon's latent temperature at the neutral ceiling so the next
-    # scroll-down from identity mode starts smoothly at 6400K.
-    "$HYPRCTL" hyprsunset temperature "$DAY_K" >/dev/null
-    "$HYPRCTL" hyprsunset identity >/dev/null
-}
-
-set_kelvin() {
+apply_kelvin() {
     target=$1
     [ "$target" -lt "$MIN_K" ] && target=$MIN_K
+    [ "$target" -gt "$DAY_K" ] && target=$DAY_K
 
-    if [ "$target" -ge "$DAY_K" ]; then
-        set_day
-    else
-        "$HYPRCTL" hyprsunset temperature "$target" >/dev/null
+    if ! has_device || ! command -v "$GBMONCTL" >/dev/null 2>&1; then
+        printf 'colortemp-ctl: compatible Gigabyte USB monitor not available\n' >&2
+        return 1
     fi
+
+    if [ "$target" -eq "$DAY_K" ]; then
+        # On the FO32U2, USB color mode 2 selects its calibrated 6500K preset.
+        "$GBMONCTL" -prop colour-mode -val 2 >/dev/null
+    else
+        rgb=$(kelvin_to_rgb "$target")
+        red=${rgb%% *}
+        green_blue=${rgb#* }
+        green=${green_blue%% *}
+        blue=${green_blue#* }
+        "$GBMONCTL" -prop colour-mode -val 3 >/dev/null
+        "$GBMONCTL" -prop rgb-red -val "$red" >/dev/null
+        "$GBMONCTL" -prop rgb-green -val "$green" >/dev/null
+        "$GBMONCTL" -prop rgb-blue -val "$blue" >/dev/null
+    fi
+
+    printf '%s\n' "$target" >"$STATE_FILE"
 }
 
-case "${1:-get}" in
-    get)
-        if ! identity=$(get_identity); then
-            printf 'off'
-            exit 0
-        fi
+command_name=${1:-get}
 
-        if [ "$identity" = true ]; then
-            printf '%sK' "$DAY_K"
-        elif kelvin=$(get_kelvin); then
-            printf '%sK' "$kelvin"
-        else
-            printf 'off'
-        fi
-        exit 0
-        ;;
+if [ "$command_name" = get ]; then
+    if ! has_device || ! command -v "$GBMONCTL" >/dev/null 2>&1; then
+        printf 'off'
+    else
+        printf '%sK' "$(read_kelvin)"
+    fi
+    exit 0
+fi
+
+mkdir -p "$STATE_DIR"
+exec 9>"$LOCK_FILE"
+flock 9
+
+case "$command_name" in
     +*|-*)
-        delta=$1
+        delta=$command_name
         magnitude=${delta#?}
         case "$magnitude" in
             ''|*[!0-9]*) usage ;;
         esac
 
-        identity=$(get_identity)
-        if [ "$identity" = true ]; then
-            current=$DAY_K
-        else
-            current=$(get_kelvin)
-        fi
-
-        case "$current" in
-            ''|*[!0-9]*)
-                printf 'colortemp-ctl: invalid temperature from hyprsunset: %s\n' "$current" >&2
-                exit 1
-                ;;
-        esac
-
+        current=$(read_kelvin)
         if [ "${delta%"$magnitude"}" = + ]; then
             target=$((current + magnitude))
         else
             target=$((current - magnitude))
         fi
-        set_kelvin "$target"
+        apply_kelvin "$target"
         ;;
     toggle)
-        if [ "$(get_identity)" = true ]; then
-            set_kelvin "$NIGHT_K"
+        if [ "$(read_kelvin)" -eq "$DAY_K" ]; then
+            apply_kelvin "$NIGHT_K"
         else
-            set_day
+            apply_kelvin "$DAY_K"
         fi
         ;;
     night)
-        set_kelvin "$NIGHT_K"
+        apply_kelvin "$NIGHT_K"
         ;;
     day)
-        set_day
+        apply_kelvin "$DAY_K"
+        ;;
+    auto)
+        apply_kelvin "$(scheduled_kelvin)"
         ;;
     *)
         usage

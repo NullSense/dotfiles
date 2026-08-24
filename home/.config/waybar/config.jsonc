@@ -316,11 +316,13 @@
     "custom/colortemp": {
         "format": "  {}",
         "exec": "$HOME/bin/colortemp-ctl get",
+        "exec-on-event": false,
         "interval": 5,
         "signal": 13,
-        "tooltip-format": "Night color — Gigabyte USB hardware RGB\nChanges the monitor itself; screenshots stay neutral.\n   scroll        ±100K (2500K–6500K)\n   left-click    toggle 4000K / 6500K\n   right-click   force 4000K\n   middle-click  neutral 6500K\nAuto 19:00→06:00 via systemd user timer",
-        "on-scroll-up": "$HOME/bin/colortemp-ctl +100",
-        "on-scroll-down": "$HOME/bin/colortemp-ctl -100",
+        "tooltip-format": "Night color — Gigabyte USB hardware presets\nChanges the monitor itself; screenshots stay neutral.\nFO32U2 exposes warm / normal / cool, not continuous Kelvin.\n   scroll        one hardware preset warmer / cooler\n   left-click    toggle warm / normal\n   right-click   force warm\n   middle-click  force normal\nAuto warm 19:00→06:00 via systemd user timer",
+        "on-scroll-up": "$HOME/bin/colortemp-ctl cooler",
+        "on-scroll-down": "$HOME/bin/colortemp-ctl warmer",
+        "smooth-scrolling-threshold": 1.0,
         "on-click": "$HOME/bin/colortemp-ctl toggle",
         "on-click-right": "$HOME/bin/colortemp-ctl night",
         "on-click-middle": "$HOME/bin/colortemp-ctl day"

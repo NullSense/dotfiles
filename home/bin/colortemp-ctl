@@ -1,30 +1,28 @@
 #!/usr/bin/env sh
-# Waybar controller for monitor-side color temperature on compatible Gigabyte
-# displays. The USB OSD protocol changes the panel's own RGB gains, so the
-# result is not baked into screenshots and does not depend on GPU CTM support.
+# Stable Waybar interface for monitor-side color profiles. Hardware quirks stay
+# here so callers do not need to know which monitor adapter is active.
 
 set -eu
 
 GBMONCTL=${COLORTEMP_GBMONCTL:-gbmonctl}
 STATE_DIR=${COLORTEMP_STATE_DIR:-${XDG_STATE_HOME:-"$HOME/.local/state"}/colortemp}
-STATE_FILE="$STATE_DIR/kelvin"
+STATE_FILE="$STATE_DIR/profile"
 LOCK_FILE="$STATE_DIR/lock"
-MIN_K=2500
-DAY_K=6500
-NIGHT_K=4000
 SIGNAL_NUM=13
 
 usage() {
-    printf 'usage: %s get|+K|-K|toggle|night|day|auto\n' "$0" >&2
+    printf 'usage: %s get|warmer|cooler|toggle|night|day|auto\n' "$0" >&2
     exit 2
 }
 
-has_device() {
+has_supported_monitor() {
     if [ -n "${COLORTEMP_DEVICE_AVAILABLE:-}" ]; then
         [ "$COLORTEMP_DEVICE_AVAILABLE" = 1 ]
         return
     fi
 
+    # FO32U2 USB OSD endpoint. Keep discovery inside this module; Waybar and
+    # systemd remain unchanged when another monitor adapter is added later.
     for device_info in /sys/class/hidraw/hidraw*/device/uevent; do
         [ -r "$device_info" ] || continue
         if grep -q '^HID_ID=.*:00000BDA:00001100$' "$device_info"; then
@@ -34,97 +32,78 @@ has_device() {
     return 1
 }
 
-scheduled_kelvin() {
+scheduled_profile() {
     hour=${COLORTEMP_HOUR:-$(date +%H)}
     hour=${hour#0}
     [ -n "$hour" ] || hour=0
 
     if [ "$hour" -ge 19 ] || [ "$hour" -lt 6 ]; then
-        printf '%s\n' "$NIGHT_K"
+        printf 'warm\n'
     else
-        printf '%s\n' "$DAY_K"
+        printf 'normal\n'
     fi
 }
 
-read_kelvin() {
+read_profile() {
     if [ -r "$STATE_FILE" ]; then
-        kelvin=$(sed -n '1p' "$STATE_FILE")
-        case "$kelvin" in
-            ''|*[!0-9]*) kelvin= ;;
+        profile=$(sed -n '1p' "$STATE_FILE")
+        case "$profile" in
+            warm|normal|cool)
+                printf '%s\n' "$profile"
+                return
+                ;;
         esac
-        if [ -n "$kelvin" ] && [ "$kelvin" -ge "$MIN_K" ] && [ "$kelvin" -le "$DAY_K" ]; then
-            printf '%s\n' "$kelvin"
-            return
-        fi
     fi
-    scheduled_kelvin
+    scheduled_profile
 }
 
-kelvin_to_rgb() {
-    awk -v kelvin="$1" '
-        function clamp(value) {
-            if (value < 0) return 0
-            if (value > 255) return 255
-            return value
-        }
-        BEGIN {
-            temperature = kelvin / 100
-            if (temperature <= 66) {
-                red = 255
-                green = 99.4708025861 * log(temperature) - 161.1195681661
-                if (temperature <= 19)
-                    blue = 0
-                else
-                    blue = 138.5177312231 * log(temperature - 10) - 305.0447927307
-            } else {
-                red = 329.698727446 * exp(-0.1332047592 * log(temperature - 60))
-                green = 288.1221695283 * exp(-0.0755148492 * log(temperature - 60))
-                blue = 255
-            }
-            printf "%d %d %d\n", int(clamp(red) / 2.55 + 0.5), int(clamp(green) / 2.55 + 0.5), int(clamp(blue) / 2.55 + 0.5)
-        }
-    '
+mode_for_profile() {
+    case "$1" in
+        cool) printf '0\n' ;;
+        normal) printf '1\n' ;;
+        warm) printf '2\n' ;;
+        *) return 1 ;;
+    esac
 }
 
 notify_waybar() {
-    pkill -RTMIN+"$SIGNAL_NUM" waybar 2>/dev/null || true
+    systemctl --user kill --kill-whom=main --signal=RTMIN+"$SIGNAL_NUM" waybar.service 2>/dev/null || true
 }
 
-apply_kelvin() {
+apply_profile() {
     target=$1
-    [ "$target" -lt "$MIN_K" ] && target=$MIN_K
-    [ "$target" -gt "$DAY_K" ] && target=$DAY_K
 
-    if ! has_device || ! command -v "$GBMONCTL" >/dev/null 2>&1; then
-        printf 'colortemp-ctl: compatible Gigabyte USB monitor not available\n' >&2
+    if ! has_supported_monitor || ! command -v "$GBMONCTL" >/dev/null 2>&1; then
+        printf 'colortemp-ctl: compatible monitor USB control is not available\n' >&2
         return 1
     fi
 
-    if [ "$target" -eq "$DAY_K" ]; then
-        # On the FO32U2, USB color mode 2 selects its calibrated 6500K preset.
-        "$GBMONCTL" -prop colour-mode -val 2 >/dev/null
-    else
-        rgb=$(kelvin_to_rgb "$target")
-        red=${rgb%% *}
-        green_blue=${rgb#* }
-        green=${green_blue%% *}
-        blue=${green_blue#* }
-        "$GBMONCTL" -prop colour-mode -val 3 >/dev/null
-        "$GBMONCTL" -prop rgb-red -val "$red" >/dev/null
-        "$GBMONCTL" -prop rgb-green -val "$green" >/dev/null
-        "$GBMONCTL" -prop rgb-blue -val "$blue" >/dev/null
+    # FO32U2 exposes three working hardware color modes. Its older M-series
+    # RGB and low-blue-light property IDs acknowledge writes but do not alter
+    # this panel, so do not advertise fake continuous Kelvin control.
+    "$GBMONCTL" -prop colour-mode -val "$(mode_for_profile "$target")" >/dev/null
+    printf '%s\n' "$target" >"$STATE_FILE"
+}
+
+transition_to() {
+    target=$1
+    force=${2:-false}
+
+    if [ "$force" != true ] && [ "$(read_profile)" = "$target" ]; then
+        return
     fi
 
-    printf '%s\n' "$target" >"$STATE_FILE"
+    apply_profile "$target"
+    notify_waybar
 }
 
 command_name=${1:-get}
 
 if [ "$command_name" = get ]; then
-    if ! has_device || ! command -v "$GBMONCTL" >/dev/null 2>&1; then
+    if ! has_supported_monitor || ! command -v "$GBMONCTL" >/dev/null 2>&1; then
         printf 'off'
     else
-        printf '%sK' "$(read_kelvin)"
+        read_profile | tr -d '\n'
     fi
     exit 0
 fi
@@ -134,40 +113,39 @@ exec 9>"$LOCK_FILE"
 flock 9
 
 case "$command_name" in
-    +*|-*)
-        delta=$command_name
-        magnitude=${delta#?}
-        case "$magnitude" in
-            ''|*[!0-9]*) usage ;;
+    warmer)
+        case "$(read_profile)" in
+            cool) transition_to normal ;;
+            normal) transition_to warm ;;
+            warm) : ;;
         esac
-
-        current=$(read_kelvin)
-        if [ "${delta%"$magnitude"}" = + ]; then
-            target=$((current + magnitude))
-        else
-            target=$((current - magnitude))
-        fi
-        apply_kelvin "$target"
+        ;;
+    cooler)
+        case "$(read_profile)" in
+            warm) transition_to normal ;;
+            normal) transition_to cool ;;
+            cool) : ;;
+        esac
         ;;
     toggle)
-        if [ "$(read_kelvin)" -eq "$DAY_K" ]; then
-            apply_kelvin "$NIGHT_K"
+        if [ "$(read_profile)" = warm ]; then
+            transition_to normal
         else
-            apply_kelvin "$DAY_K"
+            transition_to warm
         fi
         ;;
     night)
-        apply_kelvin "$NIGHT_K"
+        transition_to warm
         ;;
     day)
-        apply_kelvin "$DAY_K"
+        transition_to normal
         ;;
     auto)
-        apply_kelvin "$(scheduled_kelvin)"
+        # Force restores the desired hardware mode after login or hotplug even
+        # when the persisted profile already matches the clock.
+        transition_to "$(scheduled_profile)" true
         ;;
     *)
         usage
         ;;
 esac
-
-notify_waybar

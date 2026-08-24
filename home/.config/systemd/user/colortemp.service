@@ -1,10 +1,9 @@
 [Unit]
-Description=Apply monitor-side color temperature
+Description=Apply scheduled Hyprland CTM color temperature
 PartOf=graphical-session.target
+Requires=hyprsunset.service
+After=hyprsunset.service
 
 [Service]
 Type=oneshot
 ExecStart=%h/bin/colortemp-ctl auto
-
-[Install]
-WantedBy=graphical-session.target

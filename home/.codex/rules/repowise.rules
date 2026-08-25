@@ -1,0 +1,30 @@
+# Repowise 0.45.0 uses aiosqlite for its local index. Under Codex's Linux
+# seccomp sandbox the worker completes sqlite3.connect(), but its completion
+# callback does not wake the asyncio event loop; query commands then hang.
+# They also need loopback access to the local Nemotron embedding route.
+#
+# Keep this exception to query surfaces. Index mutation and service-management
+# commands continue to require their normal sandbox/approval path.
+prefix_rule(
+    pattern = [
+        "repowise",
+        ["ask", "context", "search", "status", "symbol", "why"],
+    ],
+    decision = "allow",
+    justification = "Repowise query commands require aiosqlite and the local embedding endpoint outside the Codex sandbox.",
+    match = [
+        "repowise ask why is this module shaped this way",
+        "repowise context src/lib.rs --include skeleton",
+        "repowise search retrieval fusion --mode hybrid",
+        "repowise status",
+        "repowise symbol SearchService",
+        "repowise why SearchService",
+    ],
+    not_match = [
+        "repowise delete",
+        "repowise generate",
+        "repowise reindex",
+        "repowise update",
+        "repowise watch",
+    ],
+)

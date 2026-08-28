@@ -1,8 +1,8 @@
 # litellm MCP-ENABLED instance (:4001) — OPTIONAL profile, started by `stack mcp`.
 # Everything the gateway (config.yaml :4000) has, PLUS mcp_servers aggregation and the
-# (deliberately disabled — see comment) semantic tool filter. Startup is SLOW here by
-# nature: litellm discovers tools from every server before uvicorn binds; that is WHY
-# this is a separate instance and not part of the always-on gateway.
+# (deliberately disabled — see comment) semantic tool filter. Remote tool mapping
+# and failure handling have a different lifecycle, so this remains separate from
+# the always-on model gateway even though LiteLLM 1.97 binds before mapping finishes.
 # Consumers connect directly to http://127.0.0.1:4001/mcp/ (trailing slash).
 # This instance is unauthenticated and MUST remain bound to loopback; local clients
 # already have the same authority to launch these MCP processes themselves.
@@ -75,6 +75,24 @@ mcp_servers:
     access_groups: ["dev", "research"]
     transport: "http"
     allow_all_keys: true
+  firecrawl:
+    description: "Firecrawl — web search plus JS-rendered page scraping (research)."
+    # Keyless by design: verified 2026-08-28 against mcp.firecrawl.dev/v2/mcp, which
+    # returns serverInfo firecrawl-fastmcp 3.24.1 on an initialize with NO Authorization
+    # header. ~1,000 free credits/month before it wants an own key, so there is no
+    # credential to keep out of this public repo. Complements exa rather than
+    # duplicating it: exa is neural search over an index, firecrawl fetches and renders
+    # a specific page, which is what actually breaks on JS-heavy vendor docs.
+    url: "https://mcp.firecrawl.dev/v2/mcp"
+    access_groups: ["research"]
+    transport: "http"
+    allow_all_keys: true
+    # firecrawl_parse is withheld deliberately. The keyless session advertises it, but it
+    # "processes supported local files through its two-phase upload flow" — i.e. it uploads
+    # local file content to a third party. Search and scrape only ever send a query or a URL.
+    allowed_tools:
+      - firecrawl_search
+      - firecrawl_scrape
   # Personal Hindsight memory is intentionally absent here. Hermes owns it
   # through the native memory provider, so general MCP clients cannot read or
   # retain into the personal bank. Non-personal banks need a separate,

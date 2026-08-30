@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=URL Router
+Comment=Open Spotify links in Spotify and other web links in Helium
+NoDisplay=true
+Exec=/home/nullsense/bin/url-router %u
+Terminal=false
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+Categories=Network;WebBrowser;

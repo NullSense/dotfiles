@@ -3,6 +3,8 @@ x-scheme-handler/claude-cli=claude-code-url-handler.desktop
 inode/directory=thunar.desktop
 application/x-directory=thunar.desktop
 x-scheme-handler/webcal=helium.desktop
+x-scheme-handler/http=url-router.desktop
+x-scheme-handler/https=url-router.desktop
 
 [Added Associations]
 image/jpeg=satty.desktop;imv.desktop;imv-dir.desktop;

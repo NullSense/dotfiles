@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# != 1 )); then
+    printf 'usage: url-router URL\n' >&2
+    exit 2
+fi
+
+url=$1
+spotify=${URL_ROUTER_SPOTIFY:-spotify-launcher}
+browser=${URL_ROUTER_BROWSER:-/home/nullsense/.local/bin/helium}
+
+if [[ $url =~ ^([Hh][Tt][Tt][Pp][Ss]?://)([^/]+)(/.*)?$ ]]; then
+    authority=${BASH_REMATCH[2]}
+    path=${BASH_REMATCH[3]:-/}
+    host=${authority%%:*}
+
+    if [[ ${host,,} == open.spotify.com ]]; then
+        path=${path%%\?*}
+        path=${path%%\#*}
+        path=${path#/}
+        path=${path%/}
+
+        case $path in
+            intl-*/*) path=${path#*/} ;;
+        esac
+        case $path in
+            embed/*) path=${path#*/} ;;
+        esac
+
+        if [[ -n $path ]]; then
+            exec "$spotify" "spotify:${path//\//:}"
+        fi
+
+        exec "$spotify"
+    fi
+fi
+
+exec "$browser" "$url"

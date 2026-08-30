@@ -2,18 +2,17 @@
 # AQ_* MUST live here (not in hypr/env.conf `env=`), because aquamarine reads
 # them at backend-creation, which is earlier than config `env=` application.
 
-# Use legacy (non-atomic) KMS modeset. Sidesteps the
-#   "atomic drm request: failed to commit: Device or resource busy"
-# death spiral that crashes Hyprland itself (SIGABRT in CHyprOpenGLImpl::begin)
-# when a vLLM/torch backfill saturates the RTX 5090 that also drives the
-# displays. 2026-07-03. See memory reference_dp2_10bit_wayland_crash (2nd trigger).
-# VERIFY after relogin: `hyprctl monitors` — confirm DP-1 4K@240 + DP-2 come up
-# and bitdepth-10 still holds. If 10-bit/240Hz breaks under legacy modeset,
-# drop this line and rely on __GL_VRR_ALLOWED + vLLM resource caps instead.
-export AQ_NO_ATOMIC=1
+# Keep Aquamarine's default atomic KMS backend. Atomic connector properties are
+# required for the AORUS HDR colorspace and HDR_OUTPUT_METADATA commits; setting
+# AQ_NO_ATOMIC makes the SUPER+ALT+H hardware-HDR toggle impossible.
+#
+# AQ_NO_ATOMIC was added as an emergency workaround on 2026-07-03 after a
+# vLLM/torch backfill starved the RTX 5090 and triggered failed page flips. The
+# narrower mitigations remain: VRR is disabled below and vLLM has explicit SM
+# and memory caps. Do not restore the legacy backend as a normal-session fix.
+unset AQ_NO_ATOMIC
 
-# Disable VRR/G-Sync at the NVIDIA GL-driver level. Removes VRR-induced
-# page-flip timing races (belt-and-braces with AQ_NO_ATOMIC). Trade-off: also
-# disables G-Sync in fullscreen games launched from this session. Remove this
-# line if you want G-Sync back and AQ_NO_ATOMIC alone proves sufficient.
+# Disable VRR/G-Sync at the NVIDIA GL-driver level. This retains the narrower
+# page-flip stability guard while allowing atomic KMS and HDR. Trade-off: it
+# also disables G-Sync in fullscreen games launched from this session.
 export __GL_VRR_ALLOWED=0

@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CTL="$ROOT/home/bin/hdr-toggle"
 BINDINGS="$ROOT/home/.config/hypr/bindings.conf"
+UWSM_ENV="$ROOT/home/.config/uwsm/env-hyprland"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -129,6 +130,12 @@ assert_eq auto "$(tail -n 1 "$TMP/colortemp")" \
     "rejected HDR signal restores scheduled night color"
 
 grep -Fq 'bindd = SUPER ALT, H,           Toggle HDR (DP-1),       exec, /home/nullsense/bin/hdr-toggle' "$BINDINGS"
+
+if grep -Eq '^[[:space:]]*(export[[:space:]]+)?AQ_NO_ATOMIC=' "$UWSM_ENV"; then
+    fail "the normal Hyprland session must use atomic KMS for hardware HDR"
+fi
+grep -Fqx 'unset AQ_NO_ATOMIC' "$UWSM_ENV" \
+    || fail "the compositor environment must clear inherited AQ_NO_ATOMIC state"
 
 if grep -Fq '/tmp/hdr-state' "$CTL"; then
     fail "HDR state must come from Hyprland, not a stale temporary file"

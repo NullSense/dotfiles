@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ComfyUI
+GenericName=Diffusion Workflow UI
+Comment=Node-based UI for Stable Diffusion / diffusion models
+Exec=/home/nullsense/.local/bin/comfyui
+Icon=applications-graphics
+Terminal=false
+Categories=Graphics;
+Keywords=stable-diffusion;ai;image;comfy;
+StartupNotify=true

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Walker-friendly ComfyUI launcher.
+# - If server already listening on $PORT, just opens browser.
+# - Otherwise starts a transient user service, waits for the port, opens browser.
+set -euo pipefail
+
+PORT="${COMFYUI_PORT:-8188}"
+URL="http://127.0.0.1:${PORT}"
+
+is_up() {
+  ss -tln "sport = :${PORT}" 2>/dev/null | grep -q LISTEN
+}
+
+if ! is_up; then
+  if ! systemctl --user is-active --quiet comfyui.service; then
+    systemctl --user reset-failed comfyui.service 2>/dev/null || true
+    systemd-run --user --quiet --collect --unit=comfyui \
+      --property=Type=exec \
+      --property=Restart=on-failure \
+      --property=RestartSec=2s \
+      -- "$HOME/.local/bin/comfyui-server"
+  fi
+  for _ in $(seq 1 90); do
+    is_up && break
+    sleep 1
+  done
+fi
+
+if is_up; then
+  xdg-open "$URL" >/dev/null 2>&1 &
+  disown || true
+else
+  notify-send -u critical "ComfyUI" "Server failed to start within 90s — check: journalctl --user -u comfyui" 2>/dev/null || true
+  exit 1
+fi

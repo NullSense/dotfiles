@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# ComfyUI server. Run directly to start in foreground (logs to terminal).
+# Runs on the RTX 5090 via CUDA (torch cu130, sm_120). The old ROCm overrides
+# (HSA_OVERRIDE_GFX_VERSION / HIP_VISIBLE_DEVICES for the RX 6750 XT) were
+# removed in the AMD→NVIDIA swap — the venv is now a CUDA PyTorch build.
+set -euo pipefail
+
+COMFYUI_DIR="${COMFYUI_DIR:-$HOME/Programming/ComfyUI}"
+cd "$COMFYUI_DIR"
+
+# Activate the mise-managed venv directly (no need to invoke mise at runtime).
+# shellcheck disable=SC1091
+source .venv/bin/activate
+
+exec python main.py --listen 127.0.0.1 "$@"

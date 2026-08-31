@@ -39,7 +39,7 @@ prepend_spotters = [
 # then sizes the floating window to the image's real pixels — or goes fullscreen
 # when the image is >=95% of the monitor. orphan=true so the viewer detaches.
 image = [
-	{ run = 'tev-fit "$@"', desc = "View in tev (HDR, sized)", orphan = true, for = "unix" },
+	{ run = "tev-fit %s", desc = "View in tev (HDR, sized)", orphan = true, for = "unix" },
 ]
 
 [open]

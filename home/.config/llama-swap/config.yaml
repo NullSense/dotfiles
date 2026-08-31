@@ -628,7 +628,7 @@ models:
     aliases: [sift-nanbeige, sift-agent, sift-decompose]
     name: "Nanbeige4.2-3B · Sift 64k (co-resident, EAGLE-3)"
     description: "reason·agent·rag · NVFP4-FP8 LoopShield weights served at 64k with fp8 KV and an EAGLE-3 draft head, sized to fit beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for separate long-context reasoning."
-    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "nvfp4-fp8-loopshield", class: "reason·agent·rag", thinking: "toggle (default on; sift sends reasoning_effort explicitly)", best_for: "Sift grounded chat turns needing retrieval co-residency", tags: [reason, agent, rag, local, nanbeige, vllm, nvfp4, sift] }
+    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "nvfp4-fp8-loopshield", class: "reason·agent·rag", thinking: "toggle (default on; sift sends reasoning_effort explicitly)", best_for: "Sift grounded chat turns needing retrieval co-residency", sift_chat_capacity: { minimum_headroom_mib: 4096, measured_headroom_mib: 4438, measured_at: "2026-09-01" }, tags: [reason, agent, rag, local, nanbeige, vllm, nvfp4, sift] }
 
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────
   # Each reasoning-capable model exposes two extra aliases:

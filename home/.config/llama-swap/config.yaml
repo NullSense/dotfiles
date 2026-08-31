@@ -127,9 +127,14 @@ models:
   #        http://127.0.0.1:9292/upstream/tei-sparse
   #
   #    5090 SIZING: the binding constraint is NOT the 67M of weights (~134 MB fp16) but the
-  #    MLM logits tensor, which is [total_batch_tokens x 30522 vocab]. At 32768 batch tokens
-  #    that is 32768*30522*2 B ≈ 2.0 GB of transient activation — raise --max-batch-tokens
-  #    only with that multiplier in mind. --max-client-batch-size must stay >= sift's
+  #    MLM logits tensor, which is [total_batch_tokens x 30522 vocab]. At 8192 batch tokens
+  #    that is 8192*30522*2 B ≈ 0.5 GB of raw transient logits. A 2026-09-01 live probe at
+  #    32768 let four concurrent Sift-shaped requests drive free VRAM from 6050 MiB to
+  #    1538 MiB, so that ceiling is not safe beside the full Sift quartet. The same
+  #    probe at 8192 retained 5297 MiB; a concurrent sparse+dense+rerank+chat probe
+  #    retained 4438 MiB. Raise --max-batch-tokens only with that multiplier and
+  #    >=4 GiB peak headroom in mind.
+  #    --max-client-batch-size must stay >= sift's
   #    configured sparse batch_size or sift's batches get rejected at the door.
   #    --auto-truncate defaults to true (deliberately left default: sift chunks can exceed
   #    DistilBERT's 512 tokens, and truncating beats a 413).
@@ -165,7 +170,7 @@ models:
       --model-id opensearch-project/opensearch-neural-sparse-encoding-v2-distill
       --pooling splade
       --dtype float16
-      --max-batch-tokens 32768
+      --max-batch-tokens 8192
       --max-client-batch-size 512
       --max-concurrent-requests 512
       --payload-limit 16000000
@@ -540,8 +545,8 @@ models:
   #      Sift    → co-residency, because ONE grounded turn needs dense + sparse + rerank
   #                + a chat model all live. Evicting the retrieval trio per turn is what
   #                made a chat turn take 4m40s (measured 2026-08-06). This entry's
-  #                NVFP4-FP8-LoopShield weights at GPU_UTIL 0.56 are what make the four
-  #                fit together.
+  #                NVFP4-FP8-LoopShield weights with an explicit 7 GiB KV cache are what
+  #                make the four fit together.
   #
   #    ⚠ CORRECTED 2026-08-31. Sift's 96 KiB evidence budget, 48 KiB history
   #    budget, and 16,384-token completion ceiling require a 64k total server
@@ -566,10 +571,14 @@ models:
   #    EAGLE-3 IS ON HERE, and the reason is the quant, not the draft head. This block
   #    used to argue the opposite ("WHY NO EAGLE-3") from an FP8-dynamic weight budget
   #    where 64k + spec measured 20.1 GB and 20.1 + 12.3 (trio) left no headroom. The
-  #    weights below are no longer those weights: NVFP4-FP8 LoopShield + GPU_UTIL
-  #    0.56 holds 64k and the draft head beside the trio while targeting 1–2
-  #    GiB of card headroom from the 2026-08-31 live allocation. EAGLE-3 has
-  #    been enabled throughout; it is a trained draft head, not this model's MTP.
+  #    weights below are no longer those weights. The explicit 7 GiB KV cache holds
+  #    64k and the draft head beside the trio while reserving enough card headroom
+  #    for sparse inference's transient SPLADE logits and the desktop. An explicit
+  #    cache is intentional: gpu-memory-utilization profiling observed co-resident
+  #    engines changing allocation mid-profile and over-allocated despite a lower
+  #    percentage. Measured 2026-08-31 with the full quartet plus desktop/ComfyUI:
+  #    83,231 KV tokens (1.27x 65,536) and 6,020 MiB idle VRAM free. EAGLE-3 is a
+  #    trained draft head, not this model's MTP.
   #
   #    KV is fp8 (KV_DTYPE default in the run script) — that halving, from the looped
   #    arch's 176 KB/token, is what makes 64k fit at all. vLLM has no int4 KV path for
@@ -581,12 +590,12 @@ models:
       SERVED_NAME=nanbeige-sift
       MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-NVFP4-FP8-LoopShield
       MAXLEN=65536
-      GPU_UTIL=0.56
       SPEC=eagle3
       SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3
       SPEC_TOKENS=3
       ATTN=TRITON_ATTN
       /home/nullsense/bin/llm-servers/vllm-nanbeige
+      --kv-cache-memory-bytes 7G
     cmdStop: docker stop vllm-nanbeige-sift
     proxy: http://127.0.0.1:${PORT}
     useModelName: nanbeige-sift
@@ -1151,8 +1160,11 @@ matrix:
     # decompose -> dense+sparse retrieval -> cross-encoder rerank -> synthesis, so the
     # chat model and all three retrieval legs must be resident TOGETHER or the turn pays
     # a model load per stage (measured 4m40s and a bare 408 before this set existed).
-    #   A 14.4 + n 3.8 + x 2.5 + m 4.7 ~= 25.4 GB, leaving ~7 GB — the same shape as the
-    #   "full RAG stack" budget above, with the 64k no-spec variant standing in for `a`.
+    #   A 14.4 + n 3.8 + x 2.5 + m 4.7 ~= 25.4 GB, leaving ~7 GB before the
+    #   desktop and other non-matrix CUDA users. A's vLLM reservation must preserve
+    #   at least 4 GiB of observed idle card headroom; the live 2026-09-01 combined
+    #   provider probe retained 4438 MiB even at peak, so x can allocate transient
+    #   SPLADE logits without starving either TEI or the display server.
     # `d` is deliberately NOT here: rewrite is 11 GB and would push this over the card.
     # Sift can use either chat model — `A` for quality, `d` (sift-agent) when dictation
     # must stay hot — but not both at once.

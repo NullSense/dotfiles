@@ -540,15 +540,14 @@ models:
   #      Sift    → co-residency, because ONE grounded turn needs dense + sparse + rerank
   #                + a chat model all live. Evicting the retrieval trio per turn is what
   #                made a chat turn take 4m40s (measured 2026-08-06). This entry's
-  #                NVFP4-FP8-LoopShield weights at GPU_UTIL 0.35 are what make the four
+  #                NVFP4-FP8-LoopShield weights at GPU_UTIL 0.56 are what make the four
   #                fit together.
   #
-  #    ⚠ CORRECTED 2026-08-14. This block used to justify the split as "Hermes → 128k,
-  #    Sift → 64k", and the comments below still said 64k and "no spec". None of that
-  #    is true: BOTH entries have run MAXLEN=32768 with SPEC=eagle3 for some time, and
-  #    the surviving difference is QUANT + GPU_UTIL + the sleep daemon, as written
-  #    above. The stale text mattered — reading it, the pair looks like pure duplication
-  #    with no reason to exist, which is exactly the wrong conclusion to act on.
+  #    ⚠ CORRECTED 2026-08-31. Sift's 96 KiB evidence budget, 48 KiB history
+  #    budget, and 16,384-token completion ceiling require a 64k total server
+  #    window. The prior MAXLEN=32768 contradicted those caller budgets and caused
+  #    deterministic HTTP 400s as soon as input crossed 16,384 tokens. The generic
+  #    Hermes entry remains 32k; this co-resident NVFP4 profile is deliberately 64k.
   #
   #    ⚠ ONE NANBEIGE AT A TIME. `a` is in no set, so requesting it is SOLO and evicts
   #    this entry plus the whole retrieval trio; `A` lives in `sift-chat` and does not
@@ -567,10 +566,10 @@ models:
   #    EAGLE-3 IS ON HERE, and the reason is the quant, not the draft head. This block
   #    used to argue the opposite ("WHY NO EAGLE-3") from an FP8-dynamic weight budget
   #    where 64k + spec measured 20.1 GB and 20.1 + 12.3 (trio) left no headroom. The
-  #    weights below are no longer those weights: NVFP4-FP8 LoopShield + GPU_UTIL 0.45
-  #    holds 64k AND the draft head at 26.9/32.6 GB with the trio resident (measured
-  #    2026-08-07). The old comment survived the weight swap and contradicted the
-  #    `cmd:` three lines under it — SPEC=eagle3 has been set this whole time.
+  #    weights below are no longer those weights: NVFP4-FP8 LoopShield + GPU_UTIL
+  #    0.56 holds 64k and the draft head beside the trio while targeting 1–2
+  #    GiB of card headroom from the 2026-08-31 live allocation. EAGLE-3 has
+  #    been enabled throughout; it is a trained draft head, not this model's MTP.
   #
   #    KV is fp8 (KV_DTYPE default in the run script) — that halving, from the looped
   #    arch's 176 KB/token, is what makes 64k fit at all. vLLM has no int4 KV path for
@@ -581,8 +580,8 @@ models:
       CONTAINER_NAME=vllm-nanbeige-sift
       SERVED_NAME=nanbeige-sift
       MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-NVFP4-FP8-LoopShield
-      MAXLEN=32768
-      GPU_UTIL=0.35
+      MAXLEN=65536
+      GPU_UTIL=0.56
       SPEC=eagle3
       SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3
       SPEC_TOKENS=3
@@ -618,8 +617,8 @@ models:
     # may never fire. Lengthen sift's warm-up interval to actually reclaim the VRAM when idle.
     ttl: 300
     aliases: [sift-nanbeige, sift-agent, sift-decompose]
-    name: "Nanbeige4.2-3B · Sift 32k (co-resident, EAGLE-3)"
-    description: "reason·agent·rag · NVFP4-FP8 LoopShield weights served at 32k with fp8 KV and an EAGLE-3 draft head, sized to fit beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for longer-context reasoning."
+    name: "Nanbeige4.2-3B · Sift 64k (co-resident, EAGLE-3)"
+    description: "reason·agent·rag · NVFP4-FP8 LoopShield weights served at 64k with fp8 KV and an EAGLE-3 draft head, sized to fit beside sift's dense+sparse+rerank trio. For Sift's grounded chat turns; use nanbeige4.2-3b for separate long-context reasoning."
     metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "nvfp4-fp8-loopshield", class: "reason·agent·rag", thinking: "toggle (default on; sift sends reasoning_effort explicitly)", best_for: "Sift grounded chat turns needing retrieval co-residency", tags: [reason, agent, rag, local, nanbeige, vllm, nvfp4, sift] }
 
   # ── thinking-toggle convention ─────────────────────────────────────────────────────────

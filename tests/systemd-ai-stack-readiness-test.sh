@@ -80,6 +80,63 @@ sift_chat_capacity_negative_controls_are_valid() {
 sift_chat_capacity_negative_controls_are_valid \
     || fail 'sift-chat capacity negative controls did not reject an invalid fixture'
 
+sift_chat_preflight_synthetic_controls_are_valid() {
+    local fixture_dir fake_bin good_running missing_running output result=0
+    fixture_dir=$(mktemp -d)
+    fake_bin="$fixture_dir/bin"
+    mkdir "$fake_bin"
+
+    cat >"$fake_bin/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == *'http://127.0.0.1:9292/running'* ]]
+[[ "$*" != *'--data'* && "$*" != *'-X '* && "$*" != *'--request'* ]]
+printf '%s\n' "${SIFT_CHAT_PREFLIGHT_RUNNING_JSON:?}"
+EOF
+    cat >"$fake_bin/nvidia-smi" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == '--query-gpu=memory.free --format=csv,noheader,nounits' ]]
+printf '%s\n' "${SIFT_CHAT_PREFLIGHT_FREE_MIB:?}"
+EOF
+    chmod +x "$fake_bin/curl" "$fake_bin/nvidia-smi"
+
+    good_running='{"running":["nanbeige-sift","nemotron-embed-1b","tei-sparse","nemotron-rerank-1b"]}'
+    missing_running='{"running":["nemotron-embed-1b","tei-sparse","nemotron-rerank-1b"]}'
+
+    if ! output=$(PATH="$fake_bin:$PATH" \
+        SIFT_CHAT_PREFLIGHT_RUNNING_JSON="$good_running" \
+        SIFT_CHAT_PREFLIGHT_FREE_MIB=4438 \
+        LSWAP_CFG="$llama_swap_config" \
+        "$stack" preflight sift-chat 2>&1); then
+        result=1
+    elif [[ "$output" != *'sift-chat preflight passed'* ]]; then
+        result=1
+    fi
+
+    if PATH="$fake_bin:$PATH" \
+        SIFT_CHAT_PREFLIGHT_RUNNING_JSON="$missing_running" \
+        SIFT_CHAT_PREFLIGHT_FREE_MIB=4438 \
+        LSWAP_CFG="$llama_swap_config" \
+        "$stack" preflight sift-chat >/dev/null 2>&1; then
+        result=1
+    fi
+
+    if PATH="$fake_bin:$PATH" \
+        SIFT_CHAT_PREFLIGHT_RUNNING_JSON="$good_running" \
+        SIFT_CHAT_PREFLIGHT_FREE_MIB=4095 \
+        LSWAP_CFG="$llama_swap_config" \
+        "$stack" preflight sift-chat >/dev/null 2>&1; then
+        result=1
+    fi
+
+    rm -r -- "$fixture_dir"
+    return "$result"
+}
+
+sift_chat_preflight_synthetic_controls_are_valid \
+    || fail 'stack preflight sift-chat synthetic readiness controls are invalid'
+
 grep -Fq 'pg_isready' "$compose" || fail 'litellm-db has no PostgreSQL healthcheck'
 grep -Fq -- '--wait --wait-timeout 90 litellm-db' "$units/litellm-db.service" \
     || fail 'litellm-db.service does not use Compose readiness waiting'

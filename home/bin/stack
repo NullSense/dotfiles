@@ -249,6 +249,66 @@ else:
 PY
 }
 
+sift_chat_preflight() {
+  local config_contract minimum_headroom_mib running_snapshot gpu_snapshot free_mib model
+  local -a expected_models missing_models free_values
+
+  for tool in yq jq curl nvidia-smi; do
+    command -v "$tool" >/dev/null 2>&1 \
+      || { echo "  ⚠ sift-chat preflight requires $tool" >&2; return 1; }
+  done
+  [[ -r "$LSWAP_CFG" ]] \
+    || { echo "  ⚠ sift-chat preflight cannot read $LSWAP_CFG" >&2; return 1; }
+
+  config_contract=$(yq -e -c '
+    select(.matrix.sets."sift-chat" == "A & n & x & m")
+    | (.models."nanbeige-sift".metadata.sift_chat_capacity.minimum_headroom_mib) as $minimum
+    | [.matrix.vars.A, .matrix.vars.n, .matrix.vars.x, .matrix.vars.m] as $models
+    | select(($minimum | type) == "number"
+        and ($minimum | floor) == $minimum
+        and $minimum >= 0)
+    | select(($models | unique | length) == 4
+        and all($models[]; type == "string" and length > 0))
+    | {minimum_headroom_mib: $minimum, models: $models}
+  ' "$LSWAP_CFG") \
+    || { echo "  ⚠ sift-chat config has no valid capacity contract" >&2; return 1; }
+  minimum_headroom_mib=$(jq -r '.minimum_headroom_mib' <<<"$config_contract")
+  mapfile -t expected_models < <(jq -r '.models[]' <<<"$config_contract")
+
+  running_snapshot=$(curl --fail --silent --show-error --max-time 3 \
+    http://127.0.0.1:9292/running) \
+    || { echo '  ⚠ llama-swap /running is unavailable' >&2; return 1; }
+  jq -e '(.running | type == "array") and all(.running[]; type == "string")' \
+    >/dev/null <<<"$running_snapshot" \
+    || { echo '  ⚠ llama-swap /running returned an invalid payload' >&2; return 1; }
+
+  missing_models=()
+  for model in "${expected_models[@]}"; do
+    jq -e --arg model "$model" '.running | index($model) != null' \
+      >/dev/null <<<"$running_snapshot" || missing_models+=("$model")
+  done
+  if ((${#missing_models[@]} != 0)); then
+    printf '  ⚠ sift-chat providers are not co-resident: %s\n' \
+      "${missing_models[*]}" >&2
+    return 1
+  fi
+
+  gpu_snapshot=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits) \
+    || { echo '  ⚠ cannot read GPU memory headroom' >&2; return 1; }
+  mapfile -t free_values <<<"$gpu_snapshot"
+  ((${#free_values[@]} == 1)) \
+    || { echo '  ⚠ sift-chat headroom is ambiguous across multiple GPUs' >&2; return 1; }
+  free_mib=${free_values[0]//[[:space:]]/}
+  [[ "$free_mib" =~ ^[0-9]+$ ]] \
+    || { echo '  ⚠ GPU memory headroom is not a numeric MiB value' >&2; return 1; }
+  ((free_mib >= minimum_headroom_mib)) \
+    || { printf '  ⚠ sift-chat has %s MiB free; minimum is %s MiB\n' \
+      "$free_mib" "$minimum_headroom_mib" >&2; return 1; }
+
+  printf '  ✓ sift-chat preflight passed: %s/%s providers resident; %s MiB free (minimum %s MiB)\n' \
+    "${#expected_models[@]}" "${#expected_models[@]}" "$free_mib" "$minimum_headroom_mib"
+}
+
 case "${1:-status}" in
   up)
     # Observability is ~6 GB and only needed to VIEW traces. It is deliberately
@@ -286,6 +346,12 @@ case "${1:-status}" in
     ensure_gateway_env
     systemctl --user start litellm && echo "  ▶ litellm gateway → :4000 (systemd)"
     echo "  gateway up → :4000 (no models · 'stack up' adds the on-demand llama-swap router)"
+    ;;
+  preflight)
+    case "${2:-}" in
+      sift-chat) sift_chat_preflight ;;
+      *) echo 'usage: stack preflight sift-chat'; exit 1 ;;
+    esac
     ;;
   mcp)  # OPTIONAL MCP-aggregation litellm instance (:4001, config-mcp.yaml). Slow to boot BY
     # NATURE (tool discovery across every MCP server before uvicorn binds) — which is exactly
@@ -392,5 +458,5 @@ case "${1:-status}" in
     echo "  ✓ prisma generated + LiteLLM_* tables ready — restart LiteLLM before using key APIs"
     ;;
   logs) journalctl --user -f -u litellm -u llama-swap -u litellm-mcp ;;  # systemd-owned now; old nohup logs remain in $RUN/*.log
-  *) echo "usage: stack {up|gateway|mcp [on|off]|dash|obs|down|mon-down|llama-reload|canary|restart|status|logs|db-init}"; exit 1 ;;
+  *) echo "usage: stack {up|gateway|preflight sift-chat|mcp [on|off]|dash|obs|down|mon-down|llama-reload|canary|restart|status|logs|db-init}"; exit 1 ;;
 esac

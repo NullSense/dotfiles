@@ -23,9 +23,12 @@ sift_chat_capacity_contract_is_valid() {
 
     yq -e '
         (.models."nanbeige-sift".cmd // "") as $command
+        | (.models."tei-sparse".cmd // "") as $sparse_command
         | (.models."nanbeige-sift".metadata.sift_chat_capacity // {}) as $capacity
         | ([ $command | scan("--kv-cache-memory-bytes[[:space:]]+[^[:space:]]+") ]
             == ["--kv-cache-memory-bytes 7G"])
+          and ([ $sparse_command | scan("--max-batch-tokens[[:space:]]+[^[:space:]]+") ]
+            == ["--max-batch-tokens 8192"])
           and (.models."nanbeige-sift".aliases
             == ["sift-nanbeige", "sift-agent", "sift-decompose"])
           and (.matrix.vars.A == "nanbeige-sift")
@@ -50,6 +53,27 @@ sift_chat_capacity_negative_controls_are_valid() {
     yq -y '
         .models."nanbeige-sift".cmd
             |= sub("--kv-cache-memory-bytes 7G"; "--kv-cache-memory-bytes 8G")
+    ' "$llama_swap_config" >"$fixture" \
+        || { rm -r -- "$fixture_dir"; return 1; }
+    if sift_chat_capacity_contract_is_valid "$fixture"; then
+        rm -r -- "$fixture_dir"
+        return 1
+    fi
+
+    yq -y '
+        .models."tei-sparse".cmd
+            |= sub("--max-batch-tokens 8192"; "--max-batch-tokens 32768")
+    ' "$llama_swap_config" >"$fixture" \
+        || { rm -r -- "$fixture_dir"; return 1; }
+    if sift_chat_capacity_contract_is_valid "$fixture"; then
+        rm -r -- "$fixture_dir"
+        return 1
+    fi
+
+    yq -y '
+        .models."tei-sparse".cmd
+            |= sub("--max-batch-tokens 8192";
+                "--max-batch-tokens 8192 --max-batch-tokens 8192")
     ' "$llama_swap_config" >"$fixture" \
         || { rm -r -- "$fixture_dir"; return 1; }
     if sift_chat_capacity_contract_is_valid "$fixture"; then

@@ -35,6 +35,7 @@ sift_chat_capacity_contract_is_valid() {
           and (.matrix.vars.n == "nemotron-embed-1b")
           and (.matrix.vars.x == "tei-sparse")
           and (.matrix.vars.m == "nemotron-rerank-1b")
+          and (.models."nemotron-rerank-1b".ttl == 0)
           and (.matrix.sets."sift-chat" == "A & n & x & m")
           and ($capacity.minimum_headroom_mib == 4096)
           and ($capacity.measured_headroom_mib >= $capacity.minimum_headroom_mib)
@@ -82,6 +83,14 @@ sift_chat_capacity_negative_controls_are_valid() {
     fi
 
     yq -y '.matrix.sets."sift-chat" = "A & n & m"' \
+        "$llama_swap_config" >"$fixture" \
+        || { rm -r -- "$fixture_dir"; return 1; }
+    if sift_chat_capacity_contract_is_valid "$fixture"; then
+        rm -r -- "$fixture_dir"
+        return 1
+    fi
+
+    yq -y '.models."nemotron-rerank-1b".ttl = 300' \
         "$llama_swap_config" >"$fixture" \
         || { rm -r -- "$fixture_dir"; return 1; }
     if sift_chat_capacity_contract_is_valid "$fixture"; then

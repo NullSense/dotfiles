@@ -17,10 +17,12 @@ globalTTL: 300            # default: unload a model 5 min after its last request
 logLevel: info
 startPort: 9300           # ${PORT} auto-increments from here per model
 
-# ── PRELOAD sift's retrieval serving path (2026-08-06) ─────────────────────────────
-# ttl:0 on nemotron-rerank-1b means "never idle-evict", NOT "already loaded" — after a
-# llama-swap restart or a config reload, a pinned model is still cold until something
-# asks for it. Preload is what closes that gap.
+# ── Sift retrieval residency (2026-09-01) ───────────────────────────────
+# ttl:0 means "never idle-evict", NOT "already loaded" — after a llama-swap restart or
+# config reload, a pinned model is still cold until something asks for it. Sift's launcher
+# sends the first bounded warm-up request; the pin keeps the reranker resident afterward.
+# sift-api's periodic retrieval warmer is deliberately exact-Release/admission-bound, so it
+# cannot keep an ambient reranker alive while no served Release declares that leg.
 #
 # Why it is worth the startup cost: a vLLM cold start on this box is ~50s end-to-end
 # (measured 2026-08-06 — container 14s, engine spawn 12s, weights 2.5s, torch.compile
@@ -30,7 +32,7 @@ startPort: 9300           # ${PORT} auto-increments from here per model
 # request path, is strictly better than letting a user's first search absorb it.
 #
 # All three are in the `sift-serve` matrix set, so co-residency is permitted and they
-# will not swap each other out. ~11 GB held from boot (n 3.8 + m 4.7 + x 2.5).
+# will not swap each other out. The matrix permits residency; it does not preload models.
 #
 # tei-sparse used to preload alongside the Q4 chat model. The NVFP4 vLLM route
 # reserves 89% of VRAM for its measured two-worker KV pool, so that combination
@@ -409,18 +411,12 @@ models:
     # fused-only ranking. The symptom is quietly worse results, not a failure,
     # which is exactly why this must not depend on a timer.
     #
-    # 2026-08-14 — CHANGED ttl: 0 → 300 (user decision: reduce the number of resident
-    # models; this is now the SINGLE reranker for BOTH sift and legalkb, replacing
-    # bge-reranker-v2-m3). The cold-start reasoning above still stands and is the
-    # accepted cost of that decision.
-    #
-    # ⚠ OPERATIONAL CAVEAT: while sift is running this TTL will effectively never fire.
-    # sift-api's provider warm-up (sift-api/src/services/warmup.rs) re-pings every
-    # provider every ~4 minutes by default, which is shorter than this 300s timer — so
-    # the model stays resident regardless. To actually reclaim the ~4.7 GB when idle,
-    # sift's warm-up interval must be lengthened past the TTL or disabled for this
-    # provider. Left as-is here because that is a sift-side config change.
-    ttl: 300
+    # 2026-09-01 — restored ttl:0 after the full Sift quartet was measured with at
+    # least 4 GiB free. The intervening 300s TTL relied on sift-api's four-minute
+    # keep-warm, but that warmer correctly touches only exact admitted served-Release
+    # legs. With no active/reranked Release, the timer fired while Sift was running and
+    # silently exposed the next query to the cold-start degradation described above.
+    ttl: 0
     name: "llama-nemotron-rerank-1b-v2 (vLLM bf16)"
     aliases: [rerank-nemotron, "nvidia/llama-nemotron-rerank-1b-v2"]
     description: "rerank · llama-nemotron-rerank-1b-v2 (Llama-3.2-1B bidirectional cross-encoder, avg pooling) via vLLM /v1/rerank. Score template + trust-remote-code enforced by the wrapper. 8k pairs. ~4.7 GB reserved."

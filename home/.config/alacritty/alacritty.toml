@@ -82,4 +82,8 @@ bindings = [
     { key = "Minus",          mods = "Control", action = "DecreaseFontSize" }, # Ctrl + -
     { key = "NumpadSubtract", mods = "Control", action = "DecreaseFontSize" }, # Ctrl + NumpadMinus
     { key = "Key0",           mods = "Control", action = "ResetFontSize" },    # Ctrl + 0
+
+    # Shift+Enter sends ESC+CR so TUIs (Claude Code, etc.) see a newline
+    # instead of a submit.
+    { key = "Return", mods = "Shift", chars = "\u001B\r" },
 ]

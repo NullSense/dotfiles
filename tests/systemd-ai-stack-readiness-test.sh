@@ -105,7 +105,7 @@ sift_chat_capacity_negative_controls_are_valid \
     || fail 'sift-chat capacity negative controls did not reject an invalid fixture'
 
 sift_chat_preflight_synthetic_controls_are_valid() {
-    local fixture_dir fake_bin good_running missing_running output result=0
+    local fixture_dir fake_bin good_running missing_running starting_running output result=0
     fixture_dir=$(mktemp -d)
     fake_bin="$fixture_dir/bin"
     mkdir "$fake_bin"
@@ -125,8 +125,9 @@ printf '%s\n' "${SIFT_CHAT_PREFLIGHT_FREE_MIB:?}"
 EOF
     chmod +x "$fake_bin/curl" "$fake_bin/nvidia-smi"
 
-    good_running='{"running":["nanbeige-sift","nemotron-embed-1b","tei-sparse","nemotron-rerank-1b"]}'
-    missing_running='{"running":["nemotron-embed-1b","tei-sparse","nemotron-rerank-1b"]}'
+    good_running='{"running":[{"model":"nanbeige-sift","state":"ready"},{"model":"nemotron-embed-1b","state":"ready"},{"model":"tei-sparse","state":"ready"},{"model":"nemotron-rerank-1b","state":"ready"}]}'
+    missing_running='{"running":[{"model":"nemotron-embed-1b","state":"ready"},{"model":"tei-sparse","state":"ready"},{"model":"nemotron-rerank-1b","state":"ready"}]}'
+    starting_running='{"running":[{"model":"nanbeige-sift","state":"ready"},{"model":"nemotron-embed-1b","state":"starting"},{"model":"tei-sparse","state":"ready"},{"model":"nemotron-rerank-1b","state":"ready"}]}'
 
     if ! output=$(PATH="$fake_bin:$PATH" \
         SIFT_CHAT_PREFLIGHT_RUNNING_JSON="$good_running" \
@@ -140,6 +141,14 @@ EOF
 
     if PATH="$fake_bin:$PATH" \
         SIFT_CHAT_PREFLIGHT_RUNNING_JSON="$missing_running" \
+        SIFT_CHAT_PREFLIGHT_FREE_MIB=4438 \
+        LSWAP_CFG="$llama_swap_config" \
+        "$stack" preflight sift-chat >/dev/null 2>&1; then
+        result=1
+    fi
+
+    if PATH="$fake_bin:$PATH" \
+        SIFT_CHAT_PREFLIGHT_RUNNING_JSON="$starting_running" \
         SIFT_CHAT_PREFLIGHT_FREE_MIB=4438 \
         LSWAP_CFG="$llama_swap_config" \
         "$stack" preflight sift-chat >/dev/null 2>&1; then

@@ -278,13 +278,21 @@ sift_chat_preflight() {
   running_snapshot=$(curl --fail --silent --show-error --max-time 3 \
     http://127.0.0.1:9292/running) \
     || { echo '  ⚠ llama-swap /running is unavailable' >&2; return 1; }
-  jq -e '(.running | type == "array") and all(.running[]; type == "string")' \
+  jq -e '
+    (.running | type == "array")
+      and all(.running[];
+        type == "object"
+          and (.model | type == "string" and length > 0)
+          and (.state | type == "string" and length > 0))
+  ' \
     >/dev/null <<<"$running_snapshot" \
     || { echo '  ⚠ llama-swap /running returned an invalid payload' >&2; return 1; }
 
   missing_models=()
   for model in "${expected_models[@]}"; do
-    jq -e --arg model "$model" '.running | index($model) != null' \
+    jq -e --arg model "$model" '
+      [.running[] | select(.model == $model and .state == "ready")] | length == 1
+    ' \
       >/dev/null <<<"$running_snapshot" || missing_models+=("$model")
   done
   if ((${#missing_models[@]} != 0)); then

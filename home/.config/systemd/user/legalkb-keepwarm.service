@@ -1,0 +1,27 @@
+[Unit]
+Description=Keep the LegalKB embedder resident for a working session
+Documentation=file:///home/nullsense/Documents/pipeline/legalkb/docs/2026-09-08-latency-profile-and-warmup.md
+After=llama-swap.service
+Wants=llama-swap.service
+
+[Service]
+Type=oneshot
+# One trivial embedding call. The embedding is not the point; the TTL reset is. llama-swap runs
+# nemotron-embed-1b at `ttl: 300`, so any call within five minutes keeps it resident. Measured
+# 2026-09-08: the call costs 0.01-0.06 s warm, while letting it evict costs 98-207 s on the next
+# /search - exactly why an idle agent's first search looks like a hung server.
+#
+# Same mechanism sift already uses (sift-api re-pings every provider every 4 minutes, which is why
+# its own 300 s TTL never fires in practice), and deliberately NOT `ttl: 0`: pinning the embedder is
+# a recorded 2026-08-16 regression, where it beat the 22.9 GB qwen3.8-27b to the VRAM at every
+# startup and left the 27B unstartable twelve times running.
+#
+# Hence opt-in and session-scoped. Start it when doing legal research, stop it when done:
+#   systemctl --user start legalkb-keepwarm.timer
+#   systemctl --user stop  legalkb-keepwarm.timer
+# Left running indefinitely it holds ~3.8 GB of VRAM and recreates that same conflict, so it is
+# deliberately NOT enabled at boot.
+ExecStart=/usr/bin/curl --fail --silent --output /dev/null --max-time 240 http://127.0.0.1:9292/v1/embeddings -H "Content-Type: application/json" -d '{"model":"nemotron-embed-1b","input":["query: keepalive"]}'
+
+[Install]
+WantedBy=default.target

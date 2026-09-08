@@ -1,0 +1,13 @@
+[Unit]
+Description=Ping the LegalKB embedder every 4 minutes while a session needs it
+Documentation=file:///home/nullsense/Documents/pipeline/legalkb/docs/2026-09-08-latency-profile-and-warmup.md
+
+[Timer]
+# 4 minutes, under the model's 300 s TTL with room to spare for a missed tick. Same interval
+# sift-api's provider warm-up uses, for the same reason.
+OnActiveSec=5s
+OnUnitActiveSec=4min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

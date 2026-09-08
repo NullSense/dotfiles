@@ -93,6 +93,46 @@ mcp_servers:
     allowed_tools:
       - firecrawl_search
       - firecrawl_scrape
+  legalkb:
+    description: "LegalKB — local German statute, administrative guidance and court-decision corpus (research)."
+    # Local and offline. This stdio entry is a thin wrapper that talks to a loopback HTTP
+    # server on :8077, which must already be running (`python -m legalkb serve` in the owning
+    # checkout). When that server is down the individual tool calls error; the gateway still
+    # boots, which is why leaving this registered permanently is safe.
+    # Pinned to an absolute script path on purpose: `uv run --script` resolves the PEP 723
+    # header, so the entry does not depend on the gateway's working directory or on the
+    # project venv being activated.
+    allow_all_keys: true
+    access_groups: ["research"]
+    transport: stdio
+    command: uv
+    args: ["run", "--script", "/home/nullsense/Documents/pipeline/legalkb/mcp_server.py"]
+    # legalkb_documents is withheld deliberately, in the same spirit as firecrawl_parse above.
+    # The three tools below read the published legal corpus and take a query or an id. That
+    # fourth one reads the operator's own private document store and applies no per-subject
+    # scoping of its own, so a caller reaching it through this shared gateway can receive
+    # records it never asked for. It stays available to the owning project, which registers
+    # this server directly and knows what it is asking for.
+    allowed_tools:
+      - legalkb_search
+      - legalkb_show
+      - legalkb_navigate
+    # STATUS 2026-09-08 — this entry is CORRECT but this gateway build DENIES it. A tools/list
+    # scoped with `x-mcp-servers: legalkb` returns
+    #   {"legalkb":{"status":"forbidden","http_status":403}}, tools: []
+    # and legalkb is absent from the unscoped listing. What that is NOT, each ruled out by test:
+    #   - not a spawn failure. Driven by hand under this service's exact environment (proxy vars
+    #     included), the server initializes, advertises its tools and answers a real tools/call
+    #     against 127.0.0.1:8077 with HTTP 200.
+    #   - not `access_groups`  — removed, restarted, still 403.
+    #   - not `allowed_tools`  — removed, restarted, still 403.
+    #   - not an unknown name  — an invented server name returns NO outcome entry at all, whereas
+    #     this one gets an explicit denial, so the gateway does read this block.
+    # litellm classifies `forbidden` only from an upstream 401/403 (MCPUpstreamAuthError), a path
+    # that presupposes an HTTP upstream a stdio server does not have — so the denial is coming from
+    # the gateway's own permission layer, most likely because a newly added server has no row in
+    # litellm-db while `store_model_in_db: false` and the master key is unset. Not yet isolated.
+    # Until it is, reach legalkb by registering this same command directly with the MCP client.
   # Personal Hindsight memory is intentionally absent here. Hermes owns it
   # through the native memory provider, so general MCP clients cannot read or
   # retain into the personal bank. Non-personal banks need a separate,

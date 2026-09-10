@@ -5,6 +5,23 @@
       "type": "remote",
       "url": "http://127.0.0.1:4001/mcp/",
       "enabled": true
+    },
+    "repowise": {
+      "type": "local",
+      "command": [
+        "/home/nullsense/.local/share/uv/tools/repowise/bin/repowise",
+        "mcp",
+        "--transport",
+        "stdio"
+      ],
+      "enabled": true
+    },
+    "tinyfish": {
+      "type": "remote",
+      "url": "https://agent.tinyfish.ai/mcp?source=tinyfish_cli&client=opencode&connect_attempt_id=50c29656-3dda-4406-90ee-1adc3a626a80",
+      "headers": {
+        "X-API-Key": "{env:TINYFISH_API_KEY}"
+      }
     }
   },
   "permission": {

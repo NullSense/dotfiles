@@ -503,7 +503,7 @@ models:
     ttl: 300
     name: "Nanbeige4.2-3B (vLLM FP8-dynamic, looped)"
     aliases: [nanbeige, "Nanbeige/Nanbeige4.2-3B", "nanbeige4.2-3b:agent", "nanbeige4.2-3b:think", "nanbeige4.2-3b:fast"]
-    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + ngram spec on vLLM. Blind-judged summ winner vs E4B (see summ-eval-v2 caveat). 154 tok/s freeform. 128k fp8-KV, ~21 GB reserved. Thinking default ON — :fast for summ."
+    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + EAGLE-3 on vLLM. Blind-judged summ winner vs E4B (see summ-eval-v2 caveat). 154 tok/s freeform. 32k fp8-KV at GPU_UTIL 0.45. Thinking default ON — :fast for summ."
     metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "fp8-dynamic (local llmcompressor)", class: "reason·agent·summarize", thinking: "toggle (default on)", best_for: "RAG answer generation, agentic reasoning, high-coverage summarization (:fast); NOT rewrite (E4B faster+more robust)", tags: [reason, agent, summarize, local, nanbeige, vllm, fp8] }
     # Three card-mapped invocation profiles (card scenario table + preserve_thinking recs):
     #   :agent → tools/RAG/multi-turn agent — thinking ON, keep prior-turn reasoning,
@@ -550,14 +550,10 @@ models:
   #    deterministic HTTP 400s as soon as input crossed 16,384 tokens. The generic
   #    Hermes entry remains 32k; this co-resident NVFP4 profile is deliberately 64k.
   #
-  #    ⚠ ONE NANBEIGE AT A TIME. `a` is in no set, so requesting it is SOLO and evicts
-  #    this entry plus the whole retrieval trio; `A` lives in `sift-chat` and does not
-  #    load `a`. So nothing loads both — but a consumer pointed at the WRONG id silently
-  #    destroys the other's working set. Sift must use `sift-agent`/`sift-decompose`
-  #    (this entry); `SIFT_DECOMPOSE_MODEL=nanbeige4.2-3b` had it evicting its own
-  #    retrieval trio every turn until 2026-08-14. Check consumers before adding an id.
-  #    Separate CONTAINER_NAME and PORT, so both can exist; the matrix decides which is
-  #    resident, and they are in different sets so it never tries to hold both.
+  #    This second profile remains disabled. Sift now deliberately uses the raw
+  #    `nanbeige4.2-3b` entry at its 32k/0.45 settings; the matrix's `sift-chat` set
+  #    keeps that model beside n+m+x. Do not restore this profile or its aliases as a
+  #    second route to the same weights without re-measuring both working sets.
   #
   #    WHY 64k AND NOT 32k. Not throughput — max-model-len bounds ONE request, it does
   #    not set concurrency (the KV pool does). It is sift's synthesis prompt: the
@@ -1163,15 +1159,12 @@ matrix:
     # decompose -> dense+sparse retrieval -> cross-encoder rerank -> synthesis, so the
     # chat model and all three retrieval legs must be resident TOGETHER or the turn pays
     # a model load per stage (measured 4m40s and a bare 408 before this set existed).
-    #   A 14.4 + n 3.8 + x 2.5 + m 4.7 ~= 25.4 GB, leaving ~7 GB before the
-    #   desktop and other non-matrix CUDA users. A's vLLM reservation must preserve
-    #   at least 4 GiB of observed idle card headroom; the live 2026-09-01 combined
-    #   provider probe retained 4438 MiB even at peak, so x can allocate transient
-    #   SPLADE logits without starving either TEI or the display server.
-    # `d` is deliberately NOT here: rewrite is 11 GB and would push this over the card.
-    # Sift can use either chat model — `A` for quality, `d` (sift-agent) when dictation
-    # must stay hot — but not both at once.
-  # sift-chat: "A & n & x & m"   # DISABLED 2026-09-07 (needs A)
+    # The raw `a` entry is fixed at MAXLEN=32768/GPU_UTIL=0.45. Its earlier 0.40
+    # configuration measured 13.2 GB; post-start free memory at 0.45 is the rollout
+    # gate. `d` and `t` are deliberately excluded: neither participates in this path,
+    # and `d` alone reserves another ~11 GB.
+    # Subset semantics make this one quartet sufficient for every pair/triple within it.
+    sift-chat: "a & n & m & x"
     # Documents-vault OCR cascade (2026-08-11, migrated GGUF→vLLM docker). Before the set existed
     # the three OCR VLMs ran SOLO and evicted the previous one — engines.py walks primary ->
     # fallback -> fallback WITHIN A SINGLE DOCUMENT whenever numeric agreement is low, so a scanned
@@ -1203,22 +1196,19 @@ matrix:
     #   than desired GPU memory utilization (0.66, 20.72 GiB)
     #
     # MEASURED, not estimated:
-    #   nanbeige alone, as llama-swap actually launches it
-    #   (cmd pins MAXLEN=131072 GPU_UTIL=0.66 — those OVERRIDE the wrapper defaults,
-    #    so tuning vllm-nanbeige's defaults does nothing for this path)   23.7 GB
+    #   old nanbeige 128k configuration
+    #   (cmd then pinned MAXLEN=131072 GPU_UTIL=0.66)                     23.7 GB
     #   retrieval trio (n + m + x)                                        13.2 GB
     #   -------------------------------------------------------------------------
     #   together                                                          36.9 GB  > 32.6
     # The old comment's "a 15" was wrong by ~9 GB.
     #
-    # nanbeige is therefore in NO set: it runs SOLO, evicting everything, which is the
-    # correct and honest behaviour for a model that wants 2/3 of the card. If you want
-    # it co-resident with retrieval, drop its context — at MAXLEN=32768 GPU_UTIL=0.40 it
-    # measures 13.2 GB and 13.2 + 13.2 = 26.4 GB fits with ~6 GB spare. That is a
-    # capability trade: 128k exists because Hermes sends max_tokens ~= context_length,
-    # and a 64k serve left no input room (see the cmd's own comment).
+    # RESTORED 2026-09-11 as `sift-chat` above after the raw entry was reduced to
+    # MAXLEN=32768/GPU_UTIL=0.45. The old 128k/0.66 failure remains the negative
+    # control: raising that entry's context or reservation requires removing this set
+    # until the full quartet is measured again.
     #
-    # SLEEP MODE is the better answer here and is already enabled on the wrapper.
+    # Sleep mode remains enabled on the wrapper for evictions outside this working set.
     # Measured 2026-08-06: POST /sleep?level=1 on nanbeige released 22.7 GB (29.2 -> 6.4
     # GB total; a sleeping nanbeige holds only ~0.9 GB of context+graphs) and /wake_up
     # restored it in 315 ms, serving correctly afterwards. Driving that from llama-swap

@@ -64,6 +64,43 @@ echo "X-T3 detected on port $PORT" >&2
 # All gphoto2 calls below go through this so they cannot disagree about target.
 gp() { gphoto2 --port "$PORT" "$@"; }
 
+# Ask the camera WHY it refused, but only once we already know we failed — this
+# costs a PTP session, so it must never run on the happy path.
+#
+# Priority Mode (PTP 0xd207) is the arbitration that actually gates liveview.
+# While it reads "Camera" the body keeps control and answers EVERY capture and
+# EVERY control write with "PTP Device Busy", while read-only config reads keep
+# working perfectly. That asymmetry — reads fine, writes and capture refused —
+# is the signature, and it is NOT clearable over USB: setting prioritymode is
+# itself refused for the same reason (chicken-and-egg), and neither
+# `gphoto2 --reset` nor a re-enumeration budges it. Menu-side fix only.
+#
+# Diagnosed 2026-09-10, after a 540-restart storm in which the logs blamed
+# "camera busy or asleep" and the investigation chased a 'Self-timer' label that
+# was only ever a gphoto2 artifact (capturedelay was 0.000s throughout).
+diagnose_no_frames() {
+  local prio
+  prio=$(gp --get-config /main/settings/prioritymode 2>/dev/null \
+           | sed -n 's/^Current: //p') || prio=""
+  case "$prio" in
+    Camera)
+      echo "CAUSE: camera Priority Mode = 'Camera' — the body is holding control," >&2
+      echo "so it refuses every PTP capture. This CANNOT be cleared over USB." >&2
+      echo "FIX (on the camera): SET UP -> CONNECTION SETTING -> PC CONNECTION MODE" >&2
+      echo "     -> USB TETHER SHOOTING FIXED, then power-cycle the body." >&2
+      ;;
+    USB)
+      echo "note: Priority Mode = 'USB' (correct), so the refusal is elsewhere —" >&2
+      echo "camera asleep, sitting in playback/menu, or a wedged PTP session." >&2
+      ;;
+    *)
+      echo "note: could not read Priority Mode — PTP is unresponsive, so the camera" >&2
+      echo "is wedged or asleep. 'gphoto2 --reset' clears a PTP Timeout wedge;" >&2
+      echo "a Device Busy wedge needs a physical power cycle." >&2
+      ;;
+  esac
+}
+
 # Free the camera from gvfs if it grabbed it.
 pkill -f gvfs-gphoto2 2>/dev/null || true
 pkill -f gvfsd-gphoto2 2>/dev/null || true
@@ -233,7 +270,7 @@ while kill -0 "$GP_PID" 2>/dev/null && kill -0 "$FF_PID" 2>/dev/null; do
     elif (( now - started > STARTUP_SECS )); then
       echo "X-T3 produced no frames in ${STARTUP_SECS}s on $PORT (camera busy or asleep)." >&2
       echo "The v4l2 loopback is fine — the camera is not producing liveview." >&2
-      echo "If this repeats, power-cycle the camera and leave it in shooting mode." >&2
+      diagnose_no_frames
       exit 1
     fi
     continue
@@ -259,7 +296,7 @@ if (( first_frame == 0 )); then
   echo "X-T3 produced no frames on $PORT — camera is busy or asleep." >&2
   echo "The v4l2 loopback is fine; any ffmpeg complaint about $DEVICE above is" >&2
   echo "a downstream symptom of the empty stream, not the cause." >&2
-  echo "If this repeats, power-cycle the camera and leave it in shooting mode." >&2
+  diagnose_no_frames
 elif ! kill -0 "$GP_PID" 2>/dev/null; then
   echo "gphoto2 exited after streaming (camera gone or PTP session dropped)." >&2
 else

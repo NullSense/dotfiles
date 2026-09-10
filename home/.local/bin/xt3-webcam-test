@@ -121,11 +121,20 @@ case "$args" in
     # "busy_movie": camera accepts the session but never emits a frame — the
     # real PTP-Device-Busy shape, and the case that used to surface as
     # "/dev/video10: Invalid argument".
-    if [[ "${STUB_MODE:-}" == "busy_movie" ]]; then sleep 60; exit 0; fi
+    if [[ "${STUB_MODE:-}" == busy* ]]; then sleep 60; exit 0; fi
     # Otherwise emit a real MJPEG stream so ffmpeg can actually decode frames.
     exec ffmpeg -hide_banner -loglevel quiet \
       -f lavfi -i "testsrc=size=1024x768:rate=25" \
       -f mjpeg -q:v 8 -
+    ;;
+  *--get-config*prioritymode*)
+    # Priority Mode gates liveview: "Camera" = body holds control and refuses
+    # every capture; "USB" = correctly handed over to the host.
+    case "${STUB_MODE:-}" in
+      busy_usbprio) printf 'Label: Priority Mode\nCurrent: USB\nEND\n' ;;
+      busy_noprio)  exit 1 ;;
+      *)            printf 'Label: Priority Mode\nCurrent: Camera\nEND\n' ;;
+    esac
     ;;
   *--get-config*capturedelay*)
     if [[ "${STUB_MODE:-}" == "getconfig_fails" ]]; then exit 1; fi
@@ -190,8 +199,22 @@ XT3_DIAG=1 check_run 'capturedelay probe failure is survived, not fatal' \
 XT3_DIAG=1 check_run 'capturedelay probe failure still reaches streaming' \
   getconfig_fails 1 'streaming:'
 
+# A no-frame failure must name the REAL cause. Priority Mode = "Camera" means
+# the body kept control and is refusing every PTP capture; that is not fixable
+# over USB and cost a 540-restart storm on 2026-09-10 to identify, because the
+# logs only ever said "camera busy or asleep".
+check_run 'no-frame failure names the Priority Mode cause' \
+  busy_movie 1 "Priority Mode = 'Camera'"
+check_run 'Priority Mode cause points at the tether menu fix' \
+  busy_movie 1 'USB TETHER SHOOTING FIXED'
+# ...and must NOT cry wolf about the menu when priority is already correct.
+check_run 'correct Priority Mode is not misreported as the cause' \
+  busy_usbprio 1 "Priority Mode = 'USB' (correct)"
+check_run 'unreadable Priority Mode reported as wedged, not as a menu fix' \
+  busy_noprio 1 'could not read Priority Mode'
+
 # No failure path may ever blame the loopback - that was the original red herring.
-for mode in busy_movie absent detect_fails; do
+for mode in busy_movie busy_usbprio busy_noprio absent detect_fails; do
   result=$(run_script "$mode")
   if printf '%s' "${result%__RC__*}" | grep -qi 'video10'; then
     bad "mode=$mode never blames /dev/video10" "output mentions video10"

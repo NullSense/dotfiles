@@ -20,6 +20,23 @@ mcp_servers:
     transport: http
     url: "https://mcp.exa.ai/mcp"
     access_groups: ["research"]
+  parallel:
+    description: "Parallel Search — AI-powered web search and token-efficient markdown extraction (research)."
+    # Anonymous free tier, so NO credential belongs in this public repository.
+    # The `/mcp` endpoint is free at lower rate limits; `/mcp-oauth` requires a
+    # Parallel account. The `parallel-cli` on this box is already OAuth-authenticated
+    # against the Tensil org and is the higher-limit path — this entry is the
+    # gateway-reachable option, not a replacement for the CLI.
+    # Search settings (mode, domains, locale) are pinned as URL query parameters;
+    # left unset here so the server picks `fast` with managed defaults, which is
+    # what the anonymous tier serves regardless.
+    allow_all_keys: true
+    transport: http
+    url: "https://search.parallel.ai/mcp"
+    access_groups: ["research"]
+    allowed_tools:
+      - web_search
+      - web_fetch
   context7:
     description: "Context7 — current library and framework documentation (dev, research)."
     allow_all_keys: true

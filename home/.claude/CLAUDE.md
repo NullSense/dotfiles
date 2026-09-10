@@ -56,11 +56,22 @@ Fix a bug → write a regression test immediately (TDD preferred).
 - **Known libraries, SDKs, CLIs, and developer tools → Context7 MCP first.** Resolve the library ID,
   verify it against the project-pinned version, then fetch a narrow topic (1–2k tokens; 5k+ for
   overviews). Reuse resolved IDs in-session.
-- **Whenever a web search is needed → Exa first.** Use regular web search only when Exa is
-  unavailable or still has no relevant result after a sensible reformulation. Fetching an already
-  known authoritative URL directly is not a web search.
+- **Whenever a web search is needed → `parallel-cli` or Exa first.** Two independent providers.
+  Reach for either, and switch to the other rather than falling through to plain WebSearch.
+  Fetching an already known authoritative URL directly is not a web search.
+  - **`parallel-cli`** (Parallel, `~/.local/bin/parallel-cli`, OAuth-authenticated to the Tensil
+    org — no key to manage). `parallel-cli search "<objective>" --mode fast --max-results N` for
+    discovery; `--mode advanced` when quality matters more than the ~1s latency;
+    `parallel-cli fetch <url>` returns token-efficient markdown. It also has `research`
+    (long-running; poll with `/status <run_id>`), `findall`, `enrich`, and `monitor` — reach past
+    `search` when the question really is a multi-entity or watch-over-time question.
+    Also reachable through the LiteLLM MCP gateway as `mcp__litellm__parallel-web_search` /
+    `-web_fetch`, which uses the anonymous free tier and so has lower rate limits than the CLI.
+  - **Exa** via `mcp__litellm__exa-web_search_exa` / `-web_fetch_exa`. Exa is prepaid: a
+    `402 exceeded your credits limit` is a top-up, not an outage — use `parallel-cli` meanwhile.
 - **Services/products** (apps, SaaS, hardware, OS features) → use current official documentation as
-  evidence; use Exa to discover the right official page and then current real-world fixes/issues.
+  evidence; use a search provider to discover the right official page, then current real-world
+  fixes/issues.
 - **Libraries/models** → after Context7, use official versioned docs, GitHub, and Hugging Face model
   cards/issues as appropriate. Never rely on training memory for a current claim.
 
@@ -73,51 +84,45 @@ Fix a bug → write a regression test immediately (TDD preferred).
 - Codex native memories (`~/.codex/memories/`) and Claude-mem are generated state. Let their owning
   agent manage them; do not hand-edit their databases or generated files.
 
-@RTK.md
 
 
 <!-- headroom:rtk-instructions -->
-# RTK (Rust Token Killer) - Token-Optimized Commands
+# Shell output distillation — repowise (RTK parked 2026-08-22)
 
-When running shell commands, **always prefix with `rtk`**. This reduces context
-usage by 60-90% with zero behavior change. If rtk has no filter for a command,
-it passes through unchanged — so it is always safe to use.
+**Do not prefix shell commands with `rtk`.** RTK is installed and still works, but the
+blanket-prefix mandate is suspended while `repowise distill` is on trial as the single
+distillation layer. Two distillers instructing at once is how tool output got corrupted before.
 
-## Key Commands
-```bash
-# Git (59-80% savings)
-rtk git status          rtk git diff            rtk git log
+Use `repowise distill <cmd>` (see Output Distillation below). Run a command bare when you
+need exact, unfiltered output — debugging, parsing, anything where a dropped line changes
+the answer.
 
-# Files & Search (60-75% savings)
-rtk ls <path>           rtk read <file>         rtk grep <pattern>
-rtk find <pattern>      rtk diff <file>
-
-# Test (90-99% savings) — shows failures only
-rtk pytest tests/       rtk cargo test          rtk test <cmd>
-
-# Build & Lint (80-90% savings) — shows errors only
-rtk tsc                 rtk lint                rtk cargo build
-rtk prettier --check    rtk mypy                rtk ruff check
-
-# Analysis (70-90% savings)
-rtk err <cmd>           rtk log <file>          rtk json <file>
-rtk summary <cmd>       rtk deps                rtk env
-
-# GitHub (26-87% savings)
-rtk gh pr view <n>      rtk gh run list         rtk gh issue list
-
-# Infrastructure (85% savings)
-rtk docker ps           rtk kubectl get         rtk docker logs <c>
-
-# Package managers (70-90% savings)
-rtk pip list            rtk pnpm install        rtk npm run <script>
-```
-
-## Rules
-- In command chains, prefix each segment: `rtk git add . && rtk git commit -m "msg"`
-- For debugging, use raw command without rtk prefix
-- `rtk proxy <cmd>` runs command without filtering but tracks usage
+To revert: restore the `rtk hook claude` PreToolUse entry in `settings.json`, then
+`rtk init` to rewrite this block.
 <!-- /headroom:rtk-instructions -->
-# graphify
-- **graphify** (`~/.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`
-When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+# Codebase navigation
+- **repowise** is the default for codebase questions in any indexed repo: `get_context`,
+  `search_codebase`, `get_symbol`, `get_health`, `get_change_risk` via MCP, or the `repowise` CLI.
+  Ask with domain vocabulary, not paraphrase — retrieval is hybrid and the full-text leg wins on
+  literal tokens. Its findings are candidates, not verdicts.
+- **Never use `get_answer` / `get_why` / `repowise ask` / `repowise why`.** They are the only
+  repowise surfaces that spend an LLM call, and the model doing that synthesis is a local one whose
+  output quality does not justify it. The *retrieval* underneath is good; the paraphrase written
+  over it is not, and a fluent wrong summary of correct hits costs more than it saves. Use the
+  retrieval-only tools and synthesize yourself — you see the same hits `get_answer` would.
+- **graphify** (`~/.claude/skills/graphify/SKILL.md`, trigger `/graphify`) is no longer the default
+  and should not be reached for on a repo repowise has indexed. It stays installed for two reasons:
+  the `/graphify` command when you explicitly ask for it, and because some projects consume
+  `graphify-out/graph.json` programmatically (sift's `sift-ingest-path` skill walks its node/edge
+  schema). Do not remove `graphify-out/` or the skill to "finish" a migration.
+- **code-intel** (`/code-intel`) still fans out to graphify as one of its three legs. Treat its
+  graphify leg as supplementary, not authoritative.
+
+<!-- REPOWISE_DISTILL:START — Do not edit below this line. Auto-generated by Repowise. -->
+### Output Distillation
+
+- Prefer `repowise distill <cmd>` for noisy commands — test runs, builds, `git status`/`log`/`diff`, searches, file listings. It runs the command unchanged (exit code preserved) and prints a compact, errors-first rendering; every error line survives.
+- Output may contain a marker like `[repowise#a1b2c3d4e5f6: 230 lines omitted (~6.1k tokens); restore: repowise expand a1b2c3d4e5f6]`. The omitted content is fully preserved — run `repowise expand <ref>` to retrieve it, or `repowise expand <ref> -q <regex>` for just the matching lines.
+- Never re-run a command to see omitted output; expand the marker instead.
+- For structure-level questions about a large indexed file ("what's in here", "which function handles X"), `get_context(["path"], include=["skeleton"])` returns the file with bodies elided — every signature plus the bodies of the most central symbols — at a fraction of the cost of a full Read.
+<!-- REPOWISE_DISTILL:END -->

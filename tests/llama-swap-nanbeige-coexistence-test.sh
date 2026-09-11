@@ -33,11 +33,12 @@ raw_nanbeige_coexistence_contract_is_valid() {
           and (.matrix.vars.m == "nemotron-rerank-1b")
           and (.matrix.vars.x == "tei-sparse")
           and (.matrix.sets."sift-chat" == "a & n & m & x")
+          and (((.hooks.on_startup.preload // []) | length) == 0)
     ' "$config" >/dev/null 2>&1
 }
 
 raw_nanbeige_coexistence_contract_is_valid "$llama_swap_config" \
-    || fail 'raw Nanbeige and the Sift retrieval trio lack their exact co-residency set'
+    || fail 'raw Nanbeige coexistence or no-startup-preload contract is invalid'
 
 fixture_dir=$(mktemp -d)
 trap 'rm -r -- "$fixture_dir"' EXIT
@@ -46,6 +47,12 @@ fixture="$fixture_dir/llama-swap.yaml"
 yq -y '.matrix.sets."sift-chat" = "a & n & m"' "$llama_swap_config" >"$fixture"
 if raw_nanbeige_coexistence_contract_is_valid "$fixture"; then
     fail 'co-residency contract accepted a set without sparse retrieval'
+fi
+
+yq -y '.hooks.on_startup.preload = ["qwen3.8-27b-nvfp4-long"]' \
+    "$llama_swap_config" >"$fixture"
+if raw_nanbeige_coexistence_contract_is_valid "$fixture"; then
+    fail 'coexistence contract accepted a mandatory startup model preload'
 fi
 
 printf 'PASS: raw Nanbeige and Sift retrieval co-residency contract\n'

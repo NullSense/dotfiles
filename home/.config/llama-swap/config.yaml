@@ -58,13 +58,6 @@ macros:
   vllm_nanbeige_port: 8010
   vllm_nanbeige_sift_port: 8011
 
-hooks:
-  on_startup:
-    # Keep only the primary interactive model resident. Sift retrieval models load
-    # on demand and are mutually exclusive with this two-worker 27B allocation.
-    preload:
-      - qwen3.8-27b-nvfp4-long
-
 models:
   # ── embeddings: sift + oracle. On-demand, evicts when idle (was ttl:0 always-on). ──
   octen-embedding-4b:
@@ -189,8 +182,8 @@ models:
     # sessions, so every return to work paid a cold load: measured 2026-08-03, an
     # idle-then-query cycle took 40-120s cold vs 42s warm and turned sift's own
     # ~1ms cache-warm search into ~10s or a 408 at the router's 30s ceiling.
-    # Pinning removes the timer from the equation entirely. This entry is also in
-    # hooks.on_startup.preload, so it is warm from boot rather than from first use.
+    # Pinning removes the timer from the equation entirely. The Sift launcher owns
+    # its bounded first-use warm-up; llama-swap does not preload models at startup.
     # Cheap to hold: ~2.5 GB peak, and the peak is MLM-logits activation, not weights.
     ttl: 0
     #
@@ -851,6 +844,8 @@ models:
   # Prefix caching can improve identical-prefix forks but is not capacity credit.
   # Eager mode deliberately trades some peak throughput to avoid the CUDA graph
   # reservation and preserve the long-context pool.
+  # This entry remains available on demand. It is deliberately not a startup preload:
+  # an unrelated 27B launch must not consume RAM/VRAM while another stack is starting.
   qwen3.8-27b-nvfp4-long:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/vllm-qwen38
     cmdStop: docker stop -t 20 vllm-qwen38-long

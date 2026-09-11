@@ -118,6 +118,33 @@ mcp_servers:
     allowed_tools:
       - firecrawl_search
       - firecrawl_scrape
+  alphaxiv:
+    description: "alphaXiv — arXiv research-paper search, full-text read and PDF analysis (research)."
+    # Endpoint and auth verified 2026-09-11 against https://www.alphaxiv.org/docs/mcp and by
+    # probing the endpoint directly: an unauthenticated initialize returns
+    #   401 + www-authenticate: Bearer realm="mcp", authorization_uri="https://api.alphaxiv.org/auth"
+    # so this server is NOT keyless, unlike every other hosted entry above. It advertises
+    # OAuth 2.1 for interactive clients; a headless service like this gateway must use the
+    # API-key path instead ("Settings > API Keys" on alphaxiv.org, sent as Authorization: Bearer).
+    #
+    # The key therefore does NOT belong in this file — this repository is public. It is injected
+    # by the Agent Vault transparent proxy that `~/bin/llm-servers/litellm-mcp` already exports
+    # HTTPS_PROXY for, exactly as the comment there describes ("LiteLLM itself owns the hosted MCP
+    # connections. Route those through Agent Vault so credentials are injected without appearing
+    # in this config"). Required one-time setup, run by a human:
+    #   agent-vault vault service add --vault default --name alphaxiv \
+    #     --host api.alphaxiv.org --auth-type bearer --token-key ALPHAXIV_API_KEY
+    #   # then store the key itself in the vault's credential store under ALPHAXIV_API_KEY
+    # Until that exists every tool call returns upstream 401; the gateway still boots, so leaving
+    # this registered is safe (same tolerance as the legalkb entry below).
+    #
+    # Note the direct probe also returns Cloudflare 1010 for non-browser user agents — python
+    # urllib is banned by browser signature while curl with a normal UA is not. If tool calls fail
+    # with 403/error_code 1010 rather than 401, that is the UA filter, not the credential.
+    allow_all_keys: true
+    transport: http
+    url: "https://api.alphaxiv.org/mcp/v1"
+    access_groups: ["research"]
   legalkb:
     description: "LegalKB — local German statute, administrative guidance and court-decision corpus (research)."
     # Local and offline. This stdio entry is a thin wrapper that talks to a loopback HTTP

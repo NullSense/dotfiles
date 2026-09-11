@@ -1,0 +1,16 @@
+[Unit]
+Description=Password-protected Sift admin sharing proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=%h/.local/lib/caddy/2.11.4/caddy run --config %h/.local/state/sift-admin-share/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

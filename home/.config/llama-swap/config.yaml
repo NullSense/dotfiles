@@ -420,10 +420,9 @@ models:
   #    (looped arch = 2× compute + 2× KV per token). Kept for RAG answer-gen / agentic
   #    experiments where its reasoning (GPQA 87.4, SWE-bench 63.6 @3B, thinking mode) wins.
   #    Arch is NOT upstream vLLM yet (PR #49433) — wrapper injects the vendored plugin
-  #    (~/bin/llm-servers/vllm-plugins/nanbeige). Wrapper defaults: 64k ctx with fp8 KV
-  #    (card wants 64k new tokens agentic / 128k reasoning; fp8 halves the looped arch's
-  #    doubled KV), GPU_UTIL 0.48 (~15 GB: 7.9 weights + 5.5 KV@64k + graphs). 128k solo:
-  #    MAXLEN=131072 GPU_UTIL=0.66. Sampling ships in generation_config (T=0.6 top_p .95
+  #    (~/bin/llm-servers/vllm-plugins/nanbeige). The card wants 64k new tokens for
+  #    agentic work / 128k for reasoning; this co-resident entry serves 64k with a
+  #    fixed 6 GiB fp8 KV cache. Sampling ships in generation_config (T=0.6 top_p .95
   #    top_k 20); the :agent alias forces the card's agentic T=1.0.
   nanbeige4.2-3b:
     # FP8-dynamic quant is the DEFAULT since 2026-07-22 (llmcompressor local checkpoint):
@@ -441,9 +440,9 @@ models:
     # Measured exception (2026-07-23 real-data sweep): LONG-document summarize
     # favors ngram (231 vs 160 output tok/s) — for bulk long-doc jobs run the
     # ngram config; eagle3 stays default for agent/RAG/chat/code traffic.
-    # MAXLEN=131072 (128k) since 2026-07-26: Hermes requests max_tokens≈context_length,
-    # so a 64k serve left 0 input room (max_tokens 65536 == full ctx). At 128k a 65536
-    # hermes context_length leaves ~64k for input. GPU_UTIL 0.66 ≈ 21 GB reserved.
+    # The old Hermes-only profile used 128k so a 65,536-token completion still left
+    # input room. Sift's co-resident contract instead uses a 64k total request window
+    # with a 16,384-token completion ceiling.
     # ── SLEEP-MODE SWAPPING (2026-08-06) ──────────────────────────────────────────
     # cmd/cmdStop go through `vllm-wrapper` (llama-swap v243+, PR #941; built from
     # cmd/vllm-wrapper — the Arch package ships only the main binary). Instead of
@@ -481,22 +480,25 @@ models:
     #    So waking is effectively free; the 41 s is llama-swap tearing down the THREE
     #    retrieval models to make room (docker stop x3 + health-poll granularity).
     #    Sleep cannot fix that half. If you want the switch to be genuinely instant,
-    #    the answer is to stop evicting at all — run nanbeige at MAXLEN=32768
-    #    GPU_UTIL=0.40 (13.2 GB measured), which co-resides with the 13.2 GB trio
-    #    inside the card with ~6 GB spare. 128k is what forces the eviction.
+    #    the answer is to stop evicting at all — run nanbeige at MAXLEN=65536.
+    #    The first 64k startup at GPU_UTIL=0.45 had 4.75 GiB of KV available but
+    #    needed 5.51 GiB (estimated maximum length 56,432). A retry at 0.49 allocated
+    #    10.79 GiB of KV and served the real grounded turn, but left only 334 MiB free.
+    #    The explicit 6 GiB cache preserves the measured 64k requirement with ~0.49 GiB
+    #    slack while reclaiming ~4.79 GiB; it overrides gpu-memory-utilization.
     cmd: >
       ${vllm_wrapper} serve
       --vllm-url http://127.0.0.1:${vllm_nanbeige_port}
       --listen :${PORT}
       --wait-timeout 10m
-       --start-cmd "env PORT=${vllm_nanbeige_port} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic MAXLEN=32768 GPU_UTIL=0.45 SPEC=eagle3 SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3 SPEC_TOKENS=3 ATTN=TRITON_ATTN /home/nullsense/bin/llm-servers/vllm-nanbeige"
+       --start-cmd "env PORT=${vllm_nanbeige_port} MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-FP8-Dynamic MAXLEN=65536 SPEC=eagle3 SPEC_MODEL=/home/nullsense/.lmstudio/models/local/Nanbeige4.2-3B-EAGLE3 SPEC_TOKENS=3 ATTN=TRITON_ATTN /home/nullsense/bin/llm-servers/vllm-nanbeige --kv-cache-memory-bytes 6G"
     cmdStop: ${vllm_wrapper} sleep --vllm-url http://127.0.0.1:${vllm_nanbeige_port}
     proxy: http://127.0.0.1:${PORT}
     useModelName: nanbeige4.2-3b
     ttl: 300
     name: "Nanbeige4.2-3B (vLLM FP8-dynamic, looped)"
     aliases: [nanbeige, "Nanbeige/Nanbeige4.2-3B", "nanbeige4.2-3b:agent", "nanbeige4.2-3b:think", "nanbeige4.2-3b:fast"]
-    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + EAGLE-3 on vLLM. Blind-judged summ winner vs E4B (see summ-eval-v2 caveat). 154 tok/s freeform. 32k fp8-KV at GPU_UTIL 0.45. Thinking default ON — :fast for summ."
+    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + EAGLE-3 on vLLM. Blind-judged summ winner vs E4B (see summ-eval-v2 caveat). 154 tok/s freeform. 64k max request with fixed 6 GiB fp8 KV. Thinking default ON — :fast for summ."
     metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "fp8-dynamic (local llmcompressor)", class: "reason·agent·summarize", thinking: "toggle (default on)", best_for: "RAG answer generation, agentic reasoning, high-coverage summarization (:fast); NOT rewrite (E4B faster+more robust)", tags: [reason, agent, summarize, local, nanbeige, vllm, fp8] }
     # Three card-mapped invocation profiles (card scenario table + preserve_thinking recs):
     #   :agent → tools/RAG/multi-turn agent — thinking ON, keep prior-turn reasoning,
@@ -528,7 +530,7 @@ models:
   # ── nanbeige-sift: a SECOND quant of the same model, sized to CO-RESIDE with retrieval ─
   #    A second entry rather than one shared entry, because the two consumers want
   #    incompatible things and only one of them can win per process:
-  #      Hermes  → FP8-Dynamic weights at GPU_UTIL 0.45 (the entry above), the
+  #      Hermes  → FP8-Dynamic weights with a fixed 6 GiB KV cache (the entry above),
   #                higher-precision quant, wired to the sleep/wake daemon so an
   #                agentic run swaps back in at 0.34s instead of an 82s cold start.
   #      Sift    → co-residency, because ONE grounded turn needs dense + sparse + rerank
@@ -541,10 +543,10 @@ models:
   #    budget, and 16,384-token completion ceiling require a 64k total server
   #    window. The prior MAXLEN=32768 contradicted those caller budgets and caused
   #    deterministic HTTP 400s as soon as input crossed 16,384 tokens. The generic
-  #    Hermes entry remains 32k; this co-resident NVFP4 profile is deliberately 64k.
+  #    raw entry now uses the same required 64k request window.
   #
   #    This second profile remains disabled. Sift now deliberately uses the raw
-  #    `nanbeige4.2-3b` entry at its 32k/0.45 settings; the matrix's `sift-chat` set
+  #    `nanbeige4.2-3b` entry at its 64k/fixed-6-GiB settings; the matrix's `sift-chat` set
   #    keeps that model beside n+m+x. Do not restore this profile or its aliases as a
   #    second route to the same weights without re-measuring both working sets.
   #
@@ -1044,7 +1046,7 @@ matrix:
     z: zerank-2                # Infinity fp16 (~8 GB) — heavy
     n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
     m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
-    a: nanbeige4.2-3b          # vLLM looped reasoner, 32k fp8-KV — 13.2 GB MEASURED (see budget)
+    a: nanbeige4.2-3b          # vLLM looped reasoner, 64k max request, fixed 6 GiB KV
   # A: nanbeige-sift           # NVFP4 quant @32k + eagle3 — sized to co-reside with n+m+x   # DISABLED 2026-09-07
     x: tei-sparse              # OpenSearch neural-sparse v2-distill 67M via TEI, splade POOLING
                                # (~2.5 GB peak: MLM logits, not weights)
@@ -1079,9 +1081,9 @@ matrix:
   # model rather than trusting the estimate — llama-swap does NOT measure VRAM and will
   # happily schedule a combination that cannot start.
   #
-  # nanbeige at its old 64k context does NOT fit next to the trio (20.1 + 12.3 = 32.4,
-  # i.e. the whole card). Raising MAXLEN back to 65536 is a deliberate choice to evict
-  # the retrieval models for an agentic run — see the header of vllm-nanbeige.
+  # The old automatic-GPU-utilization 64k profile did NOT fit next to the trio: it held
+  # 20.1 GB and brought the total to 32.4 GB. The current fixed 6 GiB KV cache removes
+  # that over-allocation; the live quartet remains the required validation boundary.
   sets:
     # 27B uncensored @128k alongside LIGHT retrieval only: Q 22.9 + x 2.5 + t 0.4
     # = 25.8 GB, + dictation 2.2 = 28.0, ~3.8 GB spare. The dense embed (n 3.8) and
@@ -1154,9 +1156,12 @@ matrix:
     # decompose -> dense+sparse retrieval -> cross-encoder rerank -> synthesis, so the
     # chat model and all three retrieval legs must be resident TOGETHER or the turn pays
     # a model load per stage (measured 4m40s and a bare 408 before this set existed).
-    # The raw `a` entry is fixed at MAXLEN=32768/GPU_UTIL=0.45. Its earlier 0.40
-    # configuration measured 13.2 GB; post-start free memory at 0.45 is the rollout
-    # gate. `d` and `t` are deliberately excluded: neither participates in this path,
+    # The raw `a` entry is fixed at MAXLEN=65536 with 6 GiB of KV. Its first 64k
+    # startup exposed the real minimum: 4.75 GiB available versus 5.51 GiB required,
+    # with an estimated maximum length of 56,432. Automatic sizing at 0.49 then
+    # allocated 10.79 GiB and left only 334 MiB free after the grounded turn, so the
+    # cache is bounded directly. `d` and `t` are deliberately excluded: neither
+    # participates in this path,
     # and `d` alone reserves another ~11 GB.
     # Subset semantics make this one quartet sufficient for every pair/triple within it.
     sift-chat: "a & n & m & x"
@@ -1198,10 +1203,10 @@ matrix:
     #   together                                                          36.9 GB  > 32.6
     # The old comment's "a 15" was wrong by ~9 GB.
     #
-    # RESTORED 2026-09-11 as `sift-chat` above after the raw entry was reduced to
-    # MAXLEN=32768/GPU_UTIL=0.45. The old 128k/0.66 failure remains the negative
-    # control: raising that entry's context or reservation requires removing this set
-    # until the full quartet is measured again.
+    # RESTORED 2026-09-11 as `sift-chat` above with the raw entry at
+    # MAXLEN=65536 and a fixed 6 GiB KV cache. The old 128k/0.66 failure remains the
+    # negative control: raising that entry beyond 64k or increasing its cache requires
+    # removing this set until the full quartet is measured again.
     #
     # Sleep mode remains enabled on the wrapper for evictions outside this working set.
     # Measured 2026-08-06: POST /sleep?level=1 on nanbeige released 22.7 GB (29.2 -> 6.4

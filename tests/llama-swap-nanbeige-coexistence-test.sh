@@ -16,8 +16,12 @@ raw_nanbeige_coexistence_contract_is_valid() {
     # shellcheck disable=SC2016
     yq -e '
         (.models."nanbeige4.2-3b".cmd // "") as $command
-        | ([ $command | scan("MAXLEN=[^[:space:]\\\"]+") ] == ["MAXLEN=32768"])
-          and ([ $command | scan("GPU_UTIL=[^[:space:]\\\"]+") ] == ["GPU_UTIL=0.45"])
+        | ([ $command | scan("MAXLEN=[^[:space:]\\\"]+") ] == ["MAXLEN=65536"])
+          and ([ $command | scan("GPU_UTIL=[^[:space:]\\\"]+") ] == [])
+          and ([
+              $command
+              | scan("--kv-cache-memory-bytes[[:space:]]+[^[:space:]\\\"]+")
+          ] == ["--kv-cache-memory-bytes 6G"])
           and (.models | has("nanbeige-sift") | not)
           and ([
               .models[]
@@ -43,6 +47,14 @@ raw_nanbeige_coexistence_contract_is_valid "$llama_swap_config" \
 fixture_dir=$(mktemp -d)
 trap 'rm -r -- "$fixture_dir"' EXIT
 fixture="$fixture_dir/llama-swap.yaml"
+
+yq -y '
+    .models."nanbeige4.2-3b".cmd
+        |= sub("--kv-cache-memory-bytes 6G"; "--kv-cache-memory-bytes 5G")
+' "$llama_swap_config" >"$fixture"
+if raw_nanbeige_coexistence_contract_is_valid "$fixture"; then
+    fail 'co-residency contract accepted an undersized Nanbeige KV cache'
+fi
 
 yq -y '.matrix.sets."sift-chat" = "a & n & m"' "$llama_swap_config" >"$fixture"
 if raw_nanbeige_coexistence_contract_is_valid "$fixture"; then

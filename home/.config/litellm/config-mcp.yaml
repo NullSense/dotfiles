@@ -43,6 +43,14 @@ mcp_servers:
     transport: http
     url: "https://mcp.context7.com/mcp"
     access_groups: ["dev", "research"]
+  sift:
+    description: "Sift — local tenant-scoped semantic retrieval and source discovery (dev)."
+    # Local auth-off development endpoint. The gateway remains loopback-only;
+    # callers use the gateway rather than connecting to Sift directly.
+    allow_all_keys: true
+    transport: http
+    url: "http://127.0.0.1:8788/mcp"
+    access_groups: ["dev"]
   wikipedia:
     description: "Wikipedia — article and revision search/read access through MediaWiki (research)."
     # Wikipedia and Wikidata are complementary: this server reads encyclopedia

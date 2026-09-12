@@ -1,0 +1,400 @@
+#!/usr/bin/env bash
+# vllm-update — keep the central vLLM image pins (_vllm-image.sh) on the latest
+# stable release, SAFELY: pull → smoke test real models → bump pin → rollback.
+#
+# Why not :latest / watchtower: model checkpoints pin vLLM versions (the Nemotron
+# NVFP4 family is broken on v0.23.x/0.24.x — found the hard way 2026-07-22), so a
+# blind auto-latest can silently break serving. This script only advances a pin
+# after the models that use it actually answer requests on the new image.
+#
+# Usage:
+#   vllm-update                # check: report configured pins vs Docker Hub latest
+#   vllm-update --apply        # pull latest, request-test wrappers, bump leading pin
+#   vllm-update --apply --notify   # + desktop notification (for the systemd timer)
+#   vllm-update --servers-dir PATH  # inspect an explicit wrapper directory
+#
+# TWO TIERS (see _vllm-image.sh):
+#   LEADING  wrappers reading $VLLM_IMAGE_PIN. All must pass on `latest` or the
+#            pin does not move. This is the gate.
+#   HELD     wrappers reading $VLLM_IMAGE_PIN_HELD, quarantined because they are
+#            broken upstream. They are re-tested against `latest` on every run,
+#            purely to report when the upstream break is fixed and they can rejoin
+#            the leading tier. Their result NEVER blocks the leading bump — that
+#            was the whole point of splitting the tiers.
+#   DIGEST   wrappers hardcoding a content digest (currently vllm-qwen38). These
+#            are request-tested against the candidate and reported as pending;
+#            this updater does not rewrite independently owned pins.
+#
+# History, because both halves of this design are scar tissue:
+#   2026-08-15a  Smoke tested ONLY vllm-nemotron-embed, on the theory that the
+#                NVFP4 embedder was strictest version-wise. v0.27.1 passed that
+#                canary, the pin was applied, and vllm-nanbeige — sift's LLM —
+#                died with "Model architectures ['NanbeigeForCausalLM'] failed to
+#                be inspected". A canary covering one of four models is not a
+#                canary. Now every wrapper boots.
+#   2026-08-15b  With one lockstep pin, that failure held the embedder and
+#                reranker back too, for a break in two unrelated models. Hence the
+#                held tier, and hence re-testing it every run so the quarantine
+#                expires on evidence rather than on someone remembering.
+set -euo pipefail
+
+SERVERS="$HOME/bin/llm-servers"
+APPLY=0 NOTIFY=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --apply) APPLY=1; shift ;;
+    --notify) NOTIFY=1; shift ;;
+    --servers-dir)
+      [ "$#" -ge 2 ] || { echo "usage: vllm-update [--apply] [--notify] [--servers-dir PATH]" >&2; exit 2; }
+      SERVERS="$2"
+      shift 2
+      ;;
+    *) echo "usage: vllm-update [--apply] [--notify] [--servers-dir PATH]" >&2; exit 2 ;;
+  esac
+done
+PIN_FILE="$SERVERS/_vllm-image.sh"
+
+[ -d "$SERVERS" ] || { echo "✗ wrapper directory does not exist: $SERVERS" >&2; exit 1; }
+[ -f "$PIN_FILE" ] || { echo "✗ image pin file does not exist: $PIN_FILE" >&2; exit 1; }
+
+note() { [ "$NOTIFY" = 1 ] && command -v notify-send >/dev/null && notify-send "vllm-update" "$1" || true; echo "$1"; }
+
+pin_of() { sed -n "s|^$1=\"vllm/vllm-openai:\(.*\)\"$|\1|p" "$PIN_FILE"; }
+current="$(pin_of VLLM_IMAGE_PIN)"
+held="$(pin_of VLLM_IMAGE_PIN_HELD)"
+[ -n "$current" ] || { echo "✗ could not parse VLLM_IMAGE_PIN from $PIN_FILE" >&2; exit 1; }
+
+latest="$(curl -sf "https://hub.docker.com/v2/repositories/vllm/vllm-openai/tags/?page_size=100&name=v" \
+  | python3 -c '
+import json,sys,re
+tags=[t["name"] for t in json.load(sys.stdin)["results"]]
+vers=[t for t in tags if re.fullmatch(r"v\d+\.\d+\.\d+(\.\d+)?",t)]
+vers.sort(key=lambda v:[int(x) for x in v[1:].split(".")],reverse=True)
+print(vers[0] if vers else "")')"
+[ -n "$latest" ] || { echo "✗ Docker Hub tag query failed" >&2; exit 1; }
+
+# The live wrappers, and only those. The glob also matches the vllm-plugins/
+# DIRECTORY and stale `.bak-*` copies; plain grep exits 2 on a directory even with
+# matches elsewhere, and under `set -e -o pipefail` that silently killed this
+# script right here — both check and --apply modes were no-ops from 2026-07-22
+# (when vllm-plugins/ appeared) to 2026-07-28. Filtering to executable regular
+# files fixes the class of bug rather than the one symptom; a `.bak` copy also has
+# no business being reported as a lagging pin.
+shopt -s nullglob
+RUN_ID="${BASHPID}-${RANDOM}"
+WRAPPERS=()
+for f in "$SERVERS"/vllm-*; do
+  [ -f "$f" ] && [ -x "$f" ] || continue
+  case "$f" in *.bak*|*.vulkan-amd) continue;; esac
+  WRAPPERS+=("$f")
+done
+[ "${#WRAPPERS[@]}" -gt 0 ] || { echo "✗ no vLLM wrappers found in $SERVERS" >&2; exit 1; }
+
+# Classify by the image source a wrapper actually dereferences. A held wrapper
+# sources the same file as a leading wrapper, so classify the dereference rather
+# than merely checking for a source line. Fail closed when a live wrapper has no
+# recognized owner (or has more than one), so the inventory cannot silently shrink.
+LEADING=() HELD_WRAPPERS=() DIGEST_WRAPPERS=()
+for f in "${WRAPPERS[@]}"; do
+  base="$(basename -- "$f")"
+  leading_match=0 held_match=0 digest_match=0
+  # The literal shell syntax is the ownership marker in each wrapper.
+  # shellcheck disable=SC2016
+  grep -Eq '\$\{VLLM_IMAGE:-\$VLLM_IMAGE_PIN\}' "$f" && leading_match=1 || true
+  # shellcheck disable=SC2016
+  grep -Eq '\$\{VLLM_IMAGE:-\$VLLM_IMAGE_PIN_HELD\}' "$f" && held_match=1 || true
+  grep -Eq '^[[:space:]]*VLLM_IMAGE=.*vllm/vllm-openai@sha256:[[:xdigit:]]{64}' "$f" \
+    && digest_match=1 || true
+  owners=$((leading_match + held_match + digest_match))
+  [ "$owners" -eq 1 ] || {
+    echo "✗ could not classify exactly one image owner for $base" >&2
+    exit 1
+  }
+  if [ "$leading_match" = 1 ]; then
+    LEADING+=("$base")
+  elif [ "$held_match" = 1 ]; then
+    HELD_WRAPPERS+=("$base")
+  else
+    DIGEST_WRAPPERS+=("$base")
+  fi
+done
+
+join_wrappers() {
+  local out="" wrapper
+  for wrapper in "$@"; do out+="${out:+ }$wrapper"; done
+  printf '%s' "$out"
+}
+
+echo "leading pin : $current   [$(join_wrappers "${LEADING[@]}")]"
+[ -n "$held" ] && echo "held pin    : $held   [$(join_wrappers "${HELD_WRAPPERS[@]}")]"
+[ "${#DIGEST_WRAPPERS[@]}" -gt 0 ] && \
+  echo "digest pins : [$(join_wrappers "${DIGEST_WRAPPERS[@]}")] (independently owned; no automatic rewrite)"
+echo "hub latest  : $latest"
+
+# Boot one wrapper standalone on a throwaway port/name and wait for /health.
+# CONTAINER_NAME is what keeps this from killing production. Until 2026-08-06 the
+# smoke test ran under the SAME container name as the live model, so `docker rm -f`
+# here tore down whatever llama-swap was serving.
+# /health is the universal readiness signal: embed, rerank and generative wrappers
+# all expose it, and reaching it proves the architecture LOADED — exactly what
+# v0.27.1 failed to do for NanbeigeForCausalLM.
+smoke_one() (
+  local wrapper="$1" image="$2" port="$3"
+  local safe_wrapper name log pid ok=0 request_ok=0 cleaned=0
+  safe_wrapper="${wrapper//[^a-zA-Z0-9_.-]/-}"
+  name="vllm-update-${BASHPID}-${RANDOM}-${safe_wrapper}"
+  log="$(smoke_log "$wrapper")"
+
+  # The name is unique to this invocation. Never pre-delete a possibly live
+  # container; cleanup is restricted to this exact generated name.
+  # shellcheck disable=SC2329
+  cleanup_smoke() {
+    [ "$cleaned" = 1 ] && return
+    cleaned=1
+    if [ -n "${pid:-}" ]; then
+      kill "$pid" >/dev/null 2>&1 || true
+      kill -KILL "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+    fi
+    docker stop -t 1 "$name" >/dev/null 2>&1 || true
+    docker rm -f "$name" >/dev/null 2>&1 || true
+  }
+  trap cleanup_smoke EXIT INT TERM
+
+  VLLM_IMAGE="$image" PORT="$port" CONTAINER_NAME="$name" \
+    "$SERVERS/$wrapper" >"$log" 2>&1 &
+  pid=$!
+  attempt=0
+  while [ "$attempt" -lt 72 ]; do   # up to ~6 min: nanbeige at 32k is the slow one
+    attempt=$((attempt + 1))
+    sleep 5
+    curl -sf -m 5 "http://127.0.0.1:$port/health" >/dev/null 2>&1 && { ok=1; break; }
+    kill -0 "$pid" 2>/dev/null || break   # wrapper died → fail fast
+  done
+  if [ "$ok" = 1 ]; then
+    request_ok=1
+    request_gate "$wrapper" "$port" || request_ok=0
+  fi
+  [ "$ok" = 1 ] && [ "$request_ok" = 1 ]
+)
+
+# /health proves readiness only. The request below exercises the serving route
+# with the model ID returned by the wrapper itself. It is a minimal contract
+# probe, not a quality test and not a reproduction of llama-swap's configured
+# command line; callers needing those guarantees must test that runtime separately.
+request_gate() {
+  local wrapper="$1" port="$2" model response kind endpoint payload
+  model="$(curl -sf -m 10 "http://127.0.0.1:$port/v1/models" \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(d[0]["id"] if d else "")')" \
+    || return 1
+  [ -n "$model" ] || return 1
+  case "$wrapper" in
+    vllm-nemotron-embed)
+      kind=embedding endpoint=/v1/embeddings
+      ;;
+    vllm-nemotron-rerank)
+      kind=rerank endpoint=/v1/rerank
+      ;;
+    vllm-glm-ocr|vllm-paddleocr-vl)
+      kind=ocr endpoint=/v1/chat/completions
+      ;;
+    *)
+      kind=chat endpoint=/v1/chat/completions
+      ;;
+  esac
+  payload="$(python3 - "$kind" "$model" <<'PY'
+import json
+import sys
+
+kind, model = sys.argv[1:]
+if kind == "embedding":
+    body = {"model": model, "input": "vllm update smoke"}
+elif kind == "rerank":
+    body = {
+        "model": model,
+        "query": "vllm update smoke",
+        "documents": ["smoke"],
+        "top_n": 1,
+    }
+elif kind == "ocr":
+    body = {
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "OCR"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}},
+            ],
+        }],
+        "max_tokens": 1,
+    }
+else:
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": "vllm update smoke"}],
+        "max_tokens": 1,
+    }
+print(json.dumps(body, separators=(",", ":")))
+PY
+)"
+  response="$(curl -sf -m 30 -H 'content-type: application/json' \
+    -d "$payload" "http://127.0.0.1:$port$endpoint")" || return 1
+  printf '%s' "$response" | python3 -c '
+import json,math,sys
+kind=sys.argv[1]
+body=json.load(sys.stdin)
+if kind == "embedding":
+    data=body.get("data")
+    vector=data[0].get("embedding") if isinstance(data, list) and data and isinstance(data[0], dict) else None
+    ok=isinstance(vector, list) and bool(vector) and all(
+        isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        for value in vector
+    )
+elif kind == "rerank":
+    results=body.get("results")
+    result=results[0] if isinstance(results, list) and results else None
+    ok=(isinstance(result, dict)
+        and isinstance(result.get("index"), int)
+        and not isinstance(result["index"], bool)
+        and result["index"] == 0
+        and isinstance(result.get("relevance_score"), (int, float))
+        and not isinstance(result["relevance_score"], bool)
+        and math.isfinite(result["relevance_score"]))
+else:
+    choices=body.get("choices")
+    message=choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+    content=message.get("content") if isinstance(message, dict) else None
+    reasoning=message.get("reasoning") if isinstance(message, dict) else None
+    reasoning_content=message.get("reasoning_content") if isinstance(message, dict) else None
+    ok=(isinstance(content, str) and bool(content)) or any(
+        isinstance(value, str) and bool(value)
+        for value in (reasoning, reasoning_content)
+    )
+raise SystemExit(0 if ok else 1)
+' "$kind"
+}
+smoke_log() {
+  local wrapper="$1" safe_wrapper
+  safe_wrapper="${wrapper//[^a-zA-Z0-9_.-]/-}"
+  printf '%s/vllm-update-smoke-%s-%s.log' "${TMPDIR:-/tmp}" "$RUN_ID" "$safe_wrapper"
+}
+smoke_reason() {
+  local f reason=""
+  f="$(smoke_log "$1")"
+  if [ -f "$f" ]; then
+    reason="$(grep -oiE "Error in inspecting model architecture '[^']*'|failed to be inspected|'[a-z_]+' is a per-layer attribute|No available memory|out of memory" "$f" 2>/dev/null | head -1)"
+  fi
+  printf '%s' "${reason:-request gate or readiness failed}"
+}
+forget_smoke_log() { rm -f -- "$(smoke_log "$1")"; }
+
+# Check every recognized owner before claiming that the configured inventory is
+# current. Digest wrappers remain explicitly pending because this updater does
+# not own their independent pin or know which digest corresponds to a tag.
+pending=()
+[ "$current" = "$latest" ] || pending+=("leading pin $current")
+if [ "${#HELD_WRAPPERS[@]}" -gt 0 ] \
+    && { [ -z "$held" ] || [ "$held" != "$latest" ]; }; then
+  pending+=("held pin ${held:-missing}")
+fi
+[ "${#DIGEST_WRAPPERS[@]}" -eq 0 ] || pending+=("digest wrappers $(join_wrappers "${DIGEST_WRAPPERS[@]}")")
+
+all_configured_current() {
+  [ "$current" = "$latest" ] || return 1
+  if [ "${#HELD_WRAPPERS[@]}" -gt 0 ]; then
+    [ -n "$held" ] && [ "$held" = "$latest" ] || return 1
+  fi
+  [ "${#DIGEST_WRAPPERS[@]}" -eq 0 ]
+}
+
+if [ "$APPLY" != 1 ]; then
+  if all_configured_current; then
+    note "✓ all configured vLLM wrappers current ($latest)"
+  else
+    note "vLLM configured inventory pending: $(join_wrappers "${pending[@]}")"
+    [ "$current" = "$latest" ] || echo "  leading update available — run: vllm-update --apply"
+  fi
+  exit 0
+fi
+
+# Even when the leading pin is already current, held and digest-owned wrappers
+# are tested against the candidate so their status is real evidence. The pull is
+# still one bounded candidate operation for the whole run.
+if all_configured_current; then
+  note "✓ all configured vLLM wrappers current ($latest)"
+  exit 0
+fi
+
+echo "→ pulling vllm/vllm-openai:$latest …"
+docker pull "vllm/vllm-openai:$latest" >/dev/null
+
+leading_ok=1 held_ok=1 digest_ok=1
+port=8099
+if [ "$current" != "$latest" ]; then
+  echo "→ gate: leading-tier wrappers on $latest"
+  for wrapper in "${LEADING[@]}"; do
+    if smoke_one "$wrapper" "vllm/vllm-openai:$latest" "$port"; then
+      echo "  ✓ $wrapper"
+    else
+      leading_ok=0; echo "  ✗ $wrapper — $(smoke_reason "$wrapper")"
+    fi
+    forget_smoke_log "$wrapper"
+    port=$((port + 1))
+  done
+fi
+
+# Held and digest tests never mutate their owners in this updater, but failures
+# and successful tests are both reported so --apply cannot claim full coverage.
+if [ "${#HELD_WRAPPERS[@]}" -gt 0 ]; then
+  echo "→ quarantine re-test: held wrappers on $latest (pin remains owner-managed)"
+  for wrapper in "${HELD_WRAPPERS[@]}"; do
+    if smoke_one "$wrapper" "vllm/vllm-openai:$latest" "$port"; then
+      echo "  ✓ $wrapper answers on $latest — held pin still requires owner review"
+    else
+      held_ok=0; echo "  · $wrapper still held ($(smoke_reason "$wrapper"))"
+    fi
+    forget_smoke_log "$wrapper"
+    port=$((port + 1))
+  done
+fi
+
+if [ "${#DIGEST_WRAPPERS[@]}" -gt 0 ]; then
+  echo "→ independent-digest re-test on $latest (pin remains owner-managed)"
+  for wrapper in "${DIGEST_WRAPPERS[@]}"; do
+    if smoke_one "$wrapper" "vllm/vllm-openai:$latest" "$port"; then
+      echo "  ✓ $wrapper answers on $latest — digest pin still requires owner review"
+    else
+      digest_ok=0; echo "  ✗ $wrapper — $(smoke_reason "$wrapper")"
+    fi
+    forget_smoke_log "$wrapper"
+    port=$((port + 1))
+  done
+fi
+
+if [ "$current" = "$latest" ]; then
+  if [ "$held_ok" = 1 ] && [ "$digest_ok" = 1 ] \
+      && all_configured_current; then
+    note "✓ all configured vLLM wrappers current ($latest)"
+    exit 0
+  fi
+  note "✗ vLLM leading pin is current, but configured owners remain pending (held/digest pins are not changed by this updater)"
+  exit 1
+fi
+
+if [ "$leading_ok" = 1 ]; then
+  previous="$current"
+  sed -i "s|^VLLM_IMAGE_PIN=.*|VLLM_IMAGE_PIN=\"vllm/vllm-openai:$latest\"|" "$PIN_FILE"
+  current="$latest"
+  if [ "$held_ok" = 1 ] && [ "$digest_ok" = 1 ] \
+      && all_configured_current; then
+    note "✓ all configured vLLM wrappers updated to $latest"
+  else
+    note "⚠ leading vLLM pin bumped $previous → $latest; held/digest owners remain pending"
+  fi
+  echo "  old image left in place — reclaim with: docker rmi vllm/vllm-openai:$previous"
+  [ "$held_ok" = 1 ] && [ "$digest_ok" = 1 ] \
+    && all_configured_current
+else
+  note "✗ vLLM $latest FAILED the leading-tier gate — pin stays at $current (logs: ${TMPDIR:-/tmp}/vllm-update-smoke-*.log)"
+  exit 1
+fi

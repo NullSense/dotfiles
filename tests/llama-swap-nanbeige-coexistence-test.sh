@@ -34,6 +34,7 @@ raw_nanbeige_coexistence_contract_is_valid() {
           ] | length == 0)
           and (.matrix.vars.a == "nanbeige4.2-3b")
           and (.matrix.vars.n == "nemotron-embed-1b")
+          and (.models."nemotron-embed-1b".ttl == 0)
           and (.matrix.vars.m == "nemotron-rerank-1b")
           and (.matrix.vars.x == "tei-sparse")
           and (.matrix.sets."sift-chat" == "a & n & m & x")
@@ -65,6 +66,11 @@ yq -y '.hooks.on_startup.preload = ["qwen3.8-27b-nvfp4-long"]' \
     "$llama_swap_config" >"$fixture"
 if raw_nanbeige_coexistence_contract_is_valid "$fixture"; then
     fail 'coexistence contract accepted a mandatory startup model preload'
+fi
+
+yq -y '.models."nemotron-embed-1b".ttl = 300' "$llama_swap_config" >"$fixture"
+if raw_nanbeige_coexistence_contract_is_valid "$fixture"; then
+    fail 'co-residency contract accepted automatic idle unloading of Repowise Nemotron'
 fi
 
 printf 'PASS: raw Nanbeige and Sift retrieval co-residency contract\n'

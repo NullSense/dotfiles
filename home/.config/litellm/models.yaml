@@ -814,7 +814,7 @@ model_list:
   # and enable_thinking=true per agent request; vLLM applies the template flag without reload.
 - model_name: sift-decompose
   litellm_params:
-    model: openai/nanbeige-sift
+    model: hosted_vllm/nanbeige4.2-3b
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     max_tokens: 1024
@@ -837,7 +837,7 @@ model_list:
 
 - model_name: sift-agent
   litellm_params:
-    model: openai/nanbeige-sift
+    model: hosted_vllm/nanbeige4.2-3b
     api_base: http://127.0.0.1:9292/v1
     api_key: "none"
     input_cost_per_token: 0

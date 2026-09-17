@@ -221,7 +221,7 @@ ensure_dashboards() {
 }
 
 patch_litellm_prisma_client() {
-  # LiteLLM 1.97.0 writes a replacement query engine through the removed
+  # LiteLLM through 1.101.0 writes a replacement query engine through the removed
   # prisma-client-py private attribute `_Prisma__engine`. Prisma 0.15 exposes
   # the supported `_engine` property setter instead. Keep this narrowly gated:
   # one exact upstream line is repaired, an already-repaired/upstream-fixed
@@ -241,7 +241,7 @@ fixed = "prisma_client._engine = engine"
 
 if text.count(broken) == 1:
     path.write_text(text.replace(broken, fixed))
-    print("  ✓ repaired LiteLLM 1.97.0 Prisma engine setter compatibility")
+    print("  ✓ repaired LiteLLM Prisma engine setter compatibility")
 elif broken not in text and text.count(fixed) == 1:
     print("  • LiteLLM Prisma engine setter already compatible")
 else:
@@ -445,14 +445,15 @@ case "${1:-status}" in
             # LiteLLM virtual-key APIs need these. Install prep — ALL extras
             # the gateway needs (prisma=DB/keys, diskcache=exact response cache, opentelemetry=otel
             # tracing). Use the FULL line on every (re)install; `--force` drops anything omitted:
-            #   uv tool install --force 'litellm[proxy-runtime,caching,extra_proxy]==1.97.0' \
+            #   uv tool install --force 'litellm[proxy,proxy-runtime,caching,extra_proxy]==1.101.0' \
             #     --with 'fastapi==0.136.3'
             #   stack db-init   # re-run after any --force reinstall (it wipes the generated prisma client)
     if [[ -z ${DATABASE_URL:-} && ${STACK_DB_INIT_INFISICAL:-0} != 1 ]]; then
       command -v infisical >/dev/null 2>&1 \
         || { echo "  ⚠ DATABASE_URL is unset and Infisical is unavailable"; exit 1; }
       export STACK_DB_INIT_INFISICAL=1
-      exec infisical run --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "$0" db-init
+      exec infisical run --domain https://eu.infisical.com --projectId 723a9325-6559-4de6-8e86-c318c2e6b9fd \
+        --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "$0" db-init
     fi
     [[ -n ${DATABASE_URL:-} ]] \
       || { echo "  ⚠ Infisical did not provide DATABASE_URL for /litellm"; exit 1; }
@@ -460,9 +461,9 @@ case "${1:-status}" in
     patch_litellm_prisma_client
     SCHEMA=$(find "$HOME/.local/share/uv/tools/litellm" -path '*proxy_extras*schema.prisma' 2>/dev/null | head -1)
     [ -n "$SCHEMA" ] || { echo "  ⚠ litellm prisma schema not found — run the pinned install command in ~/bin/llm-servers/litellm-gateway"; exit 1; }
-    PATH="$TB:$PATH" "$TB/prisma" generate --schema "$SCHEMA" 2>&1 | tail -2 || true
+    PATH="$TB:$PATH" "$TB/prisma" generate --schema "$SCHEMA" 2>&1 | tail -2
     DATABASE_URL="${DATABASE_URL:-postgresql://litellm@127.0.0.1:5433/litellm}" \
-      PATH="$TB:$PATH" "$TB/prisma" db push --schema "$SCHEMA" --skip-generate --accept-data-loss 2>&1 | tail -2
+      PATH="$TB:$PATH" "$TB/prisma" db push --schema "$SCHEMA" --skip-generate 2>&1 | tail -2
     echo "  ✓ prisma generated + LiteLLM_* tables ready — restart LiteLLM before using key APIs"
     ;;
   logs) journalctl --user -f -u litellm -u llama-swap -u litellm-mcp ;;  # systemd-owned now; old nohup logs remain in $RUN/*.log

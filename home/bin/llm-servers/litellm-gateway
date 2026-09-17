@@ -12,36 +12,16 @@
 # Env lives HERE (per-binary wrapper), not in the unit or direnv — systemd units
 # never see direnv-scoped env (see memory: agent-vault-env-systemd).
 #
-# ⚠⚠ INSTALL LINE — reproduce EXACTLY. Do not `uv tool install litellm` bare. ⚠⚠
-#
-#   uv tool install --force 'litellm[proxy-runtime,caching,extra_proxy]==1.97.0' --with 'fastapi==0.136.3'
+# Pinned installation (validated 2026-09-17):
+#   uv tool install --force --upgrade 'litellm[proxy,proxy-runtime,caching,extra_proxy]==1.101.0' --with 'fastapi==0.136.3'
 #   stack db-init
-#
-# Why each piece (all four were discovered the hard way on 2026-08-06, when the FIRST
-# restart in weeks failed — the long-running process had outlived a venv that could no
-# longer boot, so this was already broken and simply had not been observed yet):
-#   proxy        → the server itself; without it: "No module named 'websockets'"
-#   caching      → config.yaml sets cache_params.type: disk; without it, startup aborts
-#                  with "Please install litellm with `litellm[caching]`" (needs diskcache)
-#   extra_proxy  → brings prisma, required because general_settings sets
-#                  store_model_in_db: true + database_url
-#   prisma generate → installing the prisma PACKAGE is not enough; the client/binaries
-#                  are generated at install time. Without it: "Unable to find Prisma
-#                  binaries. Please run 'prisma generate' first."
-#   stack db-init → also applies the narrow LiteLLM 1.97.0 / Prisma 0.15
-#                  engine-setter compatibility repair; it fails closed if the
-#                  upstream source layout changes.
-#   proxy-runtime → adds the complete OpenTelemetry runtime used by callbacks: ["otel"]
-#   fastapi==0.136.3 → avoids the FastAPI 0.137 `_IncludedRouter` change that
-#                  crashes LiteLLM's pinned OTel FastAPI instrumentation.
-#                  LiteLLM 1.97.0 still declares
-#                  `fastapi>=0.136.3,<1.0`, but FastAPI removed
-#                  `fastapi.dependencies.utils.get_flat_dependant` in 0.140.x, which
-#                  litellm/proxy/management_endpoints/management_v1/common.py imports at
-#                  module scope. So a resolver that picks the newest allowed FastAPI
-#                  produces an install that satisfies the metadata and cannot start.
-#                  Bisected 2026-08-06: present through 0.139.x, gone in 0.140.13+.
-#                  Re-test this pin on any litellm upgrade — it should eventually lift.
+#   systemctl --user restart litellm.service litellm-mcp.service
+# proxy supplies the server; caching supplies diskcache; extra_proxy supplies
+# Prisma; proxy-runtime supplies the configured OpenTelemetry callbacks.
+# FastAPI stays pinned for LiteLLM's OTel 0.49b0 instrumentation. Recheck its
+# instrumented HTTP path before lifting this pin on an upgrade.
+# db-init regenerates Prisma and applies the guarded engine-setter repair
+# still required by 1.101.0. Schema changes fail rather than accepting data loss.
 set -euo pipefail
 
 # LiteLLM invokes the Prisma CLI as a subprocess when DATABASE_URL is set.
@@ -78,8 +58,30 @@ if [ "${LITELLM_UNSET_MASTER_KEY:-0}" = 1 ]; then
   # the gateway master key before LiteLLM starts so it cannot activate auth.
   CMD=(env -u LITELLM_MASTER_KEY "${CMD[@]}")
 fi
-if command -v infisical >/dev/null 2>&1 && [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
-  exec infisical run --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" -- "${CMD[@]}"
+if [ "${STACK_NO_INFISICAL:-0}" != 1 ]; then
+  # Daemons must never use a human CLI login: it expires between boots.
+  # systemd decrypts the dedicated LiteLLM machine identity into private tmpfs.
+  : "${CREDENTIALS_DIRECTORY:?Start LiteLLM through its systemd user service}"
+  for credential in infisical-client-id infisical-client-secret; do
+    [[ -s "$CREDENTIALS_DIRECTORY/$credential" ]] || {
+      echo "Missing LiteLLM machine credential: $credential" >&2
+      exit 1
+    }
+  done
+  export INFISICAL_DOMAIN=https://eu.infisical.com
+  unset INFISICAL_TOKEN
+  export INFISICAL_UNIVERSAL_AUTH_CLIENT_ID
+  export INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET
+  INFISICAL_UNIVERSAL_AUTH_CLIENT_ID=$(<"$CREDENTIALS_DIRECTORY/infisical-client-id")
+  INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET=$(<"$CREDENTIALS_DIRECTORY/infisical-client-secret")
+  # A new short-lived access token on every start; neither secret appears in argv.
+  INFISICAL_TOKEN=$(infisical login --method=universal-auth --plain --silent)
+  [[ -n "$INFISICAL_TOKEN" ]] || { echo "Infisical returned an empty machine token" >&2; exit 1; }
+  export INFISICAL_TOKEN
+  unset INFISICAL_UNIVERSAL_AUTH_CLIENT_ID INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET
+  exec infisical run --silent --projectId 723a9325-6559-4de6-8e86-c318c2e6b9fd \
+    --env "${INFISICAL_ENV:-dev}" --path "${INFISICAL_PATH:-/litellm}" \
+    -- env -u INFISICAL_TOKEN "${CMD[@]}"
 else
   [ -n "${OPENROUTER_API_KEY:-}" ] || echo "⚠ OPENROUTER_API_KEY unset — cloud routes will 401" >&2
   [ -n "${LITELLM_MASTER_KEY:-}" ] || echo "⚠ LITELLM_MASTER_KEY unset — no admin/virtual keys" >&2

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# ExecStartPost gate shared by the LiteLLM units. MAINPID is supplied by systemd.
+set -euo pipefail
+: "${MAINPID:?systemd must supply the service main PID}"
+[[ "$MAINPID" =~ ^[1-9][0-9]*$ && "${2:-}" =~ ^[1-9][0-9]*$ ]] || exit 2
+endpoint=$1
+deadline=$((SECONDS + $2))
+while (( SECONDS < deadline )); do
+  if ! kill -0 "$MAINPID" 2>/dev/null; then
+    echo "Main process exited before HTTP readiness: $endpoint" >&2
+    exit 1
+  fi
+  if curl --fail --silent --connect-timeout 1 --max-time 2 "$endpoint" >/dev/null; then
+    exit 0
+  fi
+  sleep 1
+done
+echo "Timed out waiting for HTTP readiness: $endpoint" >&2
+exit 1

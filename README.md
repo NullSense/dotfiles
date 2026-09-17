@@ -74,6 +74,17 @@ install.sh            conservative per-file symlink installer
 - LiteLLM on loopback port 4001 is the single MCP gateway for local clients.
 - Hermes Gateway receives its Agent Vault token and non-proxyable local or
   WebSocket credentials through systemd encrypted credentials.
+- Both LiteLLM services use the existing dedicated LiteLLM Infisical machine
+  identity, loaded from user-scoped encrypted credentials at
+  `~/.config/credstore.encrypted/litellm-infisical-client-{id,secret}.cred`.
+  They obtain a fresh access token at each start and never depend on `infisical login`.
+  The identity must retain read access to the Personal project's `dev:/litellm`.
+  When replacing a credential, use `systemd-creds encrypt --user` with the embedded
+  names `infisical-client-id` and `infisical-client-secret`, then restart both units.
+  Keep these encrypted files outside this repository. The pinned install command
+  lives in `~/bin/llm-servers/litellm-gateway`; run `stack db-init` after reinstalling.
+  `tests/litellm-boot-auth-test.sh` covers authentication and early startup failure;
+  the shared `wait-ready` helper is invoked by both units' `ExecStartPost`.
 - Hindsight is self-hosted for Hermes. The API listens on loopback port 9177,
   uses the local LiteLLM gateway for inference, and has one canonical bank:
   `hermes`.

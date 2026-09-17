@@ -4,9 +4,11 @@ After=litellm.service hindsight-hermes.service
 Wants=litellm.service hindsight-hermes.service
 
 [Service]
-Type=simple
+LoadCredentialEncrypted=infisical-client-id:%h/.config/credstore.encrypted/litellm-infisical-client-id.cred
+LoadCredentialEncrypted=infisical-client-secret:%h/.config/credstore.encrypted/litellm-infisical-client-secret.cred
+Type=exec
 ExecStart=/home/nullsense/bin/llm-servers/litellm-mcp
-ExecStartPost=/usr/bin/curl --fail --silent --show-error --retry 240 --retry-delay 2 --retry-connrefused --retry-all-errors --retry-max-time 570 --connect-timeout 2 --max-time 5 http://127.0.0.1:4001/health/liveliness
+ExecStartPost=%h/bin/llm-servers/wait-ready http://127.0.0.1:4001/health/liveliness 570
 Restart=on-failure
 RestartSec=5
 RestartSteps=4

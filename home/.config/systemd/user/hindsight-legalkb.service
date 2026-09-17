@@ -5,11 +5,13 @@ Wants=litellm.service
 
 [Service]
 Type=exec
-WorkingDirectory=%h/Documents/pipeline/hindsight_runtime
+RuntimeDirectory=hindsight-legalkb
+RuntimeDirectoryMode=0700
+WorkingDirectory=%t/hindsight-legalkb
 EnvironmentFile=%h/.config/hindsight/legalkb.env
 # Reuse the existing gateway credential read-only; do not alter Hermes.
 LoadCredentialEncrypted=hermes-litellm-key:%h/.config/credstore.encrypted/hermes-litellm-key.cred
-ExecStart=%h/Documents/pipeline/hindsight_runtime/.venv/bin/uvicorn service:app --host 127.0.0.1 --port 9178 --workers 1 --no-access-log
+ExecStart=%h/Documents/pipeline/hindsight_runtime/.venv/bin/uvicorn service:app --app-dir %h/Documents/pipeline/hindsight_runtime --host 127.0.0.1 --port 9178 --workers 1 --no-access-log
 Restart=on-failure
 RestartSec=30
 TimeoutStopSec=60

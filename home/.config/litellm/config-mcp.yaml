@@ -14,6 +14,15 @@ include:
   - models.yaml
 
 mcp_servers:
+  legalkb_memory:
+    description: "LegalKB development and private case memory. Explicit bank_id required: legalkb-dev for engineering; documents-<person> for private cases. Never mix case contents into development memory."
+    allow_all_keys: true
+    transport: http
+    url: http://127.0.0.1:9178/mcp/
+    allowed_tools: [retain, recall, reflect]
+    timeout: 660
+    access_groups: [dev, research]
+
   exa:
     description: "Exa — neural web and code search (research)."
     allow_all_keys: true

@@ -1,0 +1,15 @@
+[Unit]
+Description=Hindsight LegalKB memory control plane
+After=hindsight-legalkb.service
+Requires=hindsight-legalkb.service
+
+[Service]
+Type=simple
+Environment=HINDSIGHT_CP_DATAPLANE_API_URL=http://127.0.0.1:9178
+ExecStart=/usr/bin/node %h/.local/share/hindsight-control-plane/node_modules/@vectorize-io/hindsight-control-plane/bin/cli.js --port 19178 --hostname localhost --api-url http://127.0.0.1:9178
+Restart=on-failure
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=default.target

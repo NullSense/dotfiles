@@ -1,0 +1,10 @@
+[Unit]
+Description=Keep verified case memory in sync without agent-managed imports
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+Unit=hindsight-legalkb-sync.service
+
+[Install]
+WantedBy=timers.target

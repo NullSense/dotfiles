@@ -1,0 +1,12 @@
+[Unit]
+Description=Synchronize verified Documents into person-scoped Hindsight memory
+After=hindsight-legalkb.service
+Requires=hindsight-legalkb.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Documents/pipeline
+Environment=PIPELINE_MEMORY__ENABLED=true
+ExecStart=%h/Documents/pipeline/.venv/bin/python memory_sync.py --apply
+TimeoutStartSec=120
+UMask=0077

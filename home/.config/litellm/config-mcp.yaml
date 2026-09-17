@@ -14,14 +14,49 @@ include:
   - models.yaml
 
 mcp_servers:
-  legalkb_memory:
-    description: "LegalKB development and private case memory. Explicit bank_id required: legalkb-dev for engineering; documents-<person> for private cases. Never mix case contents into development memory."
+  legalkb_dev_memory:
+    description: 'LegalKB development. Fixed scope: pipeline/. Engineering decisions
+      only; never private case contents. Derived memory: verify cited sources; errors
+      or empty results do not prove absence.'
     allow_all_keys: true
     transport: http
-    url: http://127.0.0.1:9178/mcp/
-    allowed_tools: [retain, recall, reflect]
+    url: http://127.0.0.1:9178/mcp/legalkb-dev/
+    allowed_tools:
+    - retain
+    - recall
+    - reflect
     timeout: 660
-    access_groups: [dev, research]
+    access_groups:
+    - dev
+    - research
+  matas_case_memory:
+    description: 'Private documents — Matas Peciukonis. Fixed scope: Matas_Peciukonis/.
+      Only this person''s documents and case history; never another person''s case.
+      Derived memory: verify cited sources; errors or empty results do not prove absence.'
+    allow_all_keys: true
+    transport: http
+    url: http://127.0.0.1:9178/mcp/documents-matas-peciukonis/
+    allowed_tools:
+    - recall
+    - reflect
+    timeout: 660
+    access_groups:
+    - dev
+    - research
+  pieter_case_memory:
+    description: 'Private documents — Pieter Hoevers. Fixed scope: Pieter_Hoevers/.
+      Only this person''s documents and case history; never another person''s case.
+      Derived memory: verify cited sources; errors or empty results do not prove absence.'
+    allow_all_keys: true
+    transport: http
+    url: http://127.0.0.1:9178/mcp/documents-pieter-hoevers/
+    allowed_tools:
+    - recall
+    - reflect
+    timeout: 660
+    access_groups:
+    - dev
+    - research
 
   exa:
     description: "Exa — neural web and code search (research)."

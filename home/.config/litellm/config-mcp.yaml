@@ -25,6 +25,16 @@ mcp_servers:
     - retain
     - recall
     - reflect
+    - search_knowledge_base
+    - list_mental_models
+    - get_mental_model
+    - list_documents
+    - get_document
+    - list_operations
+    - get_operation
+    - list_tags
+    - get_bank
+    - list_directives
     timeout: 660
     access_groups:
     - dev
@@ -39,6 +49,16 @@ mcp_servers:
     allowed_tools:
     - recall
     - reflect
+    - search_knowledge_base
+    - list_mental_models
+    - get_mental_model
+    - list_documents
+    - get_document
+    - list_operations
+    - get_operation
+    - list_tags
+    - get_bank
+    - list_directives
     timeout: 660
     access_groups:
     - dev
@@ -53,6 +73,16 @@ mcp_servers:
     allowed_tools:
     - recall
     - reflect
+    - search_knowledge_base
+    - list_mental_models
+    - get_mental_model
+    - list_documents
+    - get_document
+    - list_operations
+    - get_operation
+    - list_tags
+    - get_bank
+    - list_directives
     timeout: 660
     access_groups:
     - dev

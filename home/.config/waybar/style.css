@@ -333,11 +333,8 @@ window#waybar.hidden { opacity: 0; }
  * ============================================================ */
 #custom-aiquota.ok       { color: @aqua; }
 #custom-aiquota.warning  { color: @yellow; }
-#custom-aiquota.critical {
-    background: @red;
-    color: @bg0;
-    animation: blink 1s linear infinite alternate;
-}
+/* Quota exhaustion keeps the normal pill background; details stay in the tooltip. */
+#custom-aiquota.critical { color: @fg0; }
 #custom-aiquota.stale    { color: @gray; }
 /* wrapper error pill (binary missing / timeout / panic) — what aiquota-wrap.sh
  * actually emits on failure; distinct from .critical */

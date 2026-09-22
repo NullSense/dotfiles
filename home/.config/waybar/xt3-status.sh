@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# Unified waybar module: privacy state + X-T3 webcam state.
-#
-# Visual: Material Design Outlined glyphs (Nerd Font), Carbon-style 2px-stroke
-# aesthetic. All four privacy dots (mic / cam / location / screen) plus the
-# X-T3 indicator render permanently — dim grey when idle, branded color when
-# active. This makes the bar a constant attestation of "what's watching me".
-#
-# Backends:
-#   - privacy-dots (AUR) — pipewire mic/cam/screen + geoclue dbus location.
-#     We read its `class` field and ignore its rendered text.
-#   - lsusb / systemctl / fuser for the X-T3 specifics.
+# Waybar module: X-T3 webcam state and GPU screen recording.
+# General privacy monitoring is disabled; do not render unchecked mic/camera
+# states as idle. X-T3 controls and the GPU recorder indicator remain active.
+# Backends: lsusb / systemctl / fuser for X-T3; pgrep for GPU recording.
 
 set -u
 
@@ -18,14 +11,12 @@ LOOPBACK="/dev/video10"
 SERVICE="xt3-webcam.service"
 
 # --- Carbon-inspired palette ------------------------------------------------
-COLOR_OFF="#4b5263"      # dim grey — idle privacy dot
+COLOR_OFF="#4b5263"      # dim grey — GPU recorder idle
 COLOR_XT3_OFF="#5c6370"  # slightly lighter grey — X-T3 unplugged
 COLOR_IDLE="#d19a66"     # amber — X-T3 plugged but service stopped
 COLOR_READY="#98c379"    # green — X-T3 streaming, awaiting consumer
 COLOR_LIVE="#e06c75"     # red — X-T3 in a call
 COLOR_LIVE_DIM="#7a3a3e" # dim red — pulse-off frame for LIVE
-COLOR_MIC="#56b6c2"      # teal — mic on
-COLOR_CAM="#e5c07b"      # yellow — system cam on
 COLOR_SCREEN="#c678dd"   # purple — screen sharing
 
 # --- Carbon-style MDI Outlined glyphs (Nerd Font) ---------------------------
@@ -33,8 +24,6 @@ ICON_XT3_OFF="󰷐"          # camera-off-outline
 ICON_XT3_IDLE="󰄀"         # camera-outline
 ICON_XT3_READY="󰄀"        # camera-outline (green tint)
 ICON_XT3_LIVE="󰻃"         # record-circle-outline
-ICON_MIC="󰍮"              # microphone-outline
-ICON_CAM="󰄁"              # video-outline
 ICON_SCREEN="󰹑"           # monitor-share
 
 # --- X-T3 state probes ------------------------------------------------------
@@ -54,35 +43,13 @@ consumer_present() {
   return 1
 }
 
-# --- Privacy probes via privacy-dots ----------------------------------------
-mic_active=0
-cam_active=0
+# General privacy-dots polling is disabled: its repeated process scans are
+# expensive. Preserve the separate DRM/KMS recorder check on every poll.
 screen_active=0
-pd_tooltip=""
-
-if command -v privacy-dots >/dev/null 2>&1; then
-  pd_json=$(privacy-dots 2>/dev/null || true)
-  pd_class=$(printf '%s' "$pd_json" | jq -r '.class // empty' 2>/dev/null || true)
-  # Strip the "Location: off  |  " segment so the tooltip stays focused on
-  # categories that actually fire on this machine.
-  pd_tooltip=$(printf '%s' "$pd_json" | jq -r '.tooltip // empty' 2>/dev/null \
-    | sed -E 's/  \|  Location: [^|]*\|/  |/' || true)
-  [[ "$pd_class" == *mic-on* ]] && mic_active=1
-  [[ "$pd_class" == *cam-on* ]] && cam_active=1
-  [[ "$pd_class" == *scr-on* ]] && screen_active=1
-fi
-
-# gpu-screen-recorder captures via DRM/KMS, which PipeWire (and thus
-# privacy-dots) never sees. Light the screen dot ourselves whenever a recording
-# is live, and correct the tooltip so it doesn't read "Screen sharing: off"
-# mid-capture. This is why screen recording no longer needs portal mode.
+pd_tooltip="Privacy monitoring disabled"
 if pgrep -f '^gpu-screen-recorder' >/dev/null 2>&1; then
   screen_active=1
-  if [[ -n "$pd_tooltip" && "$pd_tooltip" == *"Screen sharing:"* ]]; then
-    pd_tooltip=$(printf '%s' "$pd_tooltip" | sed -E 's/Screen sharing: [^|]*/Screen sharing: recording /')
-  else
-    pd_tooltip="Screen sharing: recording (gpu-screen-recorder)"
-  fi
+  pd_tooltip+=$'\n'"Screen recording: active (gpu-screen-recorder)"
 fi
 
 # --- X-T3 indicator ---------------------------------------------------------
@@ -107,7 +74,7 @@ else
   xt3_class="ready"; xt3_tooltip="X-T3 ready"
 fi
 
-# --- Compose: always render all five glyphs, color drives state ------------
+# --- Compose: GPU recorder and X-T3 indicators -----------------------------
 dot() {
   # $1 = active flag (0/1), $2 = on-color, $3 = glyph
   local color
@@ -115,12 +82,10 @@ dot() {
   printf '<span foreground="%s">%s</span>' "$color" "$3"
 }
 
-text="$(dot "$mic_active"    "$COLOR_MIC"    "$ICON_MIC") "
-text+="$(dot "$cam_active"    "$COLOR_CAM"    "$ICON_CAM") "
-text+="$(dot "$screen_active" "$COLOR_SCREEN" "$ICON_SCREEN") "
+text="$(dot "$screen_active" "$COLOR_SCREEN" "$ICON_SCREEN") "
 text+="<span foreground=\"$xt3_color\">$xt3_glyph</span>"
 
-# --- Tooltip: combine privacy-dots's detail with X-T3 state ----------------
+# --- Tooltip: monitoring status and X-T3 state -----------------------------
 if [ -n "$pd_tooltip" ]; then
   full_tooltip="$pd_tooltip"$'\n'"X-T3: ${xt3_tooltip#X-T3 }"
 else

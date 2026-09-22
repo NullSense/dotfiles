@@ -1,0 +1,9 @@
+id = "local.collie-autostart"
+name = "Collie Herdr startup"
+version = "1.0.0"
+min_herdr_version = "0.7.0"
+description = "Start the optional Collie bridge when the Herdr server starts."
+platforms = ["linux"]
+
+[[startup]]
+command = ["systemctl", "--user", "start", "collie.service"]

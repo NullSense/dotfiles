@@ -10,6 +10,11 @@
 set -u
 
 SERVICE="xt3-webcam.service"
+WAYBAR_SIGNAL=15
+
+refresh_waybar() {
+  pkill -RTMIN+"$WAYBAR_SIGNAL" waybar 2>/dev/null || true
+}
 CAM_USB_ID="04cb:02dd"
 ICON="camera-web"
 ACTION="${1:-restart}"
@@ -41,6 +46,7 @@ case "$ACTION" in
       # systemd returns immediately; give ExecStartPre + gphoto2 detect a moment.
       sleep 1
       if systemctl --user is-active --quiet "$SERVICE"; then
+        refresh_waybar
         notify "X-T3 webcam started" "Streaming to /dev/video10."
       else
         notify "X-T3 service failed to start" \
@@ -55,6 +61,7 @@ case "$ACTION" in
     ;;
   stop)
     if err=$(systemctl --user stop "$SERVICE" 2>&1); then
+      refresh_waybar
       notify "X-T3 webcam stopped" "Loopback /dev/video10 released."
     else
       notify "systemctl stop failed" "$err" critical

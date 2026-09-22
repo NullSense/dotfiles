@@ -17,15 +17,15 @@ ExecStart=/usr/bin/uv run python -m legalkb serve
 # 0.0008 s warm — the cost is a per-process cold computation, paid once, so paying
 # it here means the first real query never does. /health alone is most of it: it
 # aggregates over 93,689 works and 206,350 edges.
-# Deliberately NOT an embedder ping. See the doc above: pinning nemotron-embed-1b
-# is a known regression (2026-08-16 — pinned, it beat the 22.9 GB qwen3.8-27b to the
-# VRAM at every startup and left the 27B unstartable). Warming the GPU leg is opt-in
-# and session-scoped, never a boot-time side effect.
+# GPU model residency is owned by llama-swap, independently of this server.
+# LegalKB stays on-demand; start with: systemctl --user start legalkb.service
 ExecStartPost=/usr/bin/curl --fail --silent --output /dev/null --retry 120 --retry-delay 2 --retry-connrefused --retry-all-errors --connect-timeout 2 --max-time 120 http://127.0.0.1:8077/health
 # `-` prefix: a warm-up is an optimisation, never a reason to declare the server down.
 # The JSON must be single-quoted or systemd splits it on spaces and curl sends garbage.
 ExecStartPost=-/usr/bin/curl --fail --silent --output /dev/null --max-time 60 -X POST http://127.0.0.1:8077/show -H 'Content-Type: application/json' -d '{"id":"de.sgb_2.§22","as_of":"today"}'
 
+# uv reports a forwarded SIGTERM as exit 143 during a normal systemctl stop.
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=5
 # The warm-up above runs inside the start job, and a cold /health on a loaded box

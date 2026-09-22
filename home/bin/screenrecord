@@ -29,7 +29,7 @@
 #   gpu-screen-recorder captures via DRM/KMS, which PipeWire never sees — so the
 #   privacy-dots backend can't light the "screen" dot for our own recordings.
 #   Instead, waybar's xt3-status.sh lights the dot whenever a gpu-screen-recorder
-#   process is alive, and we fire `pkill -RTMIN+8 waybar` on start/stop so it
+#   process is alive, and we fire `pkill -RTMIN+15 waybar` on start/stop so it
 #   flips instantly. This is why portal mode is no longer needed for the dot.
 #
 # Requirements (install via paru if missing):
@@ -71,7 +71,7 @@ for arg in "$@"; do
 done
 
 is_recording() { pgrep -f "^gpu-screen-recorder" >/dev/null; }
-toggle_indicator() { pkill -RTMIN+8 waybar 2>/dev/null || true; }
+toggle_indicator() { pkill -RTMIN+15 waybar 2>/dev/null || true; }
 
 default_resolution() {
     read -r w h < <(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | "\(.width) \(.height)"')

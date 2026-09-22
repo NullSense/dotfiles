@@ -36,7 +36,7 @@ F="${XDG_RUNTIME_DIR:-/tmp}/brightness"
 LOCK="${XDG_RUNTIME_DIR:-/tmp}/brightness.lock"
 MIN=0
 MAX=100
-SIGNAL_NUM=8   # waybar custom/brightness has "signal": 8
+SIGNAL_NUM=16  # waybar custom/brightness has "signal": 16
 
 [ -f "$F" ] || echo 100 > "$F"
 cur=$(cat "$F")

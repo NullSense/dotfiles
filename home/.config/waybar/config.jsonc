@@ -236,8 +236,11 @@
     "custom/xt3-status": {
         "exec": "$HOME/.config/waybar/xt3-status.sh",
         "return-type": "json",
-        "interval": 2,
-        "signal": 8,
+        // X-T3 actions and screenrecord signal RTMIN+15 directly. Keep a
+        // slow fallback for USB hotplug and external webcam consumers, which
+        // have no reliable Wayland/user-service event source.
+        "interval": 10,
+        "signal": 15,
         "format": "{}",
         "tooltip": true,
         "escape": false,
@@ -271,14 +274,19 @@
         "on-scroll-down": "$HOME/bin/brightness-ctl -5",
         "on-click": "$HOME/bin/brightness-ctl 100",
         "on-click-middle": "$HOME/bin/brightness-ctl 30",
-        "interval": 5,
-        "signal": 8
+        // brightness-ctl is the sole state writer and signals RTMIN+16 after
+        // every change. `get` reads that same cached state, so polling cannot
+        // discover an unsignalled physical DDC change; keep this event-only.
+        "interval": "once",
+        "signal": 16
     },
     "custom/colortemp": {
         "format": "  {}",
         "exec": "$HOME/bin/colortemp-ctl get",
         "exec-on-event": false,
-        "interval": 5,
+        // colortemp-ctl and the scheduled systemd timer signal RTMIN+13.
+        // This module has no useful high-frequency external event source.
+        "interval": "once",
         "signal": 13,
         "tooltip-format": "Night color — Hyprland screen shader\nContinuous final-output transform. Screenshots and recordings include the effect.\nMonitor Picture Mode and native gamut remain untouched.\n   scroll        100K warmer / cooler\n   left-click    accurate default (identity / 6500K)\n   right-click   night preset (4000K)\n   middle-click  follow automatic schedule\nAuto 4000K 19:00→06:00; range 2500–6500K",
         "on-scroll-up": "$HOME/bin/colortemp-ctl cooler",

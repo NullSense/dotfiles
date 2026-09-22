@@ -1,6 +1,11 @@
 [Unit]
 Description=Apply scheduled Hyprland screen-shader color temperature
 PartOf=graphical-session.target
+# colortemp used to race the compositor/session environment at login. The
+# graphical target pulls these units, so order after their canonical readiness
+# points; wayland-session-waitenv is intentionally not Required because it is
+# a transient oneshot (RemainAfterExit=no).
+After=wayland-session-waitenv.service wayland-wm@hyprland.desktop.service
 
 [Service]
 Type=oneshot

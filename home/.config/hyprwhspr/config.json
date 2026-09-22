@@ -36,6 +36,7 @@
   "filter_filler_words": true,
   "post_transcription_hook": "/home/nullsense/.local/bin/hyprwhspr-ai-rewrite-hook",
   "clipboard_behavior": true,
+  "audio_device_name": "voice_cleaned",
   "transcription_backend": "onnx-asr",
   "audio_feedback": true,
   "audio_ducking": true

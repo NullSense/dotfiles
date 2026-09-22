@@ -85,7 +85,6 @@ window#waybar.hidden { opacity: 0; }
 #custom-brightness,
 #custom-aiquota,
 #custom-agents,
-#custom-sudo,
 #custom-hyprwhspr,
 #custom-notifications,
 #custom-xt3-status {
@@ -349,7 +348,7 @@ window#waybar.hidden { opacity: 0; }
 #custom-aiquota.mode-7d   { border-bottom: 1px dotted @gray; }
 
 /* ============================================================
- * Attention indicators — agents waiting + sudo open
+ * Attention indicators — agents waiting
  *  Sentinel: any window whose terminal title starts with the agent's
  *  brand glyph + `[<id>]` tag (OSC-2 from agent hooks). Same windowrule
  *  also paints a red border on the agent's window in Hyprland.
@@ -361,8 +360,7 @@ window#waybar.hidden { opacity: 0; }
 /* Idle pill stays visible (same chrome as the rest of the family),
  * dimmed via low-contrast color + reduced opacity so the chrome reads
  * as "armed but quiet" rather than competing with active state. */
-#custom-agents.idle,
-#custom-sudo.idle {
+#custom-agents.idle {
     color: @gray;
     opacity: 0.55;
 }
@@ -370,34 +368,6 @@ window#waybar.hidden { opacity: 0; }
     /* Per-agent foreground colors come from inline Pango spans in the
      * module text; the pill chrome just gets a red border for emphasis. */
     border-color: @red;
-}
-/* Sudo state palette — chosen so each state is recognisable by colour
- * alone, not just glyph. Lock-glyph carries the auth state, colour
- * carries the urgency:
- *   idle    closed lock   gray   neutral, locked
- *   prompt  closed+...    yellow blink — needs your action
- *   active  open lock     green  — privileged command running RIGHT NOW
- *   cached  open lock     blue   — auth cached, no command running
- *   failed  closed lock   red    brief flash — auth attempt rejected
- */
-#custom-sudo.active {
-    color: @green;
-    border-color: @green;
-}
-#custom-sudo.prompt {
-    color: @yellow;
-    border-color: @yellow;
-    animation: blink 0.8s ease-in-out infinite alternate;
-}
-#custom-sudo.cached {
-    color: @blue;
-    border-color: @bg3;
-    opacity: 0.6;
-}
-#custom-sudo.failed {
-    color: @red;
-    border-color: @red;
-    animation: blink 0.4s linear 4 alternate;  /* 4 fast pulses then idles */
 }
 
 /* hyprland workspace urgency (xdg-activation-driven) */
@@ -420,7 +390,6 @@ window#waybar.hidden { opacity: 0; }
 #custom-aiquota:hover,
 #custom-xt3-status:hover,
 #custom-agents:hover,
-#custom-sudo:hover,
 #custom-hyprwhspr:hover,
 #idle_inhibitor:hover {
     background: @bg2;

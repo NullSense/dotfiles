@@ -24,7 +24,6 @@
     ],
     "modules-right": [
         "custom/agents",
-        "custom/sudo",
         "custom/aiquota",
         "custom/hyprwhspr",
         "custom/xt3-status",
@@ -235,17 +234,6 @@
         "markup": "pango",
         "on-click": "$HOME/.config/waybar/agent-attention.sh focus",
         "on-click-right": "$HOME/.config/waybar/agent-attention.sh dismiss-all"
-    },
-    "custom/sudo": {
-        "exec": "$HOME/.config/waybar/sudo-indicator.sh",
-        "return-type": "json",
-        "interval": "once",
-        "signal": 10,
-        "format": "{}",
-        "tooltip": true,
-        "escape": false,
-        "markup": "pango",
-        "on-click": "$HOME/.config/waybar/sudo-indicator.sh focus"
     },
     "custom/hyprwhspr": {
         "format": "{}",

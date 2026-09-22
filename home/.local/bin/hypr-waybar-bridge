@@ -67,7 +67,7 @@ def find_socket() -> Path | None:
 def signal_waybar() -> None:
     # pkill is robust to multiple waybar instances (multi-monitor sometimes
     # spawns siblings) and matches the convention used by the rest of the
-    # signalling pipeline (sudo-pill-daemon, Claude Code hooks).
+    # signalling pipeline (Claude Code hooks).
     subprocess.run(
         ["pkill", f"-SIGRTMIN+8", "-u", str(UID), "waybar"],
         stdout=subprocess.DEVNULL,

@@ -8,7 +8,8 @@ should refresh the workspace pill or agent indicator.
 Why this exists: waybar's `hyprland/workspaces` is event-driven internally
 but our `custom/workspaces` script can't subscribe to the IPC socket on
 its own — waybar would otherwise have to poll. One persistent bridge
-re-uses one socket connection and dispatches a signal per relevant event.
+re-uses one socket connection and coalesces relevant event bursts into one
+refresh after 100ms of quiet, with a 250ms maximum delay during busy periods.
 
 Originally written in bash + socat; rewritten in Python because socat
 isn't installed by default on Arch and the stdlib already has everything
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import os
 import re
+import select
 import signal
 import socket
 import subprocess
@@ -34,6 +36,8 @@ from pathlib import Path
 UID = os.getuid()
 XDG = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{UID}"))
 SIG = signal.SIGRTMIN + 8
+QUIET_PERIOD = 0.10
+MAX_DELAY = 0.25
 
 EVENTS_RE = re.compile(
     r"^(workspace|focusedmon|openwindow|closewindow|movewindow|urgent|"
@@ -76,21 +80,39 @@ def signal_waybar() -> None:
     )
 
 
+def dispatch_events(s: socket.socket) -> None:
+    """Coalesce event bursts without starving updates during continuous activity."""
+    buf = b""
+    first_pending = None
+    deadline = None
+    while True:
+        now = time.monotonic()
+        if deadline is not None and now >= deadline:
+            signal_waybar()
+            first_pending = deadline = None
+        timeout = None if deadline is None else max(0, deadline - now)
+        ready, _, _ = select.select([s], [], [], timeout)
+        if not ready:
+            continue
+        chunk = s.recv(4096)
+        if not chunk:
+            if deadline is not None:
+                signal_waybar()
+            return
+        buf += chunk
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            if EVENTS_RE.match(line.decode("utf-8", "replace")):
+                now = time.monotonic()
+                if first_pending is None:
+                    first_pending = now
+                deadline = min(now + QUIET_PERIOD, first_pending + MAX_DELAY)
+
+
 def stream_events(sock_path: Path) -> None:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.connect(str(sock_path))
-        # Hyprland never closes mid-session unless the compositor dies, so a
-        # plain blocking recv loop is the right primitive here.
-        buf = b""
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                return  # Hyprland closed — outer loop will reconnect.
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                if EVENTS_RE.match(line.decode("utf-8", "replace")):
-                    signal_waybar()
+        dispatch_events(s)
 
 
 def main() -> None:

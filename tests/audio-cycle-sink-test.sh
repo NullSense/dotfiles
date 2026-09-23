@@ -24,3 +24,8 @@ out=$(AUDIO_CYCLE_SINKS=$sinks FAKE_DEFAULT=alsa_output.pci-0000_01_00.1.hdmi-st
 old=$'alsa_output.pci-0000_0f_00.6.analog-stereo\nalsa_output.pci-0000_03_00.1.hdmi-stereo-extra4'
 out=$(AUDIO_CYCLE_SINKS=$old FAKE_DEFAULT=alsa_output.pci-0000_0f_00.6.analog-stereo "$script")
 [[ $out == alsa_output.pci-0000_03_00.1.hdmi-stereo-extra4 ]]
+
+# The front headphone jack sensor is stuck "plugged"; selecting the Headphones
+# port silences the rear jacks. The cycle must always pick Line Out.
+grep -q 'set-sink-port "$HEADPHONES" analog-output-lineout' "$script"
+! grep -q 'analog-output-headphones' "$script"

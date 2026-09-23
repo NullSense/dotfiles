@@ -29,12 +29,12 @@ fi
 
 pactl set-default-sink "$next"
 
-# The ALC1220 exposes a front-panel Headphones port and rear Line Out on one
-# sink; routing to Line Out mutes the front jack. Prefer Headphones when a
-# jack is detected there so the headphones actually get sound.
-if [[ "$next" == "$HEADPHONES" ]] && pactl list sinks | awk -v s="$HEADPHONES" '
-    $1=="Name:" {inside = ($2==s)} inside && /analog-output-headphones:.*available\)/ {found=1} END {exit !found}'; then
-  pactl set-sink-port "$HEADPHONES" analog-output-headphones 2>/dev/null || true
+# Always route the analog sink to Line Out. The front-panel headphone jack
+# sensor on this board reads "plugged" with nothing in it, so the Headphones
+# port looks available but only drives the (empty) front jack; Line Out, with
+# ALSA Auto-Mute disabled (alsactl store), drives the rear jacks.
+if [[ "$next" == "$HEADPHONES" ]]; then
+  pactl set-sink-port "$HEADPHONES" analog-output-lineout 2>/dev/null || true
 fi
 
 # Move every active stream onto the new default so audio follows the user.

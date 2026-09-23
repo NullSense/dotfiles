@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
-# Cycle default sink between Realtek line-out (headphones, 3.5 mm rear jack)
-# and the Aorus FO32U2 monitor speakers (HDMI/DP audio on the AMD GPU).
+# Cycle default sink between the onboard Realtek analog output (headphones)
+# and the Aorus FO32U2 monitor speakers (HDMI/DP audio on the GPU).
+#
+# Sinks are discovered by name pattern, not hardcoded: PCI addresses shift
+# whenever a card is swapped (the RX 6750 XT → RTX 5090 move broke the old
+# hardcoded names). AUDIO_CYCLE_SINKS overrides discovery for tests.
 set -euo pipefail
 
-HEADPHONES="alsa_output.pci-0000_0f_00.6.analog-stereo"
-AORUS="alsa_output.pci-0000_03_00.1.hdmi-stereo-extra4"
+sinks=${AUDIO_CYCLE_SINKS:-$(pactl list short sinks | awk '{print $2}')}
+HEADPHONES=$(grep -m1 -E '^alsa_output\.pci-.*\.analog-stereo$' <<<"$sinks" || true)
+AORUS=$(grep -m1 -E '^alsa_output\.pci-.*\.hdmi-stereo' <<<"$sinks" || true)
+
+if [[ -z "$HEADPHONES" || -z "$AORUS" ]]; then
+  notify-send -t 3000 "Audio output" "cannot find both sinks (headphones='$HEADPHONES' aorus='$AORUS')" 2>/dev/null || true
+  exit 1
+fi
 
 current=$(pactl get-default-sink)
 case "$current" in
@@ -12,7 +22,20 @@ case "$current" in
   *)             next="$HEADPHONES" ;;
 esac
 
+if [[ -n "${AUDIO_CYCLE_DRY_RUN:-}" ]]; then
+  echo "$next"
+  exit 0
+fi
+
 pactl set-default-sink "$next"
+
+# The ALC1220 exposes a front-panel Headphones port and rear Line Out on one
+# sink; routing to Line Out mutes the front jack. Prefer Headphones when a
+# jack is detected there so the headphones actually get sound.
+if [[ "$next" == "$HEADPHONES" ]] && pactl list sinks | awk -v s="$HEADPHONES" '
+    $1=="Name:" {inside = ($2==s)} inside && /analog-output-headphones:.*available\)/ {found=1} END {exit !found}'; then
+  pactl set-sink-port "$HEADPHONES" analog-output-headphones 2>/dev/null || true
+fi
 
 # Move every active stream onto the new default so audio follows the user.
 pactl list short sink-inputs | awk '{print $1}' | while read -r id; do

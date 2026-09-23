@@ -17,6 +17,12 @@ StartLimitIntervalSec=60
 # Restart=on-failure races in a unit-owned instance. `-` prefix tolerates the
 # common case of nothing to kill; sleep gives waybar's layer-shell surface a
 # beat to disappear before the new one binds.
+#
+# The unit owns waybar, so it also owns omarchy's `waybar-off` flag. Without
+# it omarchy's autostart.conf runs `uwsm-app -- waybar` on login and a second
+# bar lives until the next restart. The flag lives in wipeable state, not in
+# dotfiles, and was lost once already (2026-09), so recreate it on every start.
+ExecStartPre=/bin/sh -c 'mkdir -p %h/.local/state/omarchy/toggles && touch %h/.local/state/omarchy/toggles/waybar-off'
 ExecStartPre=-/usr/bin/pkill -x -u %U waybar
 ExecStartPre=/bin/sh -c 'i=0; while pgrep -x -u %U waybar >/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done; pkill -KILL -x -u %U waybar 2>/dev/null; exit 0'
 # Waybar 0.15.0 accidentally puts the battery status on stdout for every

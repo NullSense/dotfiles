@@ -353,10 +353,11 @@ models:
     # interactive chat, where 10 parallel requests is generous. It is wrong for a
     # bulk embedder.
     concurrencyLimit: 32
-    # Repowise requires this dense embedder: never unload it for being idle.
-    # This disables only idle expiry; the matrix can still evict incompatible workers.
-    # Do not restart/reload llama-swap or unload Nemotron during active agent work.
-    ttl: 0
+    # Idle-evict after 10 min (was ttl:0 pinned for repowise). An explicit unload
+    # would otherwise be undone by the next background embed (hindsight consolidation)
+    # and then stay resident forever. Cost: the first embed after eviction pays a
+    # ~40s cold start.
+    ttl: 600
     name: "Nemotron-3-Embed-1B (vLLM NVFP4, 2048-dim)"
     # `embed` moved here from octen-embedding-4b on 2026-08-15 so the generic name means the
     # same model at :9292 and at litellm's :4000 (which already mapped embed → this model).

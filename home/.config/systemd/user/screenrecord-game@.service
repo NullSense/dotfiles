@@ -1,0 +1,11 @@
+[Unit]
+Description=HDR gameplay capture (%i)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=%h/bin/screenrecord --game-worker=%i
+KillSignal=SIGINT
+TimeoutStopSec=30
+ExecStopPost=-/usr/bin/pkill -RTMIN+15 waybar

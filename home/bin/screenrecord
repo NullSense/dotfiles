@@ -24,6 +24,9 @@
 #   --webcam-device=/dev/videoN pick the webcam (auto-detects first if omitted)
 #   --resolution=WxH            cap resolution
 #   --stop-recording            stop if recording, else no-op (menu probe)
+#   --game                      toggle 4K60 AV1 HDR recording of DP-1 + game audio
+#   --replay                    toggle a 120-second HDR replay buffer in RAM
+#   --save-replay               save the current replay without stopping capture
 #
 # Privacy dot:
 #   gpu-screen-recorder captures via DRM/KMS, which PipeWire never sees — so the
@@ -47,7 +50,7 @@ if ! command -v gpu-screen-recorder >/dev/null 2>&1; then
 fi
 
 [[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
-OUTPUT_DIR="${XDG_VIDEOS_DIR:-$HOME/Videos}"
+OUTPUT_DIR="${SCREENRECORD_OUTPUT_DIR:-${XDG_VIDEOS_DIR:-$HOME/Videos}}"
 mkdir -p "$OUTPUT_DIR"
 
 DESKTOP_AUDIO=false
@@ -58,6 +61,8 @@ RESOLUTION=""
 STOP=false
 FPS=60
 RECORDING_FILE="/tmp/screenrecord-current"
+GAME_ACTION=""
+GAME_WORKER=""
 
 for arg in "$@"; do
     case "$arg" in
@@ -67,11 +72,114 @@ for arg in "$@"; do
         --webcam-device=*)       WEBCAM_DEVICE="${arg#--webcam-device=}" ;;
         --resolution=*)          RESOLUTION="${arg#--resolution=}" ;;
         --stop-recording)        STOP=true ;;
+        --game)                  GAME_ACTION=record ;;
+        --replay)                GAME_ACTION=replay ;;
+        --save-replay)           GAME_ACTION=save ;;
+        --game-worker=*)         GAME_WORKER="${arg#--game-worker=}" ;;
     esac
 done
 
 is_recording() { pgrep -f "^gpu-screen-recorder" >/dev/null; }
 toggle_indicator() { pkill -RTMIN+15 waybar 2>/dev/null || true; }
+
+# systemd owns the gameplay encoder PID and stops it with SIGINT, preserving
+# the container. Never signal every recorder: desktop and gameplay controls
+# must not accidentally terminate each other or an unrelated capture.
+game_active() {
+    systemctl --user is-active --quiet "screenrecord-game@$1.service"
+}
+
+game_error() {
+    printf '%s\n' "$*" >&2
+    notify-send -u critical "Gameplay recording" "$*"
+    return 1
+}
+
+game_worker() {
+    local mode=$1 monitor=DP-1 destination
+    [[ $mode == record || $mode == replay ]] || return 2
+    if ! hyprctl -j monitors | jq -e --arg monitor "$monitor" \
+        'any(.[]; .name == $monitor and (.colorManagementPreset | startswith("hdr")))' >/dev/null; then
+        game_error "Enable HDR on $monitor before starting HDR capture."
+        return 1
+    fi
+    local args=(-w "$monitor" -s 3840x2160 -f 60 -fm cfr
+        -k av1_hdr -encoder gpu -fallback-cpu-encoding no
+        -c mkv -bm cbr -q 60000 -a default_output -ac opus)
+    if [[ $mode == replay ]]; then
+        destination="$OUTPUT_DIR/Gameplay/Replays"
+        mkdir -p "$destination"
+        args+=(-r 120 -replay-storage ram)
+    else
+        mkdir -p "$OUTPUT_DIR/Gameplay"
+        destination="$OUTPUT_DIR/Gameplay/gameplay-$(date +'%Y-%m-%d_%H-%M-%S-%N').mkv"
+    fi
+    printf 'Gameplay capture: %s -> %s\n' "$mode" "$destination"
+    toggle_indicator
+    exec gpu-screen-recorder "${args[@]}" -o "$destination"
+}
+
+game_control() {
+    local action=$1 unit other variable
+    exec 9>"${XDG_RUNTIME_DIR:?}/screenrecord-game.lock"
+    flock -n 9 || return 0
+    if [[ $action == save ]]; then
+        game_active replay || { game_error "Start replay capture with Super+Alt+F10 first."; return 1; }
+        systemctl --user kill --kill-whom=main --signal=SIGUSR1 screenrecord-game@replay.service || return
+        notify-send "Saving replay" "Last two minutes → Videos/Gameplay/Replays"
+        return
+    fi
+    unit="screenrecord-game@$action.service"
+    if game_active "$action"; then
+        systemctl --user stop "$unit" || return
+        toggle_indicator
+        if [[ $action == replay ]]; then
+            notify-send "Replay capture stopped" "Saved clips remain in Videos/Gameplay/Replays."
+        else
+            notify-send "Gameplay recording saved" "Videos/Gameplay"
+        fi
+        return
+    fi
+    other=record
+    [[ $action == record ]] && other=replay
+    if game_active "$other" || is_recording; then
+        game_error "Another recording is active. Stop it before starting a different mode."
+        return 1
+    fi
+    # Refresh only display/session names; never import the whole shell environment.
+    local session_vars=()
+    for variable in WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE; do
+        [[ -v $variable ]] && session_vars+=("$variable")
+    done
+    if ((${#session_vars[@]})); then
+        systemctl --user import-environment "${session_vars[@]}" || return
+    fi
+    systemctl --user start "$unit" || return
+    sleep 1
+    if ! game_active "$action"; then
+        game_error "Capture failed. See: journalctl --user -u $unit"
+        return 1
+    fi
+    toggle_indicator
+    if [[ $action == replay ]]; then
+        notify-send "HDR replay capture started" "4K60 · game audio · 120 seconds in RAM\nSave: Super+Alt+F11 · Stop: Super+Alt+F10"
+    else
+        notify-send "HDR gameplay recording started" "4K60 · game audio\nStop and save: Super+Alt+F9"
+    fi
+}
+
+if [[ -n $GAME_WORKER ]]; then
+    game_worker "$GAME_WORKER"
+    exit $?
+elif [[ -n $GAME_ACTION ]]; then
+    game_control "$GAME_ACTION"
+    exit $?
+elif game_active record || game_active replay; then
+    # The capture menu probes --stop-recording too. Consume it without invoking
+    # the desktop recorder's historical global stop path.
+    notify-send "Gameplay capture is active" "Use Super+Alt+F9 for recording or Super+Alt+F10 for replay."
+    exit 0
+fi
 
 default_resolution() {
     read -r w h < <(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | "\(.width) \(.height)"')

@@ -57,6 +57,28 @@ set through this documented interface instead of adding one-off runner scripts:
 for test_file in ~/.dotfiles/tests/*.sh; do "$test_file"; done
 ```
 
+## Gameplay recording
+
+`~/bin/screenrecord` owns desktop and gameplay capture. Gameplay capture uses
+GPU Screen Recorder on the AORUS (`DP-1`): 3840×2160 at 60 FPS, AV1 HDR,
+GPU encoding only, 60 Mb/s, and desktop/game audio (no microphone).
+HDR must already be enabled on that display.
+
+- **Super+Alt+F9** starts/stops a full recording in `~/Videos/Gameplay/`.
+- **Super+Alt+F10** starts/stops a 120-second replay buffer in RAM.
+- **Super+Alt+F11** saves the buffered replay in `~/Videos/Gameplay/Replays/`.
+
+Replay uses approximately 900 MB plus overhead at the configured bitrate.
+Save a replay before stopping if you want the buffered footage. Captures are
+Matroska files; the gameplay path does not trim, normalize or re-encode them.
+These modes are opt-in, mutually exclusive, and do not start at login.
+The original desktop recording shortcuts and capture menu remain available.
+
+`screenrecord-game@record.service` and `screenrecord-game@replay.service` own
+the encoder lifetime. Inspect failures with `journalctl --user -u
+screenrecord-game@replay.service` (or `@record.service`). Changes are covered by
+`tests/screenrecord-game-test.sh`, included in the regression interface above.
+
 ## Layout
 
 ```text

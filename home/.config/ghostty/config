@@ -13,11 +13,26 @@ font-style-italic = Medium Italic
 font-style-bold-italic = Bold Italic
 font-size = 9
 
-# Compact opaque window; tabs stay visible when used, without a duplicate titlebar.
+# Gruvbox highlights: dark selected text stays readable on the warm selection.
+selection-background = #d5c4a1
+selection-foreground = #1d2021
+cursor-color = #ebdbb2
+cursor-text = #1d2021
+search-background = #fabd2f
+search-foreground = #1d2021
+search-selected-background = #fe8019
+search-selected-foreground = #1d2021
+
+# Flat bottom tabs feel like an editor statusline; Hyprland owns window chrome.
 background-opacity = 1
 window-decoration = server
+window-theme = ghostty
+window-title-font-family = "JetBrainsMono Nerd Font Mono"
 gtk-titlebar = false
-gtk-tabs-location = top
+gtk-tabs-location = bottom
+gtk-wide-tabs = false
+gtk-toolbar-style = flat
+gtk-custom-css = "~/.config/ghostty/gruvbox.css"
 window-padding-x = 6
 window-padding-y = 4
 resize-overlay = never

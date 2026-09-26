@@ -1,0 +1,87 @@
+/* Ghostty GTK 4 / libadwaita: Gruvbox Dark Hard, compact editor-like chrome.
+ * Loaded only by Ghostty through gtk-custom-css; no desktop-wide GTK overrides.
+ * Inspiration: https://github.com/ghostty-org/ghostty/discussions/5827
+ * Palette: https://github.com/morhetz/gruvbox
+ */
+:root {
+  --window-bg-color: #1d2021;
+  --window-fg-color: #ebdbb2;
+  --view-bg-color: #1d2021;
+  --view-fg-color: #ebdbb2;
+  --headerbar-bg-color: #282828;
+  --headerbar-fg-color: #ebdbb2;
+  --headerbar-backdrop-color: #282828;
+  --headerbar-shade-color: transparent;
+  --popover-bg-color: #282828;
+  --popover-fg-color: #ebdbb2;
+  --dialog-bg-color: #282828;
+  --dialog-fg-color: #ebdbb2;
+  --card-bg-color: #32302f;
+  --card-fg-color: #ebdbb2;
+  --accent-bg-color: #d79921;
+  --accent-fg-color: #1d2021;
+  --accent-color: #fabd2f;
+  --destructive-bg-color: #cc241d;
+  --destructive-fg-color: #fbf1c7;
+  --destructive-color: #fb4934;
+  --success-color: #b8bb26;
+  --warning-color: #fabd2f;
+  --error-color: #fb4934;
+}
+
+tabbar {
+  background: #282828;
+  color: #bdae93;
+  border-top: 1px solid #3c3836;
+  font-family: "JetBrainsMono Nerd Font Mono";
+  font-size: 12px;
+}
+
+tabbar tab {
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+tabbar tab:selected {
+  background: #32302f;
+  color: #ebdbb2;
+  box-shadow: inset 0 2px #d79921;
+}
+
+tabbar tab:hover {
+  background: #3c3836;
+}
+
+/* Keep buttons, close controls and drag targets usable with the mouse. */
+tabbar button {
+  border-radius: 3px;
+}
+
+.search-overlay,
+.key-state-overlay {
+  background: #282828;
+  color: #ebdbb2;
+  outline-color: #665c54;
+  border-radius: 4px;
+}
+
+.search-overlay entry,
+.command-palette-search {
+  background: #1d2021;
+  color: #ebdbb2;
+  border-radius: 4px;
+}
+
+label.url-overlay {
+  background: #282828;
+  color: #8ec07c;
+  outline-color: #504945;
+}
+
+popover > contents {
+  border: 1px solid #504945;
+  border-radius: 5px;
+}

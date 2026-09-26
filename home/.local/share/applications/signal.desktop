@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Signal
+Comment=Signal - Private Messenger (native Wayland + fractional scale)
+Icon=signal-desktop
+Exec=signal-desktop --ozone-platform-hint=auto --enable-features=UseOzonePlatform,WaylandWindowDecorations,WaylandFractionalScaleV1 --ozone-platform=wayland -- %u
+Terminal=false
+Categories=Network;InstantMessaging;
+StartupWMClass=signal
+MimeType=x-scheme-handler/sgnl;x-scheme-handler/signalcaptcha;
+Keywords=sgnl;chat;im;messaging;messenger;security;privat;
+X-GNOME-UsesNotifications=true

@@ -40,7 +40,7 @@ alias gc="git checkout"
 alias rsync='rsync --info=progress2'
 alias l='ls -Fh --color=auto --group-directories-first'
 alias ll='ls -alF --color=auto --group-directories-first'
-alias dropdown='nohup alacritty -t dropdown_term > /dev/null 2>&1 &|' # dropdown terminal
+alias dropdown='hyprctl dispatch togglespecialworkspace dropdown' # managed dropdown terminal
 alias ls="eza"
 alias cat="bat"
 alias find="fd"

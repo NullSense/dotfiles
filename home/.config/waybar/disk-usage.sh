@@ -49,7 +49,7 @@ case "${1:-}" in
     # Detached (setsid -f): waybar waitpid()s the click handler and pauses
     # this module's polling until it exits — an exec'd terminal froze the
     # pill while the ncdu window stayed open. See gpu-status.sh.
-    setsid -f alacritty --class=com.local.floating-monitor -e ncdu -x "$2" </dev/null &>/dev/null
+    setsid -f ghostty --gtk-single-instance=false --class=com.local.floating-monitor -e ncdu -x "$2" </dev/null &>/dev/null
     exit 0
     ;;
   pill) : ;;   # fall through

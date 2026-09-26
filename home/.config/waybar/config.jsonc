@@ -339,7 +339,7 @@
             "warning": 25,
             "critical": 10
         },
-        "on-click": "alacritty --class=com.local.floating-monitor -e sh -c 'upower -i $(upower -e | grep hidpp); echo; read -r _'"
+        "on-click": "ghostty --gtk-single-instance=false --class=com.local.floating-monitor -e sh -c 'upower -i $(upower -e | grep hidpp); echo; read -r _'"
     },
     "tray": {
         "spacing": 12,

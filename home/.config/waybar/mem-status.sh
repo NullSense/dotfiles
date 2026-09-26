@@ -19,7 +19,7 @@ set -u
 # long as the btop window stayed open. See gpu-status.sh for the full story.
 case "${1:-}" in
   btop)
-    setsid -f alacritty --class=com.local.floating-monitor -e btop </dev/null &>/dev/null
+    setsid -f ghostty --gtk-single-instance=false --class=com.local.floating-monitor -e btop </dev/null &>/dev/null
     exit 0
     ;;
 esac

@@ -18,7 +18,7 @@ path=(
 # alone is enough for utf-8 default behavior; let programs override the rest.
 export LANG=en_US.UTF-8
 export EDITOR=nvim VISUAL=nvim MANPAGER='nvim +Man!'
-export COLORTERM=truecolor TERMINAL=alacritty
+export COLORTERM=truecolor TERMINAL=ghostty
 
 # Wayland / Qt / Mozilla
 # Don't hardcode XDG_CURRENT_DESKTOP / XDG_SESSION_TYPE — the compositor and

@@ -33,11 +33,11 @@ smi() { timeout -k 1 2 "$SMI" "$@"; }
 # instantly and polling never pauses.
 case "${1:-}" in
   nvtop)
-    setsid -f alacritty --class=com.local.floating-monitor -e nvtop </dev/null &>/dev/null
+    setsid -f ghostty --gtk-single-instance=false --class=com.local.floating-monitor -e nvtop </dev/null &>/dev/null
     exit 0
     ;;
   smi)
-    setsid -f alacritty --class=com.local.floating-monitor -e sh -c 'nvidia-smi; echo; read -r _' </dev/null &>/dev/null
+    setsid -f ghostty --gtk-single-instance=false --class=com.local.floating-monitor -e sh -c 'nvidia-smi; echo; read -r _' </dev/null &>/dev/null
     exit 0
     ;;
 esac

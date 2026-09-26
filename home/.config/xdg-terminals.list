@@ -1,0 +1,3 @@
+# Default for Omarchy and applications using xdg-terminal-exec.
+com.mitchellh.ghostty.desktop
+Alacritty.desktop

@@ -1,0 +1,59 @@
+# Ghostty 1.3: compact code, native Wayland, keyboard-first with full mouse support.
+# Follow Omarchy's active palette (currently Gruvbox Dark Hard).
+config-file = ?"~/.config/omarchy/current/theme/ghostty.conf"
+
+# Real Medium/Bold faces; 9 pt targets 12 px at 1x and 24 px at 2x at 96 DPI.
+font-family = "JetBrainsMono Nerd Font Mono"
+font-family-bold = "JetBrainsMono Nerd Font Mono"
+font-family-italic = "JetBrainsMono Nerd Font Mono"
+font-family-bold-italic = "JetBrainsMono Nerd Font Mono"
+font-style = Medium
+font-style-bold = Bold
+font-style-italic = Medium Italic
+font-style-bold-italic = Bold Italic
+font-size = 9
+
+# Compact opaque window; tabs stay visible when used, without a duplicate titlebar.
+background-opacity = 1
+window-decoration = server
+gtk-titlebar = false
+gtk-tabs-location = top
+window-padding-x = 6
+window-padding-y = 4
+resize-overlay = never
+window-inherit-working-directory = true
+window-inherit-font-size = true
+confirm-close-surface = true
+
+# 32 MiB maximum per surface, allocated as needed; retain modern terminal features.
+scrollback-limit = 33554432
+shell-integration = detect
+shell-integration-features = no-cursor,ssh-env
+cursor-style = block
+cursor-style-blink = false
+
+# Keep selection, middle-click paste, links, wheel scrolling and TUI mouse reporting.
+copy-on-select = clipboard
+mouse-hide-while-typing = true
+clipboard-read = ask
+clipboard-write = allow
+
+# Keep native defaults: Ctrl+Shift+T tabs, Ctrl+Shift+O/E right/down splits,
+# Ctrl+Shift+Enter split zoom, Ctrl+Shift+F search, Ctrl+Shift+P command palette,
+# Ctrl+Shift+PageUp/PageDown command jumps, Ctrl+Tab/Shift+Tab tab switching.
+# Ctrl+Alt+hjkl is free in Ghostty and Hyprland; plain keys remain available to Neovim.
+keybind = ctrl+alt+h=goto_split:left
+keybind = ctrl+alt+j=goto_split:down
+keybind = ctrl+alt+k=goto_split:up
+keybind = ctrl+alt+l=goto_split:right
+
+# Fine size adjustment without replacing the existing Ctrl+plus/minus/0 defaults.
+keybind = ctrl+alt+equal=increase_font_size:0.5
+keybind = ctrl+alt+minus=decrease_font_size:0.5
+
+# Preserve the previous terminal's Shift+Enter newline convention for agent TUIs.
+keybind = shift+enter=text:\x1b\r
+
+# Inspect all scrollback with Neovim: type `nvim -R `, press this chord, then Enter.
+# Paste the path instead of using xdg-open, whose text handler is Calibre here.
+keybind = ctrl+alt+shift+s=write_scrollback_file:paste,plain

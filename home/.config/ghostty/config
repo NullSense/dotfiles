@@ -38,14 +38,22 @@ mouse-hide-while-typing = true
 clipboard-read = ask
 clipboard-write = allow
 
-# Keep native defaults: Ctrl+Shift+T tabs, Ctrl+Shift+O/E right/down splits,
-# Ctrl+Shift+Enter split zoom, Ctrl+Shift+F search, Ctrl+Shift+P command palette,
-# Ctrl+Shift+PageUp/PageDown command jumps, Ctrl+Tab/Shift+Tab tab switching.
-# Ctrl+Alt+hjkl is free in Ghostty and Hyprland; plain keys remain available to Neovim.
-keybind = ctrl+alt+h=goto_split:left
-keybind = ctrl+alt+j=goto_split:down
-keybind = ctrl+alt+k=goto_split:up
-keybind = ctrl+alt+l=goto_split:right
+# Hyprland owns window splits and navigation. Release Ghostty's split shortcuts
+# to the terminal application; native menu/palette split actions still exist.
+# Keep native tabs, search, command palette and command-jump shortcuts.
+keybind = ctrl+shift+o=unbind
+keybind = ctrl+shift+e=unbind
+keybind = super+ctrl+[=unbind
+keybind = super+ctrl+]=unbind
+keybind = ctrl+alt+arrow_up=unbind
+keybind = ctrl+alt+arrow_down=unbind
+keybind = ctrl+alt+arrow_left=unbind
+keybind = ctrl+alt+arrow_right=unbind
+keybind = super+ctrl+shift+arrow_up=unbind
+keybind = super+ctrl+shift+arrow_down=unbind
+keybind = super+ctrl+shift+arrow_left=unbind
+keybind = super+ctrl+shift+arrow_right=unbind
+keybind = ctrl+shift+enter=unbind
 
 # Fine size adjustment without replacing the existing Ctrl+plus/minus/0 defaults.
 keybind = ctrl+alt+equal=increase_font_size:0.5

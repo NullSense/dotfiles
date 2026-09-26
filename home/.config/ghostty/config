@@ -1,6 +1,8 @@
 # Ghostty 1.3: compact code, native Wayland, keyboard-first with full mouse support.
 # Follow Omarchy's active palette (currently Gruvbox Dark Hard).
 config-file = ?"~/.config/omarchy/current/theme/ghostty.conf"
+# Included files load after this file; keep our Gruvbox overrides after Omarchy.
+config-file = "~/.config/ghostty/gruvbox.conf"
 
 # Real Medium/Bold faces; 9 pt targets 12 px at 1x and 24 px at 2x at 96 DPI.
 font-family = "JetBrainsMono Nerd Font Mono"
@@ -12,16 +14,6 @@ font-style-bold = Bold
 font-style-italic = Medium Italic
 font-style-bold-italic = Bold Italic
 font-size = 9
-
-# Gruvbox highlights: dark selected text stays readable on the warm selection.
-selection-background = #d5c4a1
-selection-foreground = #1d2021
-cursor-color = #ebdbb2
-cursor-text = #1d2021
-search-background = #fabd2f
-search-foreground = #1d2021
-search-selected-background = #fe8019
-search-selected-foreground = #1d2021
 
 # Flat bottom tabs feel like an editor statusline; Hyprland owns window chrome.
 background-opacity = 1

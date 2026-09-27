@@ -4,9 +4,11 @@
 # One menu-driven program covering: quick bench, distance bench, full preset
 # sweep, A/B/C compare, playback, preset switching, recording browser.
 #
-# Self-contained — uses pw-record / pw-play / pactl / python3 (all preinstalled).
+# Uses the shared voice-tools library and pw-record / pw-play / pactl / python3.
 
 set -uo pipefail
+
+source "$HOME/.local/lib/voice-tools.sh"
 
 # ─── Constants ────────────────────────────────────────────────────────
 RAW_SRC="alsa_input.usb-Samson_Technologies_Samson_Q2U_Microphone-00.analog-stereo"
@@ -95,50 +97,7 @@ header() {
 }
 
 # ─── Stats ───────────────────────────────────────────────────────────
-analyze() {
-  # $1 = label, $2 = file
-  python3 - "$1" "$2" 2>/dev/null <<'PY'
-import wave, struct, math, sys, os, subprocess, re
-label, f = sys.argv[1], sys.argv[2]
-if not os.path.isfile(f) or os.path.getsize(f) < 100:
-    print(f"    {label}: (empty)"); raise SystemExit
-with wave.open(f, 'rb') as w:
-    sr=w.getframerate(); n=w.getnframes(); ch=w.getnchannels()
-    data=w.readframes(n)
-    samples=struct.unpack('<'+'h'*(n*ch), data)
-    if ch==2: samples=samples[::2]
-    if not samples:
-        print(f"    {label}: (empty)"); raise SystemExit
-    rms=math.sqrt(sum(s*s for s in samples)/len(samples))
-    peak=max(abs(s) for s in samples)
-    win=max(1,int(0.2*sr)); s2=[s*s for s in samples]; csum=0.0; q=float('inf')
-    for i,v in enumerate(s2):
-        csum+=v
-        if i>=win: csum-=s2[i-win]
-        if i+1>=win: q=min(q, math.sqrt(csum/win))
-    db = lambda x: 20*math.log10(max(x,1)/32768)
-    flag = "  CLIPPING!" if peak>=32760 else ""
-
-    # Objective EBU R128 LUFS measurement via ffmpeg's ebur128 filter
-    lufs_str = ""
-    try:
-        r = subprocess.run(
-            ["ffmpeg","-hide_banner","-nostats","-i",f,
-             "-af","ebur128=peak=true","-f","null","-"],
-            capture_output=True, text=True, timeout=15)
-        text = r.stderr
-        # last "I:" / "TP:" lines
-        m_i = re.findall(r"\bI:\s+(-?\d+\.?\d*)\s+LUFS", text)
-        m_tp = re.findall(r"\bTP:\s+(-?\d+\.?\d*)\s+dBFS", text)
-        m_lra = re.findall(r"\bLRA:\s+(-?\d+\.?\d*)\s+LU", text)
-        if m_i and m_tp and m_lra:
-            lufs_str = f"   I {float(m_i[-1]):+5.1f} LUFS  TP {float(m_tp[-1]):+4.1f}  LRA {float(m_lra[-1]):4.1f} LU"
-    except Exception:
-        pass
-
-    print(f"    {label:10s}  RMS {db(rms):+5.1f}   Peak {db(peak):+5.1f}{flag}   Floor {db(q):+6.1f}  dBFS{lufs_str}")
-PY
-}
+analyze() { voice_analyze tui "$1" "$2" 2>/dev/null; }
 
 # ─── Recording ───────────────────────────────────────────────────────
 countdown() {
@@ -147,25 +106,17 @@ countdown() {
   printf "${GREEN}${BOLD}GO!${RESET}\n\n"
 }
 
+record_progress() {
+  local remaining=$1 label=$2
+  if (( remaining > 0 )); then
+    printf "\r  ${CYAN}● recording${RESET}  %s  ${DIM}—${RESET} %2ds left  " "$label" "$remaining"
+  else
+    printf "\r  ${GREEN}✓ done${RESET}            %s                       \n\n" "$label"
+  fi
+}
+
 record_pair() {
-  # $1 = secs, $2 = raw_path, $3 = cln_path, $4 = label
-  local secs=$1 raw=$2 cln=$3 label=$4
-  rm -f "$raw" "$cln"
-
-  pw-record --target "$RAW_SRC" --channels 1 --rate 48000 -- "$raw" >/dev/null 2>&1 &
-  local PR=$!
-  pw-record --target "$CLN_SRC" --channels 1 --rate 48000 -- "$cln" >/dev/null 2>&1 &
-  local PC=$!
-
-  for ((i=secs; i>0; i--)); do
-    printf "\r  ${CYAN}● recording${RESET}  $label  ${DIM}—${RESET} %2ds left  " "$i"
-    sleep 1
-  done
-  printf "\r  ${GREEN}✓ done${RESET}            $label                       \n\n"
-
-  kill "$PR" "$PC" 2>/dev/null || true
-  wait "$PR" 2>/dev/null || true
-  wait "$PC" 2>/dev/null || true
+  voice_record_pair "$1" "$2" "$3" "$RAW_SRC" "$CLN_SRC" record_progress "$4"
 }
 
 read_script() {

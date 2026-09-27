@@ -48,6 +48,10 @@ The repository is public. Never commit credentials. Runtime secrets belong in
 Infisical, Agent Vault, systemd encrypted credentials, or ignored local state.
 Pre-commit and pre-push hooks run Gitleaks and TruffleHog.
 
+See [Secret boundaries](SECRETS.md) for credential storage and leak response,
+and the [recovery runbook](arch-install/RUNBOOK.md) for restoring services,
+commit signing, and GitHub authentication.
+
 ## Regression checks
 
 `tests/` contains only recurring checks for tracked behavior. Run the complete
@@ -55,7 +59,12 @@ set through this documented interface instead of adding one-off runner scripts:
 
 ```bash
 for test_file in ~/.dotfiles/tests/*.sh; do "$test_file"; done
+python3 ~/.dotfiles/tests/voice-tools-test.py
 ```
+
+`audio-test`, `voice-bench`, and `voice-tui` share recording and WAV analysis
+through `home/.local/lib/voice-tools.sh`. Their regression test uses simulated
+audio devices and temporary recordings; it does not touch the live audio stack.
 
 ## Gameplay recording
 

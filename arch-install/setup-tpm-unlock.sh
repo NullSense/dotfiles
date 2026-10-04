@@ -17,9 +17,15 @@ set -euo pipefail
 
 LUKS_DEV="${LUKS_DEV:-/dev/disk/by-partlabel/cryptroot}"
 
-# Find LUKS device if the conventional partlabel doesn't exist
+# Find LUKS device if the conventional partlabel doesn't exist. Only guess when
+# exactly one LUKS device exists; otherwise make the caller name it.
 if [[ ! -b "$LUKS_DEV" ]]; then
-  LUKS_DEV=$(blkid -t TYPE=crypto_LUKS -o device | head -1)
+  mapfile -t luks_devs < <(blkid -t TYPE=crypto_LUKS -o device)
+  if (( ${#luks_devs[@]} != 1 )); then
+    echo "FAIL: found ${#luks_devs[@]} LUKS devices; set LUKS_DEV=/dev/disk/by-uuid/<uuid>" >&2
+    exit 1
+  fi
+  LUKS_DEV=${luks_devs[0]}
 fi
 [[ -b "$LUKS_DEV" ]] || { echo "FAIL: cannot find LUKS device" >&2; exit 1; }
 
@@ -30,6 +36,38 @@ if ! sbctl status 2>/dev/null | grep -qE "Secure Boot.*Enabled"; then
   echo "FAIL: Secure Boot is not enabled. Run setup-secure-boot.sh and reboot first." >&2
   echo "PCR 7 binding without active Secure Boot would be exploitable." >&2
   exit 1
+fi
+
+# The zeroed-PCR-15 pin only protects anything if the initrd extends PCR 15
+# after unlocking. Without tpm2-measure-pcr=yes it stays zero all boot and root
+# can unseal the volume key from userspace. Require it in both the running
+# kernel's cmdline and the one baked into future UKIs.
+for f in /proc/cmdline /etc/kernel/cmdline; do
+  if ! grep -q 'tpm2-measure-pcr=yes' "$f"; then
+    echo "FAIL: $f lacks rd.luks.options=...tpm2-measure-pcr=yes; PCR 15 pin would be inert." >&2
+    exit 1
+  fi
+done
+
+# PCR 7 only records WHICH keys verified the boot chain. With Microsoft's
+# vendor keys in db, any Microsoft-signed bootloader (shim + another distro,
+# Windows PE, ...) reproduces PCR 7 and can unseal the key. In that case demand
+# a TPM PIN, or an explicit, informed override.
+PIN_ARGS=()
+if sbctl status 2>/dev/null | grep -qiE 'Vendor Keys:.*microsoft'; then
+  if [[ "${TPM2_PIN:-}" == 1 ]]; then
+    PIN_ARGS=(--tpm2-with-pin=yes)
+  elif [[ "${ALLOW_PCR7_WITH_VENDOR_KEYS:-}" != 1 ]]; then
+    cat >&2 <<'EOF'
+FAIL: Microsoft vendor keys are enrolled in Secure Boot db, so PCR 7 alone does
+not tie the key to YOUR boot chain. Choose one:
+  TPM2_PIN=1                     enroll with a TPM PIN typed at boot (recommended)
+  ALLOW_PCR7_WITH_VENDOR_KEYS=1  accept PCR 7+15 without a PIN (weaker)
+The strong PIN-less option is a signed PCR 11 policy (ukify PCRPKey +
+--tpm2-public-key), which survives kernel updates; this script doesn't do that.
+EOF
+    exit 1
+  fi
 fi
 
 # 1. Enroll a recovery key FIRST. This is non-negotiable — if your motherboard
@@ -44,6 +82,7 @@ echo "=== Enrolling TPM2 (PCR 7 + zeroed PCR 15) ==="
 sudo systemd-cryptenroll \
   --tpm2-device=auto \
   --tpm2-pcrs=7+15:sha256=0000000000000000000000000000000000000000000000000000000000000000 \
+  "${PIN_ARGS[@]}" \
   --wipe-slot=tpm2 \
   "$LUKS_DEV"
 

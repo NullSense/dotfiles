@@ -1,8 +1,14 @@
 #!/bin/bash
 # Bind LUKS2 root partition to TPM2 so the box auto-unlocks after Secure Boot
-# is enrolled. Modern recipe: PCR 7 (Secure Boot policy) + PCR 11 (UKI hash).
+# is enrolled. Recipe (ArchWiki systemd-cryptenroll): PCR 7 (Secure Boot state)
+# + PCR 15 pinned to zero. The initrd measures the volume key into PCR 15 after
+# unlock (rd.luks.options=...tpm2-measure-pcr=yes in /etc/kernel/cmdline), so the
+# key can't be unsealed again later in the same boot.
 # - PCR 0/2 binding is OBSOLETE (breaks on every firmware update)
-# - PCR 7+11 is what systemd-cryptenroll docs + ArchWiki recommend in 2026
+# - Raw PCR 11 is the UKI hash and changes on EVERY kernel/initramfs rebuild;
+#   use it only through a signed PCR policy (ukify PCRPKey), never as a raw value.
+# - Needs the systemd initramfs (HOOKS: systemd ... sd-encrypt); the busybox
+#   `encrypt` hook ignores TPM2 tokens entirely.
 #
 # RUN AFTER: setup-secure-boot.sh has finished and Secure Boot is active.
 # Without active Secure Boot in user mode, PCR 7 is meaningless.
@@ -31,13 +37,13 @@ fi
 echo "=== Enrolling recovery key (write this down NOW, store in Bitwarden) ==="
 sudo systemd-cryptenroll --recovery-key "$LUKS_DEV"
 
-# 2. Enroll TPM2 bound to PCR 7 + PCR 11.
+# 2. Enroll TPM2 bound to PCR 7 + zeroed PCR 15.
 #    --wipe-slot=tpm2 ensures we replace any stale TPM enrollment, not append.
 echo
-echo "=== Enrolling TPM2 (PCR 7 + 11) ==="
+echo "=== Enrolling TPM2 (PCR 7 + zeroed PCR 15) ==="
 sudo systemd-cryptenroll \
   --tpm2-device=auto \
-  --tpm2-pcrs=7+11 \
+  --tpm2-pcrs=7+15:sha256=0000000000000000000000000000000000000000000000000000000000000000 \
   --wipe-slot=tpm2 \
   "$LUKS_DEV"
 

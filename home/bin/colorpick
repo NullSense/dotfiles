@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# Color picker — eyedropper for any pixel on screen.
+# Uses hyprpicker (Hyprland-native). Copies hex to clipboard + previews via mako.
+
+set -eu
+
+if ! command -v hyprpicker >/dev/null 2>&1; then
+    notify-send -t 2000 -u critical "colorpick" "hyprpicker not installed"
+    exit 1
+fi
+
+# `-a` = auto-copy to clipboard, `-f hex` = hex format, `-r` = render under cursor
+hex=$(hyprpicker -a -f hex -r 2>/dev/null)
+
+# hyprpicker -a already copied to clipboard; just notify with the value.
+# Use the hex as the icon background for a colored notification preview.
+[ -z "$hex" ] && exit 0
+notify-send -t 4000 "Color picked → clipboard" "$hex" --hint=string:image-path:"$hex"

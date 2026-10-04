@@ -383,7 +383,8 @@ fi
 
 if [ "$leading_ok" = 1 ]; then
   previous="$current"
-  sed -i "s|^VLLM_IMAGE_PIN=.*|VLLM_IMAGE_PIN=\"vllm/vllm-openai:$latest\"|" "$PIN_FILE"
+  # --follow-symlinks: the pin file is a dotfiles symlink; plain -i would replace it.
+  sed -i --follow-symlinks "s|^VLLM_IMAGE_PIN=.*|VLLM_IMAGE_PIN=\"vllm/vllm-openai:$latest\"|" "$PIN_FILE"
   current="$latest"
   if [ "$held_ok" = 1 ] && [ "$digest_ok" = 1 ] \
       && all_configured_current; then

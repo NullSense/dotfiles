@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# vllm-nanbeige — serve Nanbeige/Nanbeige4.2-3B (BF16) on vLLM.
+# Candidate E4B replacement for rewrite/summarization/RAG (eval 2026-07-22).
+#
+# ⚠ ARCH NOT YET UPSTREAM: NanbeigeForCausalLM is a looped transformer (22 layers
+# × num_loops=2 ⇒ 44 attention passes/token — ~2× compute + 2× KV of a plain 3B).
+# Support lives in vllm-project/vllm PR #49433 (open). Until it merges + ships,
+# we vendor the PR's model file as an out-of-tree plugin
+# (~/bin/llm-servers/vllm-plugins/nanbeige) pip-installed at container start —
+# hence the --entrypoint override below. Once a release contains the arch, the
+# plugin auto-noops (it checks the registry) and this wrapper can drop back to
+# the standard exec form.
+#
+# --trust-remote-code is REQUIRED: model_type "nanbeige" resolves via the repo's
+# configuration_nanbeige.py (the plugin only registers the model class).
+# Parsers = the EXACT classes the fork's `nanbeige` aliases point to, under their
+# stock v0.25.1 names: reasoning `qwen3` → Qwen3ParserReasoningAdapter, tools
+# `qwen3_xml` → Qwen3EngineToolParser (XML = the chat template's default
+# tool_call_format and the card's recommended one). Card sampling (T=0.6
+# top_p=0.95 top_k=20, eos 166101) ships in generation_config.json, which vLLM
+# auto-applies as request defaults — do NOT override here; agentic callers send
+# T=1.0 themselves. Thinking ON by default; chat_template_kwargs
+# {"enable_thinking": false} (llama-swap `:fast` alias) for non-thinking.
+#
+# llama-swap-MANAGED, dynamic port (env PORT=${PORT}); PORT=8005 for manual runs.
+set -euo pipefail
+: "${PORT:=8005}"
+
+MODEL="${MODEL:-$HOME/.lmstudio/models/Nanbeige/Nanbeige4.2-3B}"
+NAME="${SERVED_NAME:-nanbeige4.2-3b}"
+source "$(dirname "$(readlink -f "$0")")/_vllm-image.sh"  # central pin (vllm-update bumps it)
+# The vendored plugin passes v0.29 registry inspection after its API update.
+IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_PIN}"
+PLUGIN_DIR="$(dirname "$(readlink -f "$0")")/vllm-plugins/nanbeige"
+# Context: card wants 64k NEW tokens (agentic) / 128k (reasoning); native 262k.
+# Looped arch doubles KV (176 KB/token bf16) → fp8 KV cache (same as vllm-gemma4b)
+# halves it to 88 KB/token: 64k ctx = 5.5 GiB KV, total ≈ 7.9 weights + 5.5 KV +
+# ~1.4 graphs/activations ≈ 15 GB. 128k solo: MAXLEN=131072 GPU_UTIL=0.66 (~20.5 GB).
+# ⚠ MEASURED 2026-08-06: the "≈15 GB" estimate above is WRONG in practice. At
+# MAXLEN=65536 / GPU_UTIL=0.48 this process held 20.1 GB per nvidia-smi — ~5 GB more
+# than the arithmetic, because FlashInfer workspaces, the ngram spec-decode draft
+# slots and CUDA-graph private pools live outside the figure gpu_memory_utilization
+# accounts for. llama-swap does NOT measure VRAM, so the matrix set `rag-nanbeige`
+# was budgeting 15 and reserving 20; with sift's retrieval trio resident (11 GB) plus
+# dictation (2.3 GB) that overcommits a 32.6 GB card and the start fails with
+# "upstream command exited prematurely". Observed live, twice.
+#
+# 32768 is the default now so the RAG stack co-resides: 32k halves the KV to ~2.75 GB
+# and brings the real footprint to roughly 14-15 GB. This is a CAPABILITY trade, not
+# a quality one — the weights and every sampling path are untouched; only how much
+# context fits changes. The card wants 64k for agentic runs and 128k for long
+# reasoning, so raise it deliberately when that is what you are doing, and expect to
+# evict the retrieval models for it:
+#   MAXLEN=65536  GPU_UTIL=0.48   # agentic, ~20 GB real  — evicts the RAG trio
+#   MAXLEN=131072 GPU_UTIL=0.66   # long reasoning, solo
+# Re-measure with nvidia-smi after changing either; do not trust the arithmetic.
+MAXLEN="${MAXLEN:-32768}"
+GPU_UTIL="${GPU_UTIL:-0.40}"   # ×31.4 GB ≈ 12.6 GB reserved; ~14-15 GB real
+MAX_SEQS="${MAX_SEQS:-16}"
+KV_DTYPE="${KV_DTYPE:-fp8}"
+# Attention backend (speed matrix 2026-07-23, results/speed-matrix.md):
+# FLASHINFER (default) wins 3k+-ctx summarize/RAG (its long-ctx kernels beat the
+# spec-decode cudagraph downgrade it suffers); TRITON_ATTN wins short-ctx
+# freeform decode (166 vs 147 tok/s spec-off, +13%). ATTN=TRITON_ATTN to flip.
+ATTN="${ATTN:-}"
+ATTN_ARGS=()
+[ -n "$ATTN" ] && ATTN_ARGS=(--attention-backend "$ATTN")
+
+# Speculative decoding options:
+#   ngram     — model-free prompt-lookup (default): big wins on summarization/RAG
+#               (output copies source), −15-20% on freeform. CAVEAT (2026-07-23,
+#               docs/serving-overhead-research.md): CPU-ngram auto-DISABLES async
+#               scheduling AND (with FlashInfer on SM120) downgrades cudagraphs
+#               to PIECEWISE. ngram_gpu + --async-scheduling + TRITON_ATTN is the
+#               recovery combo — see the speed matrix before switching defaults.
+#   eagle3    — trained draft head (EAGLE-3, virtual-depth taps 3/23/41; training
+#               pipeline 2026-07-23). SPEC_MODEL points at the checkpoint dir.
+#   dspark    — official Nanbeige4.2-3B-DSpark draft (2026-08-31, HF). Semi-
+#               autoregressive PARALLEL block drafter (DFlash machinery + Markov
+#               head, block_size=7 baked into the checkpoint config) — NOT an
+#               autoregressive chain like EAGLE3, drafts a whole block in one
+#               parallel pass. method="dspark" is NATIVE in vllm-openai:v0.29.0
+#               core (vllm/v1/worker/gpu/spec_decode/dspark/, vllm/model_executor/
+#               models/qwen3_dspark.py both present in the image — verified
+#               2026-09-17, docker run --entrypoint bash + find) — NO Nanbeige
+#               fork/from-source build needed, despite Nanbeige's own README
+#               recommending `git clone -b nanbeige42 github.com/Nanbeige/vllm`.
+#               That fork branch's only real diff vs v0.29.0 is the target-model
+#               registration (nanbeige.py, ~600 lines) which our vendored plugin
+#               already provides (with additional Eagle3 aux-hidden-state patches
+#               the fork's version lacks). Draft target_layer_ids [1,10,21,32,40]
+#               (virtual-depth 0-44 scheme, same convention as our EAGLE3 taps).
+#               SPEC_MODEL points at the checkpoint dir (default: sibling
+#               Nanbeige4.2-3B-DSpark). num_speculative_tokens defaults to 7
+#               (checkpoint's own block_size) — do not shrink without re-checking
+#               the Markov head's trained block length.
+#   off       — no speculation.
+SPEC="${SPEC:-ngram}"
+SPEC_TOKENS="${SPEC_TOKENS:-8}"
+SPEC_MODEL="${SPEC_MODEL:-}"
+SPEC_ARGS=()
+case "$SPEC" in
+ngram) SPEC_ARGS=(--speculative-config "{\"method\":\"ngram\",\"num_speculative_tokens\":${SPEC_TOKENS},\"prompt_lookup_max\":4,\"prompt_lookup_min\":2}") ;;
+eagle3)
+  [ -n "$SPEC_MODEL" ] || { echo "SPEC=eagle3 needs SPEC_MODEL=<draft ckpt dir>" >&2; exit 1; }
+  SPEC_ARGS=(--speculative-config "{\"method\":\"eagle3\",\"model\":\"${SPEC_MODEL}\",\"num_speculative_tokens\":${SPEC_TOKENS}}") ;;
+peagle)
+  # P-EAGLE: served via the eagle3 method + parallel_drafting (vLLM PR #32887).
+  [ -n "$SPEC_MODEL" ] || { echo "SPEC=peagle needs SPEC_MODEL=<peagle ckpt dir>" >&2; exit 1; }
+  SPEC_ARGS=(--speculative-config "{\"method\":\"eagle3\",\"model\":\"${SPEC_MODEL}\",\"num_speculative_tokens\":${SPEC_TOKENS},\"parallel_drafting\":true}") ;;
+dspark)
+  SPEC_MODEL="${SPEC_MODEL:-$HOME/.lmstudio/models/local/Nanbeige4.2-3B-DSpark}"
+  SPEC_TOKENS="${SPEC_TOKENS:-7}"
+  SPEC_ARGS=(--speculative-config "{\"method\":\"dspark\",\"model\":\"${SPEC_MODEL}\",\"num_speculative_tokens\":${SPEC_TOKENS}}") ;;
+esac
+
+VLLM_HOST_NET=1                 # loopback-only, skips docker-proxy
+VLLM_SLEEP="${VLLM_SLEEP:-1}"   # /sleep + /wake_up instead of a ~60s cold restart
+source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
+
+# Container name is parameterized so a manual/bench launch can NOT clobber the live
+# llama-swap-served instance (both used to hardcode "vllm-nanbeige" regardless of
+# $PORT). Default is unchanged for the production path; bench/campaign scripts set
+# CONTAINER_NAME=vllm-nanbeige-bench.
+: "${CONTAINER_NAME:=vllm-nanbeige}"
+
+docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+# --entrypoint bash: install the out-of-tree arch plugin, then exec the normal
+# serve path. Plugin copied to /tmp because the ro mount can't take egg-info.
+exec docker run --rm --gpus all --name "$CONTAINER_NAME" \
+  "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
+  -v "$PLUGIN_DIR:/nanbeige-plugin:ro" \
+  --ipc=host \
+  --entrypoint bash \
+  "$IMAGE" \
+  -c 'cp -r /nanbeige-plugin /tmp/nbp && pip install --no-deps -q /tmp/nbp && exec vllm serve "$@"' _ \
+  "$MODEL" \
+  --served-model-name "$NAME" \
+  --host 127.0.0.1 --port "$PORT" \
+  ${VLLM_SLEEP:+--enable-sleep-mode} \
+  --trust-remote-code \
+  --max-model-len "$MAXLEN" \
+  --max-num-seqs "$MAX_SEQS" \
+  --kv-cache-dtype "$KV_DTYPE" \
+  "${SPEC_ARGS[@]}" \
+  "${ATTN_ARGS[@]}" \
+  --reasoning-parser qwen3 \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_xml \
+  --gpu-memory-utilization "$GPU_UTIL" \
+  "$@"

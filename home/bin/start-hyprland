@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+# Launch Hyprland from a TTY. Prefers uwsm (systemd-managed user session,
+# clean teardown of all spawned apps on logout) when available; falls back
+# to plain Hyprland otherwise.
+
+export XDG_CURRENT_DESKTOP=Hyprland
+export XDG_SESSION_TYPE=wayland
+export XDG_SESSION_DESKTOP=Hyprland
+
+# Push env to systemd user manager BEFORE Hyprland starts, so user services
+# spawned during autostart see them.
+systemctl --import-environment >/dev/null 2>&1 || true
+systemctl --user import-environment XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_DESKTOP PATH 2>/dev/null || true
+
+if command -v uwsm >/dev/null 2>&1; then
+    # uwsm wraps Hyprland in a systemd user scope. Apps launched via
+    # `uwsm app -- <cmd>` from inside the session become transient systemd
+    # units, with proper resource accounting and clean teardown on logout.
+    # The session-entry name `hyprland.desktop` (no -uwsm suffix) is what
+    # uwsm itself prefers — uwsm wraps it with -D Hyprland.
+    exec uwsm start -- hyprland.desktop "$@"
+else
+    # Plain mode — type `paru -S uwsm` and re-run for the systemd-managed path.
+    exec Hyprland "$@"
+fi

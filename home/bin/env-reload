@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+# env-reload — propagate ~/.config/environment.d/*.conf to current session
+# without a logout. Run `source ~/bin/env-reload` (or `. ~/bin/env-reload`)
+# from any shell to get the new env in THIS shell + apps you launch from it.
+#
+# Coverage:
+#   ✓ Current shell (this is why you must `source`, not just run)
+#   ✓ systemd user manager  (already there if env.d is correctly set up)
+#   ✓ dbus activation env   (covers most modern Qt6/GTK4 apps)
+#   ✗ sway's own process env — can't be updated without sway re-exec.
+#     Apps launched via sway bindsym still inherit sway's old env.
+#     Workaround: restart sway children (waybar, mako) using `env <vars> <cmd>`,
+#     or launch new apps from a shell that has sourced this file.
+
+# 1. Source all environment.d files into THIS shell.
+set -a
+for f in /etc/environment.d/*.conf "$HOME"/.config/environment.d/*.conf; do
+    [ -f "$f" ] && . "$f" 2>/dev/null
+done
+set +a
+
+# 2. Import all current env into systemd user manager (so user services see it).
+systemctl --user import-environment 2>/dev/null
+
+# 3. Update dbus activation environment (so dbus-activated apps see it).
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    dbus-update-activation-environment --systemd --all 2>/dev/null
+fi
+
+# 4. Restart helpers that should inherit the new env.
+#    Waybar runs as a systemd user unit — restarting via systemctl picks
+#    up the freshly imported env (step 2) and avoids the duplicate-bar race
+#    where a manual pkill+setsid spawns an off-tree sibling that collides
+#    with the unit's Restart=on-failure respawn.
+if systemctl --user is-active --quiet waybar.service; then
+    systemctl --user restart waybar.service
+fi
+if pgrep -x mako >/dev/null; then
+    pkill -x mako
+    setsid mako --margin 16 --padding 8 \
+        --border-color "#ebdbb2" --text-color "#ebdbb2" \
+        --background-color "#32302f" --border-size 4 \
+        --default-timeout 10000 >/dev/null 2>&1 < /dev/null &
+    disown 2>/dev/null || true
+fi
+
+echo "env-reload: propagated to current shell + systemd + dbus + waybar + mako"
+echo
+echo "Active vars in this shell:"
+env | grep -E '^(QT_|GDK_|MOZ_|ELECTRON_|SDL_|XDG_|GTK_|_JAVA_)' | sed 's/^/  /'
+echo
+echo "Apps launched FROM THIS SHELL will now have these env vars."
+echo "Apps launched FROM SWAY (bindsym) still have sway's old env."
+echo "  → For those, either restart the app from this shell, or wrap with"
+echo "    \`env QT_QPA_PLATFORMTHEME=qt6ct <cmd>\` in the sway bindsym."

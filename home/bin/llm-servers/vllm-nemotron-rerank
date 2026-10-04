@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# vllm-nemotron-rerank — serve nvidia/llama-nemotron-rerank-1b-v2 on vLLM as a
+# cross-encoder reranker (sift candidate; Llama-3.2-1B bidirectional, avg pooling).
+#
+# Custom arch (LlamaBidirectionalForSequenceClassification, ships
+# llama_bidirectional_model.py in the repo) → --trust-remote-code is MANDATORY.
+# The score chat-template is equally mandatory: without nemotron-rerank.jinja the
+# "question:… \n \n passage:…" pair format is never applied and scores are garbage
+# (per the model card). Template lives next to the weights; the model tree is
+# mounted into the container at the same path (see _vllm-common.sh).
+#
+# Speaks /v1/rerank (Jina-style: {query, documents, top_n} → relevance_score) —
+# the same contract litellm's infinity provider + llama-swap already route.
+# Needs vllm>=0.14; we pin the v0.25.0 image shared with vllm-nemotron-embed.
+#
+# CUDA graphs: pooling models default to PIECEWISE with capture ≤ min(max_num_seqs
+# ×2, 512) tokens — tiny vs an 8k query+passage pair. 4096 is NVIDIA's conservative
+# capture default (embed sibling card); sift/legalkb chunks are p99≈370 tok so 4096
+# covers >10 pairs per graphed batch. --max-num-batched-tokens 8192 still admits a
+# single full-length 8k pair (chunked-prefill rule: budget ≥ max-model-len).
+#
+# llama-swap-MANAGED, dynamic port (env PORT=${PORT}); PORT=8004 for manual runs.
+set -euo pipefail
+: "${PORT:=8004}"
+
+MODEL="${MODEL:-$HOME/.lmstudio/models/nvidia/llama-nemotron-rerank-1b-v2}"
+NAME="${SERVED_NAME:-nemotron-rerank-1b}"
+source "$(dirname "$(readlink -f "$0")")/_vllm-image.sh"  # central pin (vllm-update bumps it)
+IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_PIN}"
+MAXLEN="${MAXLEN:-8192}"       # card's supported eval length (131k rope, 8k effective)
+GPU_UTIL="${GPU_UTIL:-0.15}"   # ×31.4 GB ≈ 4.7 GB: 2.4 GB bf16 weights + graphs + workspace
+# 64, not 32 (2026-08-06): sift sends SIFT_RERANK_CANDIDATES=50 pairs per query, so
+# at 32 a full candidate set needs TWO scheduler passes; 64 admits it in one. This is
+# pure scheduling — a cross-encoder scores each (query, passage) pair independently,
+# so how many pairs share a forward pass cannot change any individual score. Verified
+# rather than assumed: the same 2-doc probe returns bit-identical 0.9999998807907104
+# at MAX_SEQS 32 and 64. Keep MAX_SEQS >= SIFT_RERANK_CANDIDATES if that env ever
+# goes above 64.
+MAX_SEQS="${MAX_SEQS:-64}"
+
+VLLM_HOST_NET=1   # loopback-only, skips docker-proxy — see _vllm-common.sh
+VLLM_SLEEP="${VLLM_SLEEP:-1}"   # /sleep + /wake_up instead of a ~60s cold restart
+source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
+
+# Overridable so a smoke test / bench can run its OWN container instead of
+# killing the live llama-swap one that shares this name (vllm-update did
+# exactly that until 2026-08-06). Default keeps the llama-swap identity.
+: "${CONTAINER_NAME:=vllm-nemotron-rerank}"
+
+docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+exec docker run --rm --gpus all --name "$CONTAINER_NAME" \
+  "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
+  --ipc=host \
+  "$IMAGE" \
+  "$MODEL" \
+  --served-model-name "$NAME" \
+  --host 127.0.0.1 --port "$PORT" \
+  --trust-remote-code \
+  --chat-template "$MODEL/nemotron-rerank.jinja" \
+  --max-model-len "$MAXLEN" \
+  --max-num-batched-tokens "$MAXLEN" \
+  --max-cudagraph-capture-size 4096 \
+  --max-num-seqs "$MAX_SEQS" \
+  ${VLLM_SLEEP:+--enable-sleep-mode} \
+  --gpu-memory-utilization "$GPU_UTIL" \
+  "$@"

@@ -1,0 +1,14 @@
+[project]
+name = "nanbeige-vllm-plugin"
+version = "0.1.0"
+description = "Out-of-tree Nanbeige4.2 model for vLLM (from PR #49433) until upstream merge"
+
+[project.entry-points."vllm.general_plugins"]
+nanbeige = "nanbeige_vllm_plugin:register"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["nanbeige_vllm_plugin"]

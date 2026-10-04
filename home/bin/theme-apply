@@ -1,0 +1,96 @@
+#!/usr/bin/env sh
+# theme-apply — apply Gruvbox-aligned theme stack across GTK/Qt/cursor/icons.
+#
+# Run after installing the theme packages:
+#   paru -S gruvbox-gtk-theme-git gruvbox-plus-icon-theme-git \
+#           bibata-cursor-theme nwg-look papirus-icon-theme
+#
+# Idempotent. Re-run after package updates or if theme reverts.
+
+set -eu
+
+THEME_GTK='Gruvbox-Dark'
+THEME_ICON='Gruvbox-Plus-Dark'
+THEME_CURSOR='Bibata-Modern-Classic'
+CURSOR_SIZE=32
+KVANTUM_THEME='KvAdaptaDark'   # built-in kvantum dark, harmonizes with Gruvbox
+
+# Verify themes are installed.
+missing=
+[ -d /usr/share/themes/Gruvbox-Dark ] || [ -d ~/.local/share/themes/Gruvbox-Dark ] || \
+    [ -d /usr/share/themes/Gruvbox-Dark-B ] || missing="$missing gruvbox-gtk-theme"
+[ -d /usr/share/icons/Gruvbox-Plus-Dark ] || [ -d ~/.local/share/icons/Gruvbox-Plus-Dark ] || \
+    missing="$missing gruvbox-plus-icon-theme"
+[ -d /usr/share/icons/Bibata-Modern-Classic ] || [ -d ~/.local/share/icons/Bibata-Modern-Classic ] || \
+    missing="$missing bibata-cursor-theme"
+
+if [ -n "$missing" ]; then
+    echo "Missing theme packages:$missing" >&2
+    echo "Run: paru -S$missing" >&2
+    exit 1
+fi
+
+# 1. GTK via gsettings (live update for running GTK4/libadwaita apps)
+gsettings set org.gnome.desktop.interface gtk-theme       "$THEME_GTK"
+gsettings set org.gnome.desktop.interface icon-theme      "$THEME_ICON"
+gsettings set org.gnome.desktop.interface cursor-theme    "$THEME_CURSOR"
+gsettings set org.gnome.desktop.interface cursor-size     "$CURSOR_SIZE"
+gsettings set org.gnome.desktop.interface color-scheme    'prefer-dark'
+gsettings set org.gnome.desktop.interface font-antialiasing 'grayscale'
+gsettings set org.gnome.desktop.interface font-hinting     'slight'
+
+# 2. GTK 3/4 settings.ini files (already written separately; verify they reference the right names)
+for f in ~/.config/gtk-3.0/settings.ini ~/.config/gtk-4.0/settings.ini; do
+    sed -i -E "s|^gtk-theme-name=.*|gtk-theme-name=${THEME_GTK}|" "$f"
+    sed -i -E "s|^gtk-icon-theme-name=.*|gtk-icon-theme-name=${THEME_ICON}|" "$f"
+    sed -i -E "s|^gtk-cursor-theme-name=.*|gtk-cursor-theme-name=${THEME_CURSOR}|" "$f"
+done
+
+# 3. Qt: ensure qt6ct + Kvantum are pointing at the right things
+sed -i -E "s|^icon_theme=.*|icon_theme=${THEME_ICON}|" ~/.config/qt6ct/qt6ct.conf 2>/dev/null || true
+mkdir -p ~/.config/Kvantum
+cat > ~/.config/Kvantum/kvantum.kvconfig <<EOF
+[General]
+theme=${KVANTUM_THEME}
+EOF
+
+# 4. Cursor for X11 / generic apps via Xcursor
+mkdir -p ~/.icons/default
+cat > ~/.icons/default/index.theme <<EOF
+[Icon Theme]
+Inherits=${THEME_CURSOR}
+EOF
+
+# 5. Compositor cursor — sync the Wayland seat cursor theme.
+# Hyprland: cursor is set via env (HYPRCURSOR_*) at session start; live update
+# via hyprctl. Sway: swaymsg seat directive.
+case "${XDG_CURRENT_DESKTOP:-}" in
+    Hyprland)
+        hyprctl keyword cursor:default "${THEME_CURSOR}" "${CURSOR_SIZE}" >/dev/null 2>&1 || true
+        # Also push to systemd user env so children inherit
+        systemctl --user set-environment XCURSOR_THEME="${THEME_CURSOR}" XCURSOR_SIZE="${CURSOR_SIZE}" 2>/dev/null || true
+        ;;
+    sway)
+        swaymsg seat 'seat0' "xcursor_theme ${THEME_CURSOR} ${CURSOR_SIZE}" >/dev/null 2>&1 || true
+        ;;
+esac
+
+# 6. Refresh GTK app caches
+gtk-update-icon-cache -f -t /usr/share/icons/"$THEME_ICON" 2>/dev/null || true
+gtk-update-icon-cache -f -t ~/.local/share/icons/"$THEME_ICON" 2>/dev/null || true
+
+cat <<EOF
+✓ theme stack applied:
+  GTK theme:    $THEME_GTK
+  Icons:        $THEME_ICON
+  Cursor:       $THEME_CURSOR ($CURSOR_SIZE px)
+  Qt style:     Kvantum / $KVANTUM_THEME
+  Qt icons:     $THEME_ICON
+
+Currently-running GTK4/libadwaita apps update live via gsettings.
+GTK3 apps need to be restarted to see changes.
+Qt apps need restart for Kvantum style to apply (env QT_QPA_PLATFORMTHEME=qt6ct
+must also be in their env — sourced via env-reload).
+
+Tip: launch \`nwg-look\` for a GUI to fine-tune any of this.
+EOF

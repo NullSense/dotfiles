@@ -1,0 +1,42 @@
+#!/usr/bin/env sh
+# OCR — select an area, extract text via Tesseract, copy to clipboard.
+# Inspired by Windows PowerToys "Text Extractor" / macOS Live Text.
+#
+# Bind to a key (e.g. $mod+Shift+T) for instant text grabs from anywhere on
+# screen — IDE error messages in screenshots, text in images, terminal output
+# in screen recordings, Japanese in manga (with -l jpn), etc.
+#
+# Usage:  ocr            # English (default)
+#         ocr jpn+eng    # multiple languages joined with +
+#         ocr fra        # French
+#
+# Available languages: ls /usr/share/tessdata/ | sed 's/.traineddata//'
+# Install more: paru -S tesseract-data-jpn tesseract-data-fra ...
+
+set -eu
+
+LANG="${1:-eng}"
+TMP=$(mktemp --suffix=.png)
+trap 'rm -f "$TMP"' EXIT
+
+# Region select via slurp; capture via grim; OCR via tesseract; clip via wl-copy.
+if ! grim -g "$(slurp -d)" "$TMP" 2>/dev/null; then
+    notify-send -t 2000 "OCR" "Cancelled (no region selected)"
+    exit 0
+fi
+
+# Run Tesseract. `-` as output writes to stdout. `--psm 6` = "single uniform
+# block of text" (best for most screen captures vs the default auto-segmentation).
+text=$(tesseract "$TMP" - -l "$LANG" --psm 6 2>/dev/null)
+
+if [ -z "$text" ]; then
+    notify-send -t 2000 -u low "OCR" "No text detected in selection"
+    exit 0
+fi
+
+printf '%s' "$text" | wl-copy
+
+# Show preview of what was captured (truncated for notification UX)
+preview=$(printf '%s' "$text" | head -c 80)
+[ ${#text} -gt 80 ] && preview="${preview}…"
+notify-send -t 3000 "OCR → clipboard" "$preview"

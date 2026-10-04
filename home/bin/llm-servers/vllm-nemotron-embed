@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# vllm-nemotron-embed — serve nvidia/Nemotron-3-Embed-1B-NVFP4 on vLLM as a
+# 2048-dim embedder (sift candidate; MTEB-strong, Ministral-3-3B pruned encoder).
+#
+# NVFP4 weights (~1 GB) run natively on Blackwell SM120 — vLLM reads the checkpoint
+# quant metadata, no quantization flag needed. ⚠ REQUIRES vLLM v0.25.0: the model
+# card explicitly lists v0.23.x/v0.24.x as broken for this NVFP4 checkpoint family.
+#
+# Serving shape = the model card's recommended command: max-model-len =
+# max-num-batched-tokens = max-cudagraph-capture-size = 4096. The capture-size
+# equality is the card's CUDA-graph guidance for pooling models (vLLM defaults
+# pooling models to PIECEWISE graphs with capture ≤ min(max_num_seqs*2, 512) —
+# far below a full 4k sequence; raising it to the token budget graphs the whole
+# forward pass at every bucket, and 4096 is the card's "conservative default"
+# that keeps cold-start ~1 min instead of tens of minutes at 32k).
+#
+# ⚠ CALLER CONTRACT (/v1/embeddings): prefix inputs with "query: " / "passage: "
+#   (asymmetric retrieval). The card's /v2/embed endpoint does it automatically
+#   via input_type, but litellm/sift speak /v1/embeddings — prefix client-side.
+# 2048-dim ⇒ NOT interchangeable with octen's 2560-dim `embed` — a sift switch
+# needs a separate vector-config/collection (same rule as embed-legal/F2LLM).
+#
+# llama-swap-MANAGED, dynamic port (env PORT=${PORT}); PORT=8003 for manual runs.
+set -euo pipefail
+: "${PORT:=8003}"
+
+MODEL="${MODEL:-$HOME/.lmstudio/models/nvidia/Nemotron-3-Embed-1B-NVFP4}"
+NAME="${SERVED_NAME:-nemotron-embed-1b}"
+source "$(dirname "$(readlink -f "$0")")/_vllm-image.sh"  # central pin (vllm-update bumps it)
+IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_PIN}"            # ⚠ floor v0.25.0 — v0.24.x breaks this NVFP4 family
+MAXLEN="${MAXLEN:-8192}"       # model supports 32k; the three flags below move together.
+                               # 8192 measured 2026-08-22 over the repowise sift corpus (1,190
+                               # pages) with this model's own tokenizer: p50=643 p95=2127
+                               # p99=3432 max=7032. Clears every page with ~14% headroom; the
+                               # old 4096 card default silently dropped 5 of them.
+# ~1 GB NVFP4 weights + graphs + activation workspace; pooling models hold no KV
+# pool to speak of, so this is mostly weights + cudagraph buffers. Verified knob:
+# raise if "No available memory" at startup, shrink once measured.
+GPU_UTIL="${GPU_UTIL:-0.12}"   # ×31.4 GB ≈ 3.8 GB reserved
+
+VLLM_HOST_NET=1   # loopback-only, skips docker-proxy — see _vllm-common.sh
+VLLM_SLEEP="${VLLM_SLEEP:-1}"   # /sleep + /wake_up instead of a ~60s cold restart
+source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
+
+# Overridable so a smoke test / bench can run its OWN container instead of
+# killing the live llama-swap one that shares this name (vllm-update did
+# exactly that until 2026-08-06). Default keeps the llama-swap identity.
+: "${CONTAINER_NAME:=vllm-nemotron-embed}"
+
+docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+exec docker run --rm --gpus all --name "$CONTAINER_NAME" \
+  "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
+  --ipc=host \
+  "$IMAGE" \
+  "$MODEL" \
+  --served-model-name "$NAME" \
+  --host 127.0.0.1 --port "$PORT" \
+  --max-model-len "$MAXLEN" \
+  --max-num-batched-tokens "$MAXLEN" \
+  --max-cudagraph-capture-size "$MAXLEN" \
+  ${VLLM_SLEEP:+--enable-sleep-mode} \
+  --gpu-memory-utilization "$GPU_UTIL" \
+  "$@"

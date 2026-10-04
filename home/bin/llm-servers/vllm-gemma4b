@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# vllm-gemma4b — serve Gemma-4 E4B (TEXT-ONLY) on vLLM as the summariser +
+# dictation-rewrite backend for the RTX 5090.
+#
+# Why text-only: the stock E4B checkpoints are multimodal — the NVFP4/FP8 builds
+# on HF keep the vision+audio towers at full precision (~11 GB), which a
+# summariser/dictation path never touches. We quantise the TEXT-ONLY base
+# (principled-intelligence/gemma-4-E4B-it-text-only, arch `gemma4_text`) to NVFP4
+# so the resident footprint is ~4 GB — small enough to stay warm alongside a
+# second project's VRAM, and to serve BOTH `summarize` and `rewrite` from ONE
+# slot (no llama-swap load/unload bounce between summaries and dictation).
+#
+# Served names: `summarize` (oracle summarize-cheap) + `rewrite` (dictation) →
+# one vLLM process answers both. diffusiongemma stays the on-demand PREMIUM tier
+# (vllm-diffusiongemma, llama-swap, ttl-unload) for when there's spare VRAM.
+#
+# ⚠ Quantise first (needs a free-VRAM window — llm-compressor loads the bf16):
+#   the 15 GB bf16 base lives at $HOME/.lmstudio/models/principled-intelligence/
+#   gemma-4-E4B-it-text-only. Produce an NVFP4 (compressed-tensors) copy at
+#   $MODEL below. Until then, point MODEL at the bf16 base to smoke-test (needs
+#   ~16 GB free) or at leon-se FP8 as an interim.
+#
+# llama-swap-MANAGED, dynamic port: llama-swap starts this via `env PORT=${PORT}`
+# and stops it via `docker stop vllm-gemma4b` (cmdStop). PORT defaults to 8001
+# only for a manual standalone run; under llama-swap it's the dynamic pool port.
+#
+# Usage:  vllm-gemma4b        (Ctrl-C to stop; --rm cleans up)
+set -euo pipefail
+: "${PORT:=8001}"
+
+# NVFP4 (compressed-tensors) text-only E4B. Override to the bf16 base or an FP8
+# build while the NVFP4 copy is being produced.
+MODEL="${MODEL:-$HOME/.lmstudio/models/local/gemma-4-E4B-it-text-NVFP4}"
+NAME="${SERVED_NAME:-summarize}"        # primary served name (oracle summarize-cheap)
+ALT_NAME="${ALT_SERVED_NAME:-rewrite}"  # dictation reuses the SAME warm slot
+# Opted in to the central pin 2026-08-07. This wrapper had kept a literal v0.24.0
+# with no recorded reason — it simply predated _vllm-image.sh. v0.24.x is BELOW the
+# floor that file documents ("the Nemotron NVFP4 checkpoint family is broken on
+# v0.23.x/0.24.x") and predates the NVFP4+Gemma RMSNorm fusion fix (vllm #48330,
+# shipped v0.25.1) as well as the gemma4 tool-call parser rewrite (#45588/#45795).
+source "$(dirname "$(readlink -f "$0")")/_vllm-image.sh"  # central pin (vllm-update bumps it)
+# HELD tier since 2026-08-15: v0.27.1 raises "'head_dim' is a per-layer attribute
+# and may vary across layers" for this checkpoint (see _vllm-image.sh).
+IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_PIN_HELD}"
+# GPU_UTIL is vLLM's VRAM target = util × TOTAL(31.4GB): that much must be FREE at
+# startup, and vLLM grabs it. So it's THE footprint knob, but it's bounded on BOTH
+# sides here:
+#   • FLOOR ~0.43: below it, weights(8.7GB: 4-bit linears + bf16 262k-vocab embeds)
+#     leave no room for the KV pool → "No available memory for cache blocks".
+#   • CEILING ~0.46: co-resident parakeet(5.7GB)+hermes(1.4GB) hold ~17GB, so only
+#     ~14.7GB is free → util×31.4 must stay under that.
+# 0.44≈13.8GB is the tuned value: fits alongside the co-resident octen embedder
+# (7.7GB) + parakeet (5.7GB) when they're loaded, yet still clears the KV floor
+# (measured: 219k-token pool, 53x concurrency at 4096). Reclaims 4.7GB vs the 0.55
+# the optimization run left it at. To go lower, first shrink a co-resident (parakeet
+# int8) — the 8.7GB weights (bf16 embeddings) are the hard anchor otherwise.
+GPU_UTIL="${GPU_UTIL:-0.35}"           # was 0.44≈13.8GB, then 0.25 (OOM'd: measured weights+MTP-draft=8.99GiB, not the hoped ~4GB — bf16 262k-vocab embeddings dominate despite NVFP4-quantized linears, so the real floor is close to the pre-quantization ~0.43 estimate below). 0.25 gave "Available KV cache memory: -1.7 GiB"; 0.28 (the documented fallback) still OOM'd at -0.7 GiB. 0.35 (~11.1GB) is the smallest value verified clean on 2026-07-14: weights 8.99GiB + graph 0.09GiB leaves 1.5 GiB KV → 76,088-token pool, 18.58x concurrency at max-model-len 4096 (max_num_seqs=4, so plenty of margin). Do not go below 0.35 without re-verifying "Available KV cache memory" is comfortably positive.
+MAXLEN="${MAXLEN:-4096}"               # caps the largest single-request KV alloc; summaries+dictation are short (was 8192)
+KV_DTYPE="${KV_DTYPE:-fp8}"            # halve KV vs bf16 (Gemma SWA already keeps KV small); set 'auto' to disable
+
+# Speculative decoding. Gemma4 MTP support landed in vLLM 0.22.0 (PR #41745) and
+# Google's MTP head was re-published for vLLM (SeatownSin/gemma-4-E4B-mtp-drafter,
+# model_type gemma4_assistant → Gemma4MTPModel, shares KV with the target). So:
+#   SPEC=mtp    → real MTP via that drafter (fastest single-stream)
+#   SPEC=ngram  → data-free ngram (helps repetitive summary output, no drafter)
+#   SPEC=off    → plain decode
+# NOTE: the drafter was trained on google/gemma-4-E4B-it; acceptance may dip on the
+# quantized text-only target — measure and fall back to ngram if it's not a win.
+SPEC="${SPEC:-mtp}"
+# The vLLM-native MTP drafter is the `gemma4_assistant` checkpoint (NOT the LiteRT
+# SeatownSin one, which has a custom loader). Resolved from the HF cache offline.
+MTP_DRAFT="${MTP_DRAFT:-google/gemma-4-E4B-it-assistant}"
+SPEC_TOKENS="${SPEC_TOKENS:-3}"        # benched winner: mtp n=3 = 410 tok/s (2.0x); scales with tokens
+SPEC_ARGS=()
+case "$SPEC" in
+  mtp)   SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"model\":\"$MTP_DRAFT\",\"num_speculative_tokens\":$SPEC_TOKENS}") ;;
+  ngram) SPEC_ARGS=(--speculative-config "{\"method\":\"ngram\",\"num_speculative_tokens\":$SPEC_TOKENS,\"prompt_lookup_max\":4,\"prompt_lookup_min\":2}") ;;
+esac
+
+# Shared mounts + env (persistent torch.compile cache, HF cache, model tree, Blackwell
+# alloc, offline HF) — one source of truth for EVERY vLLM server, no per-script drift.
+VLLM_HOST_NET=1                 # loopback-only, skips docker-proxy
+VLLM_SLEEP="${VLLM_SLEEP:-1}"   # /sleep + /wake_up instead of a ~60s cold restart
+source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
+
+# Clear a stale container from a hard kill/unload before relaunching — mirrors the same
+# guard in llama-summarize-auto for vllm-diffusiongemma. Needed now that llama-swap
+# supervises this container's lifecycle (cmd/cmdStop) instead of a bare standalone run.
+# Overridable so a smoke test / bench can run its OWN container instead of
+# killing the live llama-swap one that shares this name (vllm-update did
+# exactly that until 2026-08-06). Default keeps the llama-swap identity.
+: "${CONTAINER_NAME:=vllm-gemma4b}"
+
+docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+# eos self-heal (found 2026-07-22): this local NVFP4 re-export shipped generation_config
+# eos_token_id: 1 (<eos>) ONLY — but Gemma-4 chat ends turns with <turn|> (id 106), so
+# vLLM never stopped and every generic chat call spewed "<turn|>" junk until max_tokens.
+# Ensure 106 stays in the stop set even if the checkpoint is re-exported/re-downloaded.
+python3 - "$MODEL" <<'PY'
+import json, sys, pathlib
+p = pathlib.Path(sys.argv[1]) / "generation_config.json"
+g = json.loads(p.read_text())
+eos = g.get("eos_token_id")
+ids = eos if isinstance(eos, list) else [eos]
+if 106 not in ids:
+    g["eos_token_id"] = sorted(set(ids) | {106})
+    p.write_text(json.dumps(g, indent=2))
+    print(f"[vllm-gemma4b] patched eos_token_id -> {g['eos_token_id']} (added <turn|> 106)", file=sys.stderr)
+PY
+
+exec docker run --rm --gpus all --name "$CONTAINER_NAME" \
+  "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
+  --ipc=host \
+  "$IMAGE" \
+  "$MODEL" \
+  --served-model-name "$NAME" "$ALT_NAME" \
+  --host 127.0.0.1 --port "$PORT" \
+  ${VLLM_SLEEP:+--enable-sleep-mode} \
+  --max-model-len "$MAXLEN" \
+  --max-num-seqs "${MAX_SEQS:-4}" \
+  --gpu-memory-utilization "$GPU_UTIL" \
+  --kv-cache-dtype "$KV_DTYPE" \
+  --default-chat-template-kwargs '{"enable_thinking":false}' \
+  "${SPEC_ARGS[@]}" \
+  "$@"

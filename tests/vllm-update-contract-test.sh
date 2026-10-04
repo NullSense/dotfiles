@@ -201,6 +201,23 @@ grep -Fqx 'VLLM_IMAGE_PIN_HELD="vllm/vllm-openai:v0.26.0"' \
 grep -Fq 'vllm/vllm-openai@sha256:aaaaaaaa' "$apply_root/bin/llm-servers/vllm-qwen38" \
     || fail 'digest-owned wrapper was changed by the updater'
 
+# Regression 3: the live _vllm-image.sh is a dotfiles symlink. Bumping the pin
+# must edit the tracked target in place; a plain `sed -i` replaces the link with
+# an untracked regular file and the repo silently stops seeing pin changes.
+link_root="$tmp/symlinked"
+link_output="$tmp/symlinked.out"
+make_fixture "$link_root" v0.28.0 v0.26.0
+mkdir -p "$link_root/repo"
+mv "$link_root/bin/llm-servers/_vllm-image.sh" "$link_root/repo/_vllm-image.sh"
+ln -s "$link_root/repo/_vllm-image.sh" "$link_root/bin/llm-servers/_vllm-image.sh"
+: >"$link_root/wrappers.log"; : >"$link_root/docker.log"; : >"$link_root/curl.log"
+VLLM_TEST_DIR="$link_root" TMPDIR="$link_root" PATH="$link_root/fake-bin:$PATH" \
+    "$updater" --servers-dir "$link_root/bin/llm-servers" --apply >"$link_output" 2>&1 || true
+[[ -L "$link_root/bin/llm-servers/_vllm-image.sh" ]] \
+    || fail 'pin bump replaced the _vllm-image.sh symlink with a regular file'
+grep -Fqx 'VLLM_IMAGE_PIN="vllm/vllm-openai:v0.29.0"' "$link_root/repo/_vllm-image.sh" \
+    || fail 'pin bump did not reach the symlink target'
+
 # Every recognized wrapper is exercised through readiness followed by its real
 # route contract, while all smoke containers receive isolated names.
 for endpoint in /v1/embeddings /v1/rerank /v1/chat/completions; do

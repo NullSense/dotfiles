@@ -307,7 +307,13 @@ litellm_settings:
   #    semantic — semantic carries a 3-8% wrong-answer false-hit rate, unacceptable for
   #    unique-article summaries. disk backend = zero new service. mode default_off =
   #    opt-in: a request caches only when it sends `cache: {"no-cache": false}`. ──────
-  cache: true
+  # OFF since 2026-10-05: in LiteLLM 1.101.0, `cache: true` adds a sync success
+  # callback that mutates call metadata on a thread while the event loop iterates it
+  # ("dictionary changed size during iteration" → HTTP 500 after a successful upstream
+  # call). Nothing opted in (cache.db empty). See llm-stack
+  # docs/2026-10-05-litellm-embeddings-500-cache-race.md; same fix as config.yaml.
+  # Re-enable only on a LiteLLM release that iterates a copy in merge_litellm_metadata.
+  cache: false
   cache_params:
     type: disk
     disk_cache_dir: "/home/nullsense/.cache/llm-stack/litellm-cache"  # FIXED path — default is CWD-relative (./.litellm_cache), which leaks into whatever dir launched the proxy

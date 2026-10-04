@@ -1,0 +1,24 @@
+[Unit]
+Description=Documents vault agent tools (vault_status + sandboxed vault_run MCP) :8079
+Documentation=file:///home/nullsense/Documents/pipeline/docs/2026-10-04-vault-agent-tool-surface.md
+# LegalKB and Hindsight are reached on demand and probed in the background; neither is required
+# for the daemon to start, so they are ordering hints only.
+After=legalkb.service hindsight-legalkb.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/pipeline
+Environment=PYTHONPATH=%h/Documents/pipeline
+ExecStart=%h/Documents/pipeline/.venv/bin/python -m vault serve --port 8079
+# The daemon writes only its probe cache and per-run broker sockets; the registry index cache is
+# the one shared write it may refresh. Everything else is read-only to it.
+ProtectSystem=strict
+CacheDirectory=vault-tools
+ReadWritePaths=%h/Documents/pipeline/output %t
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

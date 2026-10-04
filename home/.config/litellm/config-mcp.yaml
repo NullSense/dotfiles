@@ -91,6 +91,41 @@ mcp_servers:
     - dev
     - research
 
+  # Documents vault agent tools (2026-10-04): one connection per person, exactly like the case
+  # banks above — the URL fixes the person, no tool takes a person argument. Served by
+  # vault-tools.service (pipeline/vault/server.py), loopback only. vault_run executes a short
+  # Python snippet against the read-only `vault` SDK inside bubblewrap (no network, read-only
+  # binds of that person's folder only); its only way out is a broker that allows LegalKB reads and
+  # this person's Hindsight recall. Design: ~/Documents/pipeline/docs/2026-10-04-vault-agent-tool-surface.md
+  matas_vault:
+    description: 'Documents vault tools — Matas Peciukonis. Fixed scope: Matas_Peciukonis/.
+      vault_status = what must be done to be certain; vault_run = sandboxed read-only code mode
+      (cases, docs, law, memory, deterministic calculators). Never hand-compute deadlines or amounts.'
+    allow_all_keys: true
+    transport: http
+    url: http://127.0.0.1:8079/mcp/matas-peciukonis/
+    allowed_tools:
+    - vault_status
+    - vault_run
+    timeout: 200
+    access_groups:
+    - dev
+    - research
+  pieter_vault:
+    description: 'Documents vault tools — Pieter Hoevers. Fixed scope: Pieter_Hoevers/.
+      vault_status = what must be done to be certain; vault_run = sandboxed read-only code mode
+      (cases, docs, law, memory, deterministic calculators). Never hand-compute deadlines or amounts.'
+    allow_all_keys: true
+    transport: http
+    url: http://127.0.0.1:8079/mcp/pieter-hoevers/
+    allowed_tools:
+    - vault_status
+    - vault_run
+    timeout: 200
+    access_groups:
+    - dev
+    - research
+
   exa:
     description: "Exa — neural web and code search (research)."
     allow_all_keys: true

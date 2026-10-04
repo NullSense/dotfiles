@@ -293,4 +293,4 @@ systemctl --user enable udiskie.service
 systemctl --user disable --now ssh-agent.service 2>/dev/null || true
 
 echo
-echo "=== DONE — reboot, then run hardware-optimize.sh, then populate ~/.secrets per dotfiles/SECRETS.md ==="
+echo "=== DONE — reboot, then populate ~/.secrets per dotfiles/SECRETS.md ==="

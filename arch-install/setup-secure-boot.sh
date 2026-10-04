@@ -1,6 +1,6 @@
 #!/bin/bash
 # Secure Boot setup with sbctl + UKI on Arch.
-# Run AFTER post-install.sh, AFTER hardware-optimize.sh, after a working boot.
+# Run AFTER post-install.sh, after a working boot.
 #
 # PRE-REQUISITES (do these first, in BIOS):
 #   1. Reboot:  systemctl reboot --firmware-setup

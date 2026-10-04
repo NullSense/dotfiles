@@ -1,7 +1,8 @@
 #!/bin/bash
-# Test harness for ~/.claude/statusline.sh
-# Feeds mock JSON payloads and displays rendered output
-SCRIPT="$HOME/.claude/statusline.sh"
+# Test harness for home/.claude/statusline.sh (the Claude Code status line).
+# Feeds mock JSON payloads and checks the rendered output. Hermetic: no real
+# project checkouts or ~/.claude cache writes.
+SCRIPT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/home/.claude/statusline.sh"
 PASS=0
 FAIL=0
 
@@ -74,54 +75,17 @@ run_test "Minimal payload (missing fields)" '{
   "context_window":{}
 }' 'Opus 4\.5.*proj.*0%'
 
-# ── Test 6: Vercel project detection (dream-slate-landing) ──────────────────
-if [ -f "/home/nullsense/Programming/dream-slate-landing/.vercel/project.json" ]; then
-    # Seed cache so test doesn't depend on background fetch timing
-    V_PROJECT_ID=$(jq -r '.projectId' /home/nullsense/Programming/dream-slate-landing/.vercel/project.json)
-    mkdir -p "$HOME/.claude/cache/vercel"
-    echo "READY|dream-slate-landing-abc123.vercel.app|main" > "$HOME/.claude/cache/vercel/${V_PROJECT_ID}.cache"
-
-    run_test "Vercel project detected (dream-slate-landing)" '{
-      "model":{"display_name":"Opus 4.5"},
-      "workspace":{"current_dir":"/home/nullsense/Programming/dream-slate-landing"},
-      "version":"1.0.90",
-      "cost":{"total_cost_usd":0.10,"total_lines_added":10,"total_lines_removed":2},
-      "context_window":{"used_percentage":20.0}
-    }' 'Opus 4\.5.*dream-slate-landing.*▲ Ready'
-
-    # Test 6b: Verify OSC 8 hyperlink is present in raw output
-    RAW_V=$(echo '{
-      "model":{"display_name":"Opus 4.5"},
-      "workspace":{"current_dir":"/home/nullsense/Programming/dream-slate-landing"},
-      "version":"1.0.90",
-      "cost":{"total_cost_usd":0.10,"total_lines_added":10,"total_lines_removed":2},
-      "context_window":{"used_percentage":20.0}
-    }' | bash "$SCRIPT" 2>/dev/null)
-    if echo "$RAW_V" | grep -qP '\x1b\]8;;https://dream-slate-landing-abc123\.vercel\.app'; then
-        printf "  \033[32mPASS\033[0m  Vercel OSC 8 clickable link present\n"
-        printf "        link target: https://dream-slate-landing-abc123.vercel.app\n\n"
-        PASS=$((PASS + 1))
-    else
-        printf "  \033[31mFAIL\033[0m  Vercel OSC 8 clickable link missing\n"
-        printf "        raw bytes: %s\n\n" "$(echo "$RAW_V" | cat -v)"
-        FAIL=$((FAIL + 1))
-    fi
-
-    # Clean up seeded cache so real refresh takes over
-    rm -f "$HOME/.claude/cache/vercel/${V_PROJECT_ID}.cache"
-else
-    echo "  SKIP  Vercel project test (dream-slate-landing not found)"
-    echo ""
-fi
-
-# ── Test 7: Real workspace (panopticon) ──────────────────────────────────────
-run_test "Real workspace (panopticon with git)" '{
+# ── Test 6: git branch shown for a repository workspace ─────────────────────
+GIT_TMP=$(mktemp -d)
+trap 'rm -rf -- "$GIT_TMP"' EXIT
+git -C "$GIT_TMP" init -q -b feat/statusline-test
+run_test "Git workspace shows branch" '{
   "model":{"display_name":"Opus 4.5"},
-  "workspace":{"current_dir":"/home/nullsense/Programming/panopticon","project_dir":"/home/nullsense/Programming/panopticon"},
+  "workspace":{"current_dir":"'"$GIT_TMP"'","project_dir":"'"$GIT_TMP"'"},
   "version":"1.0.90",
   "cost":{"total_cost_usd":0.33,"total_lines_added":15,"total_lines_removed":3},
   "context_window":{"used_percentage":40.0}
-}' 'Opus 4\.5.*panopticon.*feat/dre-380.*40%.*\$0\.33'
+}' 'Opus 4\.5.*feat/statusline-test.*40%.*\$0\.33'
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -132,3 +96,4 @@ else
     printf "\033[31m  %d/%d failed\033[0m\n" "$FAIL" "$TOTAL"
 fi
 echo ""
+[ "$FAIL" -eq 0 ]

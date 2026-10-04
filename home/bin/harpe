@@ -3,7 +3,7 @@
 # All logic lives in the Python project at ~/Programming/harpe; this is a thin shim.
 #
 # Back-compat names are SYMLINKS to this file and dispatch on the invoked name:
-#   harpe, grab, sadak  → straight passthrough (grab & sadak are legacy names)
+#   harpe, grab         → straight passthrough (grab is the legacy name)
 #   artgrab             → 'harpe -s' (federated museum art search); prompts if no query
 #
 # Backends: yt-dlp, gallery-dl, dezoomify-rs. Core is keyless; optional keys
@@ -11,7 +11,7 @@
 # environment — grab-menu injects them via `infisical run`, or for direct CLI use:
 #   infisical run -- harpe -s "<query>"
 #
-# Usage: harpe --help     (old bash version: ~/bin/.grab-bash-backup/)
+# Usage: harpe --help
 case "${0##*/}" in
   artgrab)
     # artgrab "the feast of belshazzar rembrandt"  |  artgrab  (prompts for a query)

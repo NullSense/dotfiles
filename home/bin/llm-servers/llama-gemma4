@@ -28,7 +28,7 @@ MODEL_DIR="$HOME/.lmstudio/models/yuxinlu1/gemma-4-12B-it-Claude-4.6-4.8-Opus-GG
 MODEL="${MODEL:-$MODEL_DIR/gemma4-opus48-Q4_K_M.gguf}"
 DRAFT="${DRAFT:-$MODEL_DIR/gemma-4-12B-it-MTP-Q8_0.gguf}"
 SLOTS_DIR="${SLOTS_DIR:-$HOME/.cache/llama-cpp/slots-gemma4}"
-PORT="${PORT:-8082}"   # 8080 = llama-qwen36, 8081 = taken (system), 1234 = LM Studio
+PORT="${PORT:-8082}"   # 8081 = taken (system), 1234 = LM Studio
 # Context: 131072 = card max. On the 32GB 5090 the dense 12B (7.4GB) + full-ctx KV
 # leaves tens of GB of slack, so we run the full window by default (the old 65536 cap
 # was a 12GB-GTT-spill workaround on the retired AMD card).

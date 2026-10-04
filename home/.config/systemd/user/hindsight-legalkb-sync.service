@@ -9,5 +9,9 @@ WorkingDirectory=%h/Documents/pipeline
 Environment=PIPELINE_MEMORY__ENABLED=true
 ExecStart=%h/Documents/pipeline/.venv/bin/python memory_sync.py --apply
 ExecStartPost=%h/Documents/pipeline/hindsight_runtime/.venv/bin/python %h/Documents/pipeline/hindsight_runtime/configure.py --profile-pages --apply --summary
-TimeoutStartSec=120
+# Weekly private-history purge: a no-op unless due (settings.memory.purge_interval_days); when due
+# it takes a backup.py package, drills it, purges withheld history, then prunes old packages.
+ExecStartPost=%h/Documents/pipeline/.venv/bin/python memory_sync.py --scheduled-purge
+# A normal cycle takes ~15 s; the budget covers a due purge (backup.py calls cap at 900 s each).
+TimeoutStartSec=2100
 UMask=0077

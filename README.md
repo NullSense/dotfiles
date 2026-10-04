@@ -66,6 +66,24 @@ python3 ~/.dotfiles/tests/voice-tools-test.py
 through `home/.local/lib/voice-tools.sh`. Their regression test uses simulated
 audio devices and temporary recordings; it does not touch the live audio stack.
 
+## Codex updates
+
+`~/.local/bin/codex` checks and installs the latest stable official standalone
+release before each new session. The OpenAI installer manages complete packages
+under `~/.codex/packages/standalone/`; its command symlinks live in
+`~/.local/lib/codex/bin/` so updates cannot replace the tracked launcher.
+Existing sessions retain their executable and companion files. Old releases are
+not pruned by the launcher, and no daemon or session is restarted.
+
+Offline or failed updates warn and launch the installed version. Downloads and
+installation have bounded timeouts; details go to
+`~/.local/state/codex-launcher/update.log`. `codex update` retries explicitly and
+returns failure if the update fails. Help, version, completion, internal servers,
+and commands spawned inside Codex skip automatic updates. The Arch package and
+the old custom build are retained but no longer selected by ordinary launches.
+
+Run `tests/codex-launcher-test.sh` for the offline regression suite.
+
 ## Gameplay recording
 
 `~/bin/screenrecord` owns desktop and gameplay capture. Gameplay capture uses

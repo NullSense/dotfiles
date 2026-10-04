@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Keep the official standalone package current before starting a new session.
+set -uo pipefail
+
+install_dir="$HOME/.local/lib/codex/bin"
+binary="$install_dir/codex"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/codex-launcher"
+
+update_codex() (
+    umask 077
+    mkdir -p "$state_dir" || exit 1
+    # Close this descriptor before exec so sessions never retain the update lock.
+    exec 9>"$state_dir/update.lock" || exit 1
+    flock -w 125 9 || exit 1
+    exec >"$state_dir/update.log" 2>&1
+    installer=$(mktemp "$state_dir/installer.XXXXXX") || exit 1
+    trap 'rm -f -- "$installer"' EXIT
+    # Download fully before execution; a truncated response must never run.
+    curl -fsSL --connect-timeout 5 --max-time 15 \
+        https://chatgpt.com/codex/install.sh -o "$installer" || exit 1
+    # The installer owns checksums, complete packages and atomic version selection.
+    # Its private command directory keeps it from replacing this tracked launcher.
+    env CODEX_INSTALL_DIR="$install_dir" CODEX_NON_INTERACTIVE=1 \
+        CODEX_RELEASE=latest PATH="$install_dir:$PATH" \
+        timeout --kill-after=5s 120s sh "$installer"
+)
+
+update=1
+case "${1:-}" in
+    --version|-V|--help|-h|help|completion|app-server|exec-server)
+        update=0 ;;
+esac
+# Internal commands spawned by Codex must not recursively update their package.
+[[ ${CODEX_LAUNCH_ACTIVE:-0} == 1 ]] && update=0
+[[ ${1:-} == update ]] && update=1
+
+if (( update )); then
+    if update_codex; then
+        if [[ ${1:-} == update ]]; then
+            "$binary" --version
+            exit $?
+        fi
+    else
+        printf 'codex: update check failed; using installed version (log: %s/update.log).\n' "$state_dir" >&2
+        [[ ${1:-} == update ]] && exit 1
+    fi
+fi
+
+if [[ ! -x "$binary" ]]; then
+    printf 'codex: standalone package missing; run codex update while online.\n' >&2
+    exit 1
+fi
+export CODEX_LAUNCH_ACTIVE=1
+# Preserve this destination for an update initiated from the Codex UI, too.
+export CODEX_INSTALL_DIR="$install_dir"
+exec "$binary" "$@"

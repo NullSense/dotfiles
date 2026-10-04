@@ -76,12 +76,21 @@ models:
     description: "embedding · Octen-Embedding-4B (Qwen3-Embedding finetune), 2560-dim, last-token pooling. LEGACY: sift moved its dense leg to nemotron-embed-1b (2048-dim); kept only to read pre-cutover 2560-dim collections."
     metadata: { engine: "llama.cpp", hf: "Octen/Octen-Embedding-4B", class: embedding, thinking: na, best_for: "reading pre-cutover 2560-dim indexes", tags: [embedding, local, legacy] }
 
-  # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), Vulkan GPU (~0.4 GB VRAM).
-  #    Used by litellm mcp_semantic_tool_filter. Co-resident with the small models via the
-  #    matrix (var `t`) so loading it NEVER evicts the chat model. First load auto-downloads
-  #    the official llama.cpp GGUF (~379 MB Q8_0); needs a llama.cpp build with the `lfm2-bidir`
-  #    arch (update llama.cpp if it errors "unknown architecture lfm2-bidir"; if the Vulkan
-  #    backend lacks it, fall back to -ngl 0). Filter fails-open (all tools) if it can't load.
+  # ── tool-search embedder — LFM2.5-Embedding-350M (1024-dim CLS), CUDA GPU (~0.4 GB VRAM).
+  #    ⚠ RETIRED-BUT-DEFINED 2026-09-12: litellm's mcp_semantic_tool_filter.embedding_model now
+  #    points at nemotron-embed-1b instead (see config-mcp.yaml and this file's matrix.vars `t`
+  #    retirement comment — one fewer distinct model in the warm set, per user decision). This
+  #    entry is left live and callable by its aliases (embed-lfm/tool-embed/lfm2-embed) for
+  #    rollback or standalone use, but it is no longer in ANY matrix set (var `t` removed), so a
+  #    direct request for it now runs SOLO and evicts whatever else is resident. First load
+  #    auto-downloads the official llama.cpp GGUF (~379 MB Q8_0); needs a llama.cpp build with
+  #    the `lfm2-bidir` arch (update llama.cpp if it errors "unknown architecture lfm2-bidir";
+  #    if the CUDA backend lacks it, fall back to -ngl 0).
+  #    (Corrected 2026-09-12: this header used to say "Vulkan GPU" while the cmd below and the
+  #    description both always said CUDA — the cmd's `--device CUDA0` was never Vulkan, this was
+  #    just a stale header word.) The mcp_semantic_tool_filter feature this served is itself
+  #    `enabled: false` in litellm's config-mcp.yaml and semantic-router isn't even installed in
+  #    litellm's venv, so it fails open (all tools) regardless of which embedder is configured.
   lfm2-embed-350m:
     # ctx 8192 ≫ ubatch 512: -ub is the PER-INPUT token cap (pooled embeddings must fit one
     # ubatch); -c bounds the TOTAL tokens of a batched /v1/embeddings request. At -c 512 a
@@ -92,8 +101,8 @@ models:
     ttl: 3600
     name: "LFM2.5-Embedding-350M (tool search, CUDA GPU)"
     aliases: [embed-lfm, tool-embed, lfm2-embed]
-    description: "embed·tools · LFM2.5-Embedding-350M 1024-dim CLS, CUDA GPU (~0.4 GB VRAM) — semantic MCP tool filter. Asymmetric query:/document: prefixes recommended."
-    metadata: { engine: "llama.cpp", hf: "LiquidAI/LFM2.5-Embedding-350M-GGUF", class: embed, thinking: na, best_for: "MCP tool semantic search (litellm mcp_semantic_tool_filter)", tags: [embed, tools, local, lfm2, gpu, cuda] }
+    description: "embed·tools · LFM2.5-Embedding-350M 1024-dim CLS, CUDA GPU (~0.4 GB VRAM). RETIRED 2026-09-12 as the MCP tool filter's embedder (superseded by nemotron-embed-1b); no longer in any matrix set (var `t` removed) so a direct request runs solo. Kept defined for rollback. Asymmetric query:/document: prefixes recommended."
+    metadata: { engine: "llama.cpp", hf: "LiquidAI/LFM2.5-Embedding-350M-GGUF", class: embed, thinking: na, best_for: "rollback target if nemotron-embed-1b is unsuitable for MCP tool semantic search", tags: [embed, tools, local, lfm2, gpu, cuda, retired] }
 
   # ── LEARNED-SPARSE (SPLADE-family) — sift's hybrid lexical leg (2026-07-31) ──────────────
   #    TEI is the only engine here that can serve SPLADE pooling: Infinity explicitly does
@@ -251,20 +260,27 @@ models:
   #    Consumers: legalkb (via :9292/v1) today; sift legalkb-tenant later (provider=custom,
   #    model=embed-legal, dimensions=2048, api_base=http://127.0.0.1:9292/v1 — 2048 ≠ octen's 2560,
   #    so it is a SEPARATE sift vector-config/collection by construction, never a swap-in).
-  f2llm-embed:
-    # CONTAINERIZED 2026-07-18 (image built from the project's own uv.lock — Modal-ready;
-    # native venv remains the dev fallback: swap `docker run …` for
-    # `.venv/bin/infinity_emb v2 --host 127.0.0.1 --port ${PORT} <same flags>`).
-    # Score parity container↔native verified (bge 0.45535 both).
-    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-f2llm --init --gpus all -p 127.0.0.1:${PORT}:7997 -v /home/nullsense/.cache/huggingface:/hf infinity-serving:local --engine torch --device cuda --dtype float16 --no-bettertransformer --model-id codefuse-ai/F2LLM-v2-1.7B --revision 2af800f9d08546d675b1c7c522351ce1d900dc2e --served-model-name codefuse-ai/F2LLM-v2-1.7B@2af800f9d08546d675b1c7c522351ce1d900dc2e --batch-size 128 --url-prefix /v1
-    cmdStop: docker stop swap-f2llm
-    proxy: http://127.0.0.1:${PORT}
-    useModelName: codefuse-ai/F2LLM-v2-1.7B@2af800f9d08546d675b1c7c522351ce1d900dc2e
-    ttl: 300
-    name: "F2LLM-v2-1.7B (Infinity, 2048-dim)"
-    aliases: [embed-legal, f2llm, "codefuse-ai/F2LLM-v2-1.7B"]
-    description: "embedding · F2LLM-v2-1.7B fp16 2048-dim via Infinity — wins German legal retrieval (GerDaLIR/LeCaRDv2, see legalkb 2026-07-02 reeval). legalkb embedder now; sift legalkb-tenant embedding later. Batch 128 (5090: 254 texts/s)."
-    metadata: { engine: "infinity", hf: "codefuse-ai/F2LLM-v2-1.7B", class: embedding, thinking: na, best_for: "German legal retrieval (legalkb; future sift legalkb tenant)", tags: [embedding, local, legal, infinity] }
+  # f2llm-embed — DISABLED 2026-09-12 (entry commented out, not deleted — house style, see the
+  # `mineru` entry below for the same treatment). Verified zero live consumers: legalkb's
+  # settings.py switched its production embedder to nemotron-embed-1b on 2026-08-14 (explicit
+  # comment there: "SWITCHED from codefuse-ai/F2LLM-v2-1.7B... by USER DECISION"), and grepping
+  # the whole ~/Documents/pipeline tree for codefuse-ai/F2LLM and f2llm-embed found only
+  # historical comments and a test asserting the switch happened — no embed-side A/B bench script
+  # references it (contrast `bge-rerank` below, which legalkb/evals/rerank_ab_bench.py still
+  # defaults to). matrix.vars' `f` var and its mentions in the `legal`/`legal-q`/`legal-z` sets
+  # were retired in the same change. Re-enable by uncommenting this entry, restoring `f` in
+  # matrix.vars, and re-adding it to whichever sets need it — nothing else depends on it dying.
+  #
+  # Last known-good cmd, kept for reference / a future re-enable:
+  #   docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-f2llm --init --gpus all -p 127.0.0.1:${PORT}:7997 -v /home/nullsense/.cache/huggingface:/hf infinity-serving:local --engine torch --device cuda --dtype float16 --no-bettertransformer --model-id codefuse-ai/F2LLM-v2-1.7B --revision 2af800f9d08546d675b1c7c522351ce1d900dc2e --served-model-name codefuse-ai/F2LLM-v2-1.7B@2af800f9d08546d675b1c7c522351ce1d900dc2e --batch-size 128 --url-prefix /v1
+  # cmdStop: docker stop swap-f2llm
+  # proxy: http://127.0.0.1:${PORT}
+  # useModelName: codefuse-ai/F2LLM-v2-1.7B@2af800f9d08546d675b1c7c522351ce1d900dc2e
+  # ttl: 300
+  # name: "F2LLM-v2-1.7B (Infinity, 2048-dim)"
+  # aliases: [embed-legal, f2llm, "codefuse-ai/F2LLM-v2-1.7B"]
+  # description: "embedding · F2LLM-v2-1.7B fp16 2048-dim via Infinity — wins German legal retrieval (GerDaLIR/LeCaRDv2, see legalkb 2026-07-02 reeval). legalkb embedder now; sift legalkb-tenant embedding later. Batch 128 (5090: 254 texts/s)."
+  # metadata: { engine: "infinity", hf: "codefuse-ai/F2LLM-v2-1.7B", class: embedding, thinking: na, best_for: "German legal retrieval (legalkb; future sift legalkb tenant)", tags: [embedding, local, legal, infinity] }
 
   bge-rerank:
     cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-bge --init --gpus all -p 127.0.0.1:${PORT}:7997 -v /home/nullsense/.cache/huggingface:/hf infinity-serving:local --engine torch --device cuda --dtype float16 --no-bettertransformer --model-id BAAI/bge-reranker-v2-m3 --served-model-name bge-rerank --batch-size 16 --url-prefix /v1
@@ -353,11 +369,10 @@ models:
     # interactive chat, where 10 parallel requests is generous. It is wrong for a
     # bulk embedder.
     concurrencyLimit: 32
-    # Idle-evict after 10 min (was ttl:0 pinned for repowise). An explicit unload
-    # would otherwise be undone by the next background embed (hindsight consolidation)
-    # and then stay resident forever. Cost: the first embed after eviction pays a
-    # ~40s cold start.
-    ttl: 600
+    # Repowise requires this dense embedder: never unload it for being idle.
+    # This disables only idle expiry; the matrix can still evict incompatible workers.
+    # Do not restart/reload llama-swap or unload Nemotron during active agent work.
+    ttl: 0
     name: "Nemotron-3-Embed-1B (vLLM NVFP4, 2048-dim)"
     # `embed` moved here from octen-embedding-4b on 2026-08-15 so the generic name means the
     # same model at :9292 and at litellm's :4000 (which already mapped embed → this model).
@@ -423,17 +438,43 @@ models:
     # blind-judge gate passed (summ 4.55-vs-4.61 same judge, taxonomy 18/20 both) at +60%
     # decode (154 vs 96 tok/s freeform; 206 tok/s summarize with ngram spec) and 3 GB
     # less VRAM. Drop the MODEL env to fall back to the bf16 original.
-    # EAGLE-3 draft head is the DEFAULT spec since 2026-07-23. THINKING-AWARE retrain
-    # 2026-07-24 (28.6k corpus, 45% thinking traces, 4 epochs; val cond_acc 0.685/0.697/
-    # 0.715, up from 0.622): thinking-mode acceptance 0.33->0.41 (+23%), thinking tok/s
-    # 244->272; non-thinking gains too. Head lives at the same path (overwritten in place;
-    # prior head backed up at ...EAGLE3.champion-bak). ONE config, keeps async+MRV2+full
-    # graphs. TRITON_ATTN is mandatory with eagle3 on SM120 (FlashInfer+spec drops
-    # cudagraphs to PIECEWISE, slower than spec-off). SPEC_TOKENS=3 (pos-2 accepts ~0.25).
-    # Fall back: drop SPEC/SPEC_MODEL/ATTN envs → wrapper's ngram default.
-    # Measured exception (2026-07-23 real-data sweep): LONG-document summarize
-    # favors ngram (231 vs 160 output tok/s) — for bulk long-doc jobs run the
-    # ngram config; eagle3 stays default for agent/RAG/chat/code traffic.
+    # SPEC=eagle3 RESTORED 2026-09-17 (user: speed over the 0.7 GB; DSpark k=7 lost: 17-21 GB, ~190 tok/s).
+    # SPEC=off since 2026-09-12 (user: "no spec cause i want to minimize vram usage").
+    # Previously ran EAGLE-3 (THINKING-AWARE retrain 2026-07-24, 28.6k corpus, val
+    # cond_acc 0.685/0.697/0.715) with TRITON_ATTN forced (mandatory with eagle3 on
+    # SM120 — FlashInfer+spec drops cudagraphs to PIECEWISE). MEASURED head-to-head at
+    # this entry's MAXLEN=65536/6G-KV (nvidia-smi + 300-tok freeform bench, 2026-09-12):
+    #   eagle3 + TRITON_ATTN         13.7 GB   ~207-236 tok/s (avg ~223)
+    #   off    + TRITON_ATTN         13.0 GB   ~146-163 tok/s (avg ~157)   <- ACTIVE
+    #   off    + FlashInfer (none)   13.0 GB   ~149-153 tok/s (avg ~151)
+    # Disabling spec saves only ~0.7 GB here (the draft head itself is small; the fixed
+    # 6 GiB KV cache dominates either way) for a ~30% tok/s cost. TRITON_ATTN keeps its
+    # short-ctx freeform edge over FlashInfer even with spec off (matches the wrapper's
+    # own speed-matrix finding), so it stays set explicitly rather than reverting to the
+    # wrapper's FlashInfer default.
+    # If real VRAM headroom is the goal rather than just dropping spec, MAXLEN/KV size
+    # matter far more than SPEC: a bench run at MAXLEN=8192 + --kv-cache-memory-bytes 1G
+    # (SPEC=off, TRITON_ATTN) measured only 7.7 GB resident.
+    # EAGLE-3 checkpoint remains on disk at .../Nanbeige4.2-3B-EAGLE3 for revival;
+    # SPEC_TOKENS=3 was tuned for it (pos-2 accepts ~0.25) and is meaningless with spec off.
+    # ⚠ INTERACTIVE-REWRITE VIABILITY (2026-09-12): hyprwhspr-ai's backends.json now
+    # points dictation rewrite at nanbeige (active: "nanbeige") against a 4.0s hook
+    # budget. This entry is WRONG for that: ttl:300 + evict_cost 4 (cheapest model on
+    # the card to evict, see the matrix below) means it gets swapped out whenever idle
+    # 5 min or whenever anything else needs its VRAM, and the measured swap-in-from-
+    # asleep cost is 41.6 s (of which waking is 0.34 s — the rest is llama-swap evicting
+    # the retrieval trio). Nothing about SPEC or ATTN touches that; only residency does.
+    # MEASURED (2026-09-12), model already warm, :fast (thinking off), realistic short
+    # rewrite prompt: ~0.74 s wall / ~160 tok/s — comfortably inside 4 s once resident.
+    # So the fix, if wanted, is a SEPARATE pinned (ttl: 0) small-context profile sized
+    # for rewrite traffic only (mirrors the now-disabled nanbeige-sift pattern below):
+    # MAXLEN~8192 + a ~1G kv-cache-memory-bytes measured at ~7.7 GB resident, vs this
+    # entry's 13.0 GB — still a permanent VRAM tax, and it stacks with whatever else is
+    # pinned (rewrite E4B alone is already ~13.2 GB ttl:0). Left unimplemented: doing so
+    # would directly fight this same change's VRAM-minimization goal, and the existing
+    # `rewrite` E4B entry above already covers this need at a known cost — this note
+    # exists so the trade is explicit rather than silently eaten on the next dictation
+    # backend swap.
     # The old Hermes-only profile used 128k so a 65,536-token completion still left
     # input room. Sift's co-resident contract instead uses a 64k total request window
     # with a 16,384-token completion ceiling.
@@ -492,8 +533,8 @@ models:
     ttl: 300
     name: "Nanbeige4.2-3B (vLLM FP8-dynamic, looped)"
     aliases: [nanbeige, "Nanbeige/Nanbeige4.2-3B", "nanbeige4.2-3b:agent", "nanbeige4.2-3b:think", "nanbeige4.2-3b:fast"]
-    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + EAGLE-3 on vLLM. Blind-judged summ winner vs E4B (see summ-eval-v2 caveat). 154 tok/s freeform. 64k max request with fixed 6 GiB fp8 KV. Thinking default ON — :fast for summ."
-    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "fp8-dynamic (local llmcompressor)", class: "reason·agent·summarize", thinking: "toggle (default on)", best_for: "RAG answer generation, agentic reasoning, high-coverage summarization (:fast); NOT rewrite (E4B faster+more robust)", tags: [reason, agent, summarize, local, nanbeige, vllm, fp8] }
+    description: "reason·agent·summarize · Nanbeige4.2-3B looped transformer (22L×2) FP8-dynamic + EAGLE-3 on vLLM (SPEC=eagle3 restored 2026-09-17: speed over the ~0.7 GB). Blind-judged summ winner vs E4B (see summ-eval-v2 caveat). ~207-236 tok/s freeform with eagle3. 64k max request with fixed 6 GiB fp8 KV. Thinking default ON — :fast for summ."
+    metadata: { engine: "vllm", hf: "Nanbeige/Nanbeige4.2-3B", quant: "fp8-dynamic (local llmcompressor)", class: "reason·agent·summarize", thinking: "toggle (default on)", best_for: "RAG answer generation, agentic reasoning, high-coverage summarization (:fast); NOT rewrite (E4B faster+more robust, and this entry's 5-min-idle/cheap-evict residency can cost 40s+ to swap back in — see note above)", tags: [reason, agent, summarize, local, nanbeige, vllm, fp8, eagle3] }
     # Three card-mapped invocation profiles (card scenario table + preserve_thinking recs):
     #   :agent → tools/RAG/multi-turn agent — thinking ON, keep prior-turn reasoning,
     #            forced T=1.0 (card "Agentic and tool-use tasks")
@@ -790,11 +831,15 @@ models:
     # (64 KiB/token) and there is now headroom. Paired with the finish_reason=length check added to
     # ocr_http.py the same day, so any remaining truncation fails loudly instead of silently.
     #
-    # 2026-08-15: wrapper HELD at VLLM_IMAGE_PIN_HELD (v0.26.0) — v0.27.1 raises a KV-cache-too-small
-    # ValueError at this GPU_UTIL (0.15), measured by booting on both images (see _vllm-image.sh).
+    # 2026-08-15..2026-09-12: wrapper was HELD at VLLM_IMAGE_PIN_HELD (v0.26.0) — v0.27.1 raised a
+    # KV-cache-too-small ValueError at the old GPU_UTIL=0.15 default (measured by booting on both
+    # images). REJOINED the leading tier 2026-09-12: measured on v0.29.0, 0.15/0.16 still fail the
+    # same way, 0.18 boots with real margin (21,872-token KV pool, 1.33x concurrency) and is now the
+    # wrapper default (~5.66 GB reserved, up from ~4.8 GB) — verified past boot with a real OCR
+    # request. Full GPU_UTIL sweep + the exact errors: _vllm-image.sh.
     name: "GLM-OCR (3rd consensus, vLLM)"
     aliases: [glm-ocr]
-    description: "ocr · GLM-OCR 0.9B bf16 via vLLM (VLLM_IMAGE_PIN_HELD — v0.27.1 KV-cache-too-small at this util, see _vllm-image.sh). OmniDocBench ~95.15. Documents pipeline 3rd consensus (rarely reached). Prompt 'Text Recognition:' (per zai-org model card). MTP spec-decode OFF — needs vLLM nightly + transformers>=5.0.0 (neither pin tier carries MTP weights). 3721-token encoder ceiling → max-num-batched-tokens 8192 + limit-mm 1. On-demand."
+    description: "ocr · GLM-OCR 0.9B bf16 via vLLM (VLLM_IMAGE_PIN, rejoined leading tier 2026-09-12 at GPU_UTIL 0.18 — see _vllm-image.sh). OmniDocBench ~95.15. Documents pipeline 3rd consensus (rarely reached). Prompt 'Text Recognition:' (per zai-org model card). MTP spec-decode OFF — needs vLLM nightly + transformers>=5.0.0 (neither pin tier carries MTP weights). 3721-token encoder ceiling → max-num-batched-tokens 8192 + limit-mm 1. On-demand."
     metadata: { engine: "vllm", hf: "zai-org/GLM-OCR", class: ocr, thinking: na, best_for: "document OCR — third independent consensus engine", tags: [ocr, vision, local, glm, multimodal, vllm] }
 
   # ── GLiNER2 NER is ORACLE-OWNED, not in this stack (decided 2026-06-18). Oracle runs it
@@ -1031,14 +1076,48 @@ matrix:
     e: octen-embedding-4b      # embeddings (sift + oracle) — keep warm
     s: gemma-4-e4b             # summarize  · NP=4 SPEC=off
     d: rewrite                 # shared E4B · rewrite + Sift RAG, 64K tools, ttl:0 (~11 GB)
-    t: lfm2-embed-350m         # MCP tool-search embedder (~0.4 GB) — keep warm, never evict chat
+  # t: lfm2-embed-350m         # RETIRED 2026-09-12 (user: switch the MCP tool-search embedder to
+    #   nemotron, "we're using that anyways" — one fewer distinct model in the warm set). The
+    #   litellm mcp_semantic_tool_filter's embedding_model now points at nemotron-embed-1b (var
+    #   `n` below), which is already ttl:0-pinned and independently resident for sift/legalkb —
+    #   reusing it costs nothing extra where `n` is already in a set. `t` is dropped from every
+    #   set it appeared in rather than replaced with `n` everywhere, because several of those sets
+    #   (coresident ~31 GB, sift-chat-27b at 128k) have NO headroom for nemotron's ~3.8 GB and
+    #   `n` was never in them for good reason (see sift-chat-27b's own comment on why n/m are
+    #   excluded at 128k). `n` IS added to the `ocr` set specifically (mirrors t's original
+    #   purpose there: protect a running OCR cascade from eviction by an in-flight tool-search
+    #   call) since that set has real headroom. NOTE: mcp_semantic_tool_filter is `enabled: false`
+    #   in litellm's config-mcp.yaml (unrelated pre-existing reason — a LiteLLM <=1.93 bug that
+    #   clobbers client-supplied OpenAI tools) AND semantic-router is not even installed in
+    #   litellm's venv, so this whole feature is a no-op today regardless of matrix wiring; the
+    #   sets above are pre-positioned for whenever it is next turned on, not solving a live problem.
+    #   lfm2-embed-350m's MODEL ENTRY is left defined-but-unreferenced below, not deleted.
     b: gemma-4-12b-opus        # strong summarizer/reasoner (~10 GB w/ MTP + 131k f16 KV)
-    f: f2llm-embed             # Infinity F2LLM 2048-dim (legalkb / future sift legal tenant)
-    r: bge-rerank              # Infinity bge-reranker-v2-m3 (~1.3 GB)
+  # f: f2llm-embed             # RETIRED 2026-09-12 — verified zero live consumers: legalkb's
+    #   settings.py switched its production embedder to nemotron-embed-1b on 2026-08-14 (explicit
+    #   comment there: "SWITCHED from codefuse-ai/F2LLM-v2-1.7B... by USER DECISION"), and grepping
+    #   the whole pipeline for codefuse-ai/F2LLM / f2llm-embed found only historical comments and
+    #   test assertions about the switch itself — no embed-side A/B bench script exists (contrast
+    #   `r` below, which DOES still have one). Dropped from the `legal`/`legal-q`/`legal-z` sets
+    #   accordingly (see those sets' comments) rather than replaced with `n`, since repurposing
+    #   those sets for a live embedder wasn't asked for and would change their VRAM budget — add
+    #   `n` there deliberately if a future embed+rerank end-to-end A/B bench needs it resident.
+    #   f2llm-embed's MODEL ENTRY is commented out below (house style, like `mineru`), not deleted.
+    r: bge-rerank              # NOT dead (2026-09-12 verified) — bge-reranker-v2-m3 is still the
+                               # default first tier in legalkb/evals/rerank_ab_bench.py's --tiers
+                               # list, so the model entry stays live and callable by alias. The VAR
+                               # is unused in every matrix set below, though: `legal-q`/`legal-z`
+                               # use `q`/`z`, never `r` — the OLD comment on this line claiming "kept
+                               # for the legal-q/legal-z A/B sets" was simply wrong (verified by
+                               # grepping every `sets:` entry — zero contain a bare `r`). Left
+                               # defined for direct-alias invocation (an occasional manual A/B run
+                               # is fine running solo/evicting); add it to a set only if a future
+                               # bench needs bge co-resident with something else.
     q: qwen3-reranker-4b       # llama.cpp Q8_0 (~4.3 GB)
     j: jina-reranker-v3        # transformers sidecar (~1.5 GB bf16)
     z: zerank-2                # Infinity fp16 (~8 GB) — heavy
-    n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate
+    n: nemotron-embed-1b       # vLLM NVFP4 2048-dim (~3.8 GB reserved) — sift candidate; also now
+                               # the MCP tool-search embedder target (see retired `t`, above)
     m: nemotron-rerank-1b      # vLLM bf16 cross-encoder (~4.7 GB reserved) — sift candidate
     a: nanbeige4.2-3b          # vLLM looped reasoner, 64k max request, fixed 6 GiB KV
   # A: nanbeige-sift           # NVFP4 quant @32k + eagle3 — sized to co-reside with n+m+x   # DISABLED 2026-09-07
@@ -1047,14 +1126,16 @@ matrix:
     P: paddleocr-vl            # Documents OCR cascade, PRIMARY  — vLLM, GPU_UTIL 0.18 (~5.8 GB RESERVED)
     # M (mineru) var REMOVED 2026-08-15 along with the model entry itself (see `mineru` comment
     # under models: — the entry booted a broken container on request, now fully disabled).
-    G: glm-ocr                 # Documents OCR cascade, fallback 2 — vLLM, GPU_UTIL 0.15 (~4.8 GB RESERVED)
+    G: glm-ocr                 # Documents OCR cascade, fallback 2 — vLLM, GPU_UTIL 0.18 (~5.7 GB
+                               # RESERVED, up from 0.15/~4.8GB 2026-09-12 — rejoined VLLM_IMAGE_PIN
+                               # on v0.29.0, see _vllm-image.sh for the measured GPU_UTIL sweep)
     Q: qwen3.8-27b-uncensored  # uncensored 27B chat/agent, Q4_K_M + MTP n2 (~18.8 GB @32k q8-KV)
   # OCR evict costs are high for the same reason as x: the cost is reload-stalls per DOCUMENT,
   # not GB. A vault re-verify walks the cascade per scanned page; evicting mid-run re-pays a
   # full model load each time. vLLM gpu-memory-utilization is a FRACTION OF TOTAL (32 GB), so
   # the reservation exceeds the bf16 weights; P+M+G ≈ 18.6 GB reserved → the `ocr` set runs
   # solo-evicting (VRAM is the binding constraint, sift stack reloads after the OCR run).
-  evict_costs: { e: 10, s: 5, d: 7, t: 8, b: 6, f: 7, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8, P: 8, G: 7 }   # `A` (nanbeige-sift) removed 2026-09-07
+  evict_costs: { e: 10, s: 5, d: 7, b: 6, r: 6, q: 6, j: 5, z: 7, n: 7, m: 6, a: 4, x: 8, P: 8, G: 7 }   # `A` (nanbeige-sift) removed 2026-09-07; `t`/`f` removed 2026-09-12 (retired vars, see matrix.vars comments)
 
   # ── MEASURED VRAM BUDGET, 2026-08-06 (nvidia-smi, not arithmetic) ─────────────────
   # Every other number on this page is a hand estimate. These three are not, and where
@@ -1079,53 +1160,62 @@ matrix:
   # 20.1 GB and brought the total to 32.4 GB. The current fixed 6 GiB KV cache removes
   # that over-allocation; the live quartet remains the required validation boundary.
   sets:
-    # 27B uncensored @128k alongside LIGHT retrieval only: Q 22.9 + x 2.5 + t 0.4
-    # = 25.8 GB, + dictation 2.2 = 28.0, ~3.8 GB spare. The dense embed (n 3.8) and
+    # 27B uncensored @128k alongside LIGHT retrieval only: Q 22.9 + x 2.5
+    # = 25.4 GB, + dictation 2.2 = 27.6, ~4.2 GB spare. The dense embed (n 3.8) and
     # reranker (m 4.7) are deliberately EXCLUDED — at 128k they do not co-fit, and
     # embed/rerank/generate are sequential in a RAG turn, so eviction costs one
     # reload rather than concurrent VRAM. Drop ctx to 65536 if you want n resident.
-    sift-chat-27b: "Q & x & t"
+    # `t` (tool-embed) DROPPED 2026-09-12 — see matrix.vars' retirement comment on `t`.
+    sift-chat-27b: "Q & x"
     # 32GB 5090: keep all small/medium models hot together (any subset is a valid resident
     # state). Hand-estimated full-ctx f16-KV VRAM: embed 4.4 + e4b(s) ~5 + rewrite(vLLM E4B
-    # NVFP4+MTP, util 0.35) ~11.15 + tool 0.4 + 12B ~10 ≈ 31GB, close to the 32GB ceiling —
+    # NVFP4+MTP, util 0.35) ~11.15 + 12B ~10 ≈ 30.6GB, close to the 32GB ceiling —
     # watch headroom (see the CONFIRM note above) and trim GPU_UTIL further if it's tight.
     # Big MoE (qwen3.6-35b-a3b ~26GB, uncensored MXFP4 ~20GB) are in NO set → SOLO (evict all).
-    coresident: "e & s & d & t & b"
-    # legalkb working set: F2LLM embed + bge rerank must coexist (retrieval does embed→rerank
-    # in one query), keep dictation (d, ttl:0) + tool-embed (t) alive. Query-time ≈ 17 GB;
-    # legalkb BULK re-index observed ~16 GB for infinity alone → ~28 GB with d — watch
-    # nvidia-smi during a re-index and drop INFINITY batch to 64 if it crowds 31 GB.
-    # Deliberately excludes e/s/b: the solver evicts the summarizers + octen for legal work.
-    # Light rerankers (r 1.3 + j 1.5) co-reside with embed; the heavy tiers get their own
-    # sets so loading rerank-strong/-max evicts the light ones instead of OOMing:
-    #   legal    ≈ f 3.5 + r 1.3 + j 1.5 + d 11 + t 0.4 ≈ 18 GB
-    #   legal-q  ≈ f 3.5 + q 4.3 + d 11 + t 0.4         ≈ 19 GB
-    #   legal-z  ≈ f 3.5 + z 8   + d 11 + t 0.4         ≈ 23 GB (watch during bulk runs)
+    # `t` (tool-embed, ~0.4 GB) DROPPED 2026-09-12, not replaced with `n` (~3.8 GB) — this set
+    # has no headroom to absorb the difference (see matrix.vars' retirement comment on `t`).
+    coresident: "e & s & d & b"
+    # legalkb working set — HISTORICAL framing (F2LLM embed + bge rerank co-resident) is now
+    # STALE: legalkb's production embedder switched to nemotron-embed-1b on 2026-08-14
+    # (pipeline/settings.py) and f2llm-embed has zero live consumers (verified 2026-09-12 —
+    # see matrix.vars' retirement comment on `f`). `f` and `t` are dropped from all three sets
+    # below rather than replaced with `n`: these sets exist for A/B-benching the RERANKER tiers
+    # (q/z/j) against legalkb's corpus, and repurposing them to also hold a live embedder wasn't
+    # asked for. If a future embed+rerank end-to-end A/B bench wants an embedder resident, add
+    # `n` (the current production embedder) here deliberately and re-check the budget below.
+    #   legal    ≈ m 4.7 + j 1.5 + d 11         ≈ 17 GB  (was ≈18 GB with f+t; net -1GB)
+    #   legal-q  ≈ q 4.3 + d 11                 ≈ 15 GB  (was ≈19 GB with f+t)
+    #   legal-z  ≈ z 8   + d 11                 ≈ 19 GB  (was ≈23 GB with f+t; watch during bulk runs)
     # 2026-08-14: r (bge-rerank) → m (nemotron-rerank-1b). legalkb's reranker was switched to
     # nemotron in pipeline/settings.py the same day so ONE reranker serves both sift and legalkb.
-    # bge is no longer called by anything, so it never loads; the var `r` is kept defined for the
-    # legal-q/legal-z A/B sets and for an easy revert.
-    legal: "f & m & j & d & t"
-    legal-q: "f & q & d & t"
-    legal-z: "f & z & d & t"
+    # bge is no longer called by anything IN THESE SETS, but it does still have a live consumer
+    # elsewhere (legalkb/evals/rerank_ab_bench.py's default --tiers) — see matrix.vars' `r`
+    # comment. The var `r` remains unused by any set (that part of the old comment was simply
+    # wrong: legal-q/legal-z use `q`/`z`, never `r` — corrected 2026-09-12).
+    legal: "m & j & d"
+    legal-q: "q & d"
+    legal-z: "z & d"
     # sift HYBRID INDEXING working set (2026-07-31): dense + sparse must be co-resident,
     # because sift embeds every chunk on BOTH legs in the same Silver pass — if the
     # solver may evict one to load the other, a bulk reindex thrashes the pair once per
     # batch. That is also why x carries a high evict_cost (8) rather than a
     # small-model-cheap one: cost here is measured in reload-stalls per batch, not GB.
-    #   e 4.4 + x 2.5 + d 11 + t 0.4 ≈ 18.3 GB
+    #   e 4.4 + x 2.5 + d 11 ≈ 17.9 GB
     # Sparse peak is activation, not weights, so it scales with --max-batch-tokens; if you
     # raise that, re-check this number rather than trusting the 2.5.
+    # `t` (tool-embed) DROPPED 2026-09-12 — see matrix.vars' retirement comment on `t`.
     #
     # NOTE (2026-08-06): `e` is octen (2560-dim), sift's CURRENT dense embedder for this
     # set. sift's .env now points its dense leg at `n` (nemotron, 2048-dim) instead, so
     # sift-nemotron-hybrid below is the set a re-index actually wants. Both are kept:
     # the two are NOT interchangeable (different dims ⇒ different collections), so which
     # one applies depends on the pipeline's vector-config, not on preference.
-    sift-hybrid: "e & x & d & t"
+    sift-hybrid: "e & x & d"
     # Nemotron dense + sparse, the indexing counterpart to sift-serve.
-    #   n 3.8 + x 2.5 + d 11 + t 0.4 ≈ 17.7 GB
-    sift-nemotron-hybrid: "n & x & d & t"
+    #   n 3.8 + x 2.5 + d 11 ≈ 17.3 GB
+    # `t` DROPPED 2026-09-12 — was already redundant here (`n` IS the tool-search embedder's
+    # target now too, see matrix.vars' retirement comment on `t`).
+    sift-nemotron-hybrid: "n & x & d"
     # sift SERVING working set. Without it, `sift-hybrid` (x, no m) and
     # `sift-nemotron` (m, no x) each evict the other's model and EVERY search pays a
     # full model load — measured at 26 s for a two-document rerank, which blows sift's
@@ -1137,15 +1227,16 @@ matrix:
     # was invisible to every estimate on this page. sift now points at llama-swap
     # (SIFT_EMBEDDING_API_BASE=http://127.0.0.1:9292), so the dense leg is a real var
     # here and the query path's three models are finally all solver-visible.
-    #   n 3.8 + x 2.5 + m 4.7 + d 11 + t 0.4 ~= 22.4 GB
+    #   n 3.8 + x 2.5 + m 4.7 + d 11 ~= 22 GB
     # m is ttl:0 (pinned) so it is resident regardless; listing it keeps the set honest.
-    sift-serve: "n & x & m & d & t"
-    # sift Nemotron working set: embed→rerank in one query path, plus dictation (d) +
-    # tool-embed (t). n 3.8 + m 4.7 + d 11 + t 0.4 ≈ 20 GB. Octen (e) deliberately
-    # excluded — a sift cutover to nemotron means a NEW 2048-dim collection; during
-    # re-index keep an eye on nvidia-smi (vLLM reservations are fixed, so no surprise
-    # growth like infinity's batch-scaled peaks).
-    sift-nemotron: "n & m & d & t"
+    # `t` DROPPED 2026-09-12 — was already redundant here (see matrix.vars' `t` comment).
+    sift-serve: "n & x & m & d"
+    # sift Nemotron working set: embed→rerank in one query path, plus dictation (d).
+    # n 3.8 + m 4.7 + d 11 ≈ 19.5 GB. Octen (e) deliberately excluded — a sift cutover
+    # to nemotron means a NEW 2048-dim collection; during re-index keep an eye on
+    # nvidia-smi (vLLM reservations are fixed, so no surprise growth like infinity's
+    # batch-scaled peaks). `t` DROPPED 2026-09-12 — was already redundant here.
+    sift-nemotron: "n & m & d"
     # sift CHAT working set — the one a grounded turn actually needs. A turn is
     # decompose -> dense+sparse retrieval -> cross-encoder rerank -> synthesis, so the
     # chat model and all three retrieval legs must be resident TOGETHER or the turn pays
@@ -1154,19 +1245,26 @@ matrix:
     # startup exposed the real minimum: 4.75 GiB available versus 5.51 GiB required,
     # with an estimated maximum length of 56,432. Automatic sizing at 0.49 then
     # allocated 10.79 GiB and left only 334 MiB free after the grounded turn, so the
-    # cache is bounded directly. `d` and `t` are deliberately excluded: neither
-    # participates in this path,
-    # and `d` alone reserves another ~11 GB.
+    # cache is bounded directly. `d` is deliberately excluded: it does not participate
+    # in this path, and it alone reserves another ~11 GB. (`t` was also excluded here
+    # before its 2026-09-12 retirement — see matrix.vars' `t` comment.)
     # Subset semantics make this one quartet sufficient for every pair/triple within it.
     sift-chat: "a & n & m & x"
     # Documents-vault OCR cascade (2026-08-11, migrated GGUF→vLLM docker). Before the set existed
     # the three OCR VLMs ran SOLO and evicted the previous one — engines.py walks primary ->
     # fallback -> fallback WITHIN A SINGLE DOCUMENT whenever numeric agreement is low, so a scanned
     # doc could pay three full model loads, and the next doc paid them again. Now they co-reside.
-    #   P ~5.8 + M ~8.0 + G ~4.8 + t 0.4 ~= 19.0 GB RESERVED (gpu-memory-utilization of 32 GB total,
-    #   vLLM reserves ahead even for small weights). The sift stack is NOT in this set: 19 GB +
-    #   sift trio (12.3 GB) would exceed the card, so an OCR run evicts sift and reloads it after.
+    #   P ~5.8 + G ~5.7 + n ~3.8 ~= 15.3 GB RESERVED (gpu-memory-utilization of 32 GB total,
+    #   vLLM reserves ahead even for small weights). The sift stack is NOT in this set: 15.3 GB +
+    #   sift trio (12.3 GB) would still fit today, but the two working sets are kept separate on
+    #   purpose (see `d`'s exclusion below) — an OCR run evicts sift and reloads it after.
     #
+    # 2026-09-12: `t` (lfm2-embed-350m) → `n` (nemotron-embed-1b). The tool-search embedder was
+    # switched (see matrix.vars' `t` retirement comment); `n` keeps this set's original purpose —
+    # protect a running OCR cascade from eviction by an in-flight MCP tool-search call — at the
+    # cost of ~3.4 GB more reservation (0.4→3.8), which this set has ample headroom to absorb.
+    # G's own reservation also rose 0.15→0.18 GPU_UTIL (~4.8→~5.7 GB) the same day when glm-ocr
+    # rejoined the leading vLLM pin — see _vllm-image.sh and the `glm-ocr` model entry above.
     # `d` (rewrite, 11 GB) is DELIBERATELY EXCLUDED, unlike most sets here. The Documents
     # pipeline runs its own in-process PP-OCRv6/PP-StructureV3 on the SAME card via
     # paddlepaddle-gpu (~2 GB, observed during a run) and llama-swap cannot see that
@@ -1180,7 +1278,7 @@ matrix:
     # 2026-08-15: the `mineru` MODEL ENTRY itself is now also gone (see models: — it was still
     # bootable standalone via alias even though excluded from this set). Re-add both the entry and
     # M here together if MinerU is ever re-enabled in settings.py — the three must stay in sync.
-    ocr: "P & G & t"
+    ocr: "P & G & n"
     # ⚠ REMOVED 2026-08-06: `rag-nanbeige: "a & n & m & t"` was IMPOSSIBLE and this set
     # existing is what made every nanbeige start fail with "upstream command exited
     # prematurely" while the retrieval models were resident. The solver believed the

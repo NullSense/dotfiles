@@ -48,19 +48,11 @@ mcp_servers:
     transport: http
     url: http://127.0.0.1:9178/mcp/documents-matas-peciukonis/
     allowed_tools:
-    - recall
     - reflect
     - search_knowledge_base
-    - list_mental_models
     - get_mental_model
     - list_documents
     - get_document
-    - list_operations
-    - get_operation
-    - list_tags
-    - get_bank
-    - list_directives
-    - memory_status
     timeout: 660
     access_groups:
     - dev
@@ -73,19 +65,11 @@ mcp_servers:
     transport: http
     url: http://127.0.0.1:9178/mcp/documents-pieter-hoevers/
     allowed_tools:
-    - recall
     - reflect
     - search_knowledge_base
-    - list_mental_models
     - get_mental_model
     - list_documents
     - get_document
-    - list_operations
-    - get_operation
-    - list_tags
-    - get_bank
-    - list_directives
-    - memory_status
     timeout: 660
     access_groups:
     - dev

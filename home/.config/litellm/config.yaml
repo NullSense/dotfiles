@@ -58,7 +58,17 @@ litellm_settings:
   #    semantic — semantic carries a 3-8% wrong-answer false-hit rate, unacceptable for
   #    unique-article summaries. disk backend = zero new service. mode default_off =
   #    opt-in: a request caches only when it sends `cache: {"no-cache": false}`. ──────
-  cache: true
+  # ⚠ DISABLED 2026-10-05 — it caused intermittent 500s on EVERY route, not just cached
+  #   ones. `cache: true` registers the string "cache" in litellm.success_callback, so each
+  #   async call also runs the sync success_handler on a thread pool; that thread inserts
+  #   metadata["hidden_params"] while the event loop iterates the same dict in
+  #   merge_litellm_metadata (cost calc, litellm 1.101.0) → RuntimeError "dictionary changed
+  #   size during iteration" → HTTP 500 AFTER the upstream already returned 200. Measured:
+  #   live burst 2/4000 500s on embed-nemotron; offline mock 7/8000 with cache, 0/10000
+  #   without. Nothing opted in (cache.db held 0 entries). Upstream main copies the dict
+  #   first; re-enable only on a LiteLLM release with that fix, and re-run the burst.
+  #   Evidence: ~/Programming/llm-stack/docs/2026-10-05-litellm-embeddings-500-cache-race.md
+  cache: false
   cache_params:
     type: disk
     disk_cache_dir: "/home/nullsense/.cache/llm-stack/litellm-cache"  # FIXED path — default is CWD-relative (./.litellm_cache), which leaks into whatever dir launched the proxy

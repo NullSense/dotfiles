@@ -1,0 +1,19 @@
+[Unit]
+Description=LegalKB upstream update check (probe only; never fetches item bodies, never writes serving DBs)
+Documentation=file:///home/nullsense/Documents/pipeline/legalkb/docs/2026-10-05-incremental-update-capability.md
+# Started by legalkb.service (Wants=, no ordering): serving never waits for it. A re-trigger within each
+# lane's probe_min_interval costs zero requests (debounce in legalkb/update_check.py); a concurrent run
+# exits 0 "busy". Results: legalkb_data/update-checks.json, surfaced as `upstream` in /health.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/nullsense/Documents/pipeline
+# Let `serve` finish its cold warm-up (/health measured at 26.7 s) before any probe runs.
+ExecStartPre=/usr/bin/sleep 120
+ExecStart=/usr/bin/uv run python -m legalkb reconcile-sources --check --json
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=512M
+# Bounded by the PUC host group (120 s between requests): about 6-8 min.
+TimeoutStartSec=20min
+Environment=PATH=/home/nullsense/bin:/home/nullsense/.local/bin:/home/nullsense/.local/share/mise/shims:/usr/local/bin:/usr/bin

@@ -1,0 +1,13 @@
+[Unit]
+Description=LegalKB weekly update check + evidence-only fetch for auto_fetch lanes (never applies to serving)
+Documentation=file:///home/nullsense/Documents/pipeline/legalkb/docs/2026-10-05-incremental-update-capability.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/nullsense/Documents/pipeline
+ExecStart=/usr/bin/uv run python -m legalkb reconcile-sources --check --fetch-auto --json
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=1G
+TimeoutStartSec=2h
+Environment=PATH=/home/nullsense/bin:/home/nullsense/.local/bin:/home/nullsense/.local/share/mise/shims:/usr/local/bin:/usr/bin

@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly LegalKB update check (installed, not enabled: enable deliberately)
+
+[Timer]
+OnCalendar=Sun 03:30
+Persistent=true
+RandomizedDelaySec=30min
+Unit=legalkb-update-check-weekly.service
+
+[Install]
+WantedBy=timers.target

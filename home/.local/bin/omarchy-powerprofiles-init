@@ -1,0 +1,11 @@
+#!/bin/bash
+# Shadows upstream omarchy-powerprofiles-init (run by Omarchy's default hypr
+# autostart at every login).
+#
+# Upstream chooses `performance` whenever no laptop battery is present. On this
+# desktop (amd-pstate-epp) that pins the governor + EPP at performance, so all
+# cores sit at ~5.5 GHz even idle. `balanced` = powersave governor + EPP
+# balance_performance, which still boosts fully under load. Policy lives in
+# power-profiles-daemon only; don't add a second governor/EPP service.
+
+powerprofilesctl set balanced

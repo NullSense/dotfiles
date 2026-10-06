@@ -72,8 +72,10 @@ def register():
     from vllm import ModelRegistry
 
     _patch_eagle3_draft_layer_naming()
-    if "NanbeigeForCausalLM" in ModelRegistry.get_supported_archs():
-        return  # native support arrived — plugin is a no-op
+    # 2026-10-06: NO LONGER a no-op on native support. vLLM >= v0.30 lists
+    # NanbeigeForCausalLM but serves it through the Transformers backend, which
+    # dies on the repo's remote code (KeyError: 'vllm' in NANBEIGE_ATTENTION_CLASSES)
+    # on v0.31.0. The vendored class below is the tested path, so always override.
     ModelRegistry.register_model(
         "NanbeigeForCausalLM",
         "nanbeige_vllm_plugin.nanbeige:NanbeigeForCausalLM",

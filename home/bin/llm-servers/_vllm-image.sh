@@ -20,7 +20,7 @@
 # @ v0.24.0), which nothing re-tests. Prefer a tier over a literal.
 #
 # ⚠ Floor: >= v0.25.0 — the Nemotron NVFP4 checkpoint family is broken on v0.23.x/0.24.x.
-VLLM_IMAGE_PIN="vllm/vllm-openai:v0.29.0"
+VLLM_IMAGE_PIN="vllm/vllm-openai:v0.31.0"   # 2026-10-06 (was v0.29.0; rollback = restore _vllm-image.sh.bak-20261006)
 
 # HELD at v0.26.0 for vllm-gemma4b (dies at architecture inspection on v0.27.1,
 # before any memory is allocated — not a GPU_UTIL artefact, measured by booting on

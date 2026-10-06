@@ -41,7 +41,7 @@ ALT_NAME="${ALT_SERVED_NAME:-rewrite}"  # dictation reuses the SAME warm slot
 source "$(dirname "$(readlink -f "$0")")/_vllm-image.sh"  # central pin (vllm-update bumps it)
 # HELD tier since 2026-08-15: v0.27.1 raises "'head_dim' is a per-layer attribute
 # and may vary across layers" for this checkpoint (see _vllm-image.sh).
-IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_PIN_HELD}"
+IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_PIN}"   # leading tier since 2026-10-06: v0.31.0 clears the head_dim error (needs GPU_UTIL>=0.38, was 0.35)
 # GPU_UTIL is vLLM's VRAM target = util × TOTAL(31.4GB): that much must be FREE at
 # startup, and vLLM grabs it. So it's THE footprint knob, but it's bounded on BOTH
 # sides here:
@@ -54,7 +54,7 @@ IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_PIN_HELD}"
 # (measured: 219k-token pool, 53x concurrency at 4096). Reclaims 4.7GB vs the 0.55
 # the optimization run left it at. To go lower, first shrink a co-resident (parakeet
 # int8) — the 8.7GB weights (bf16 embeddings) are the hard anchor otherwise.
-GPU_UTIL="${GPU_UTIL:-0.35}"           # was 0.44≈13.8GB, then 0.25 (OOM'd: measured weights+MTP-draft=8.99GiB, not the hoped ~4GB — bf16 262k-vocab embeddings dominate despite NVFP4-quantized linears, so the real floor is close to the pre-quantization ~0.43 estimate below). 0.25 gave "Available KV cache memory: -1.7 GiB"; 0.28 (the documented fallback) still OOM'd at -0.7 GiB. 0.35 (~11.1GB) is the smallest value verified clean on 2026-07-14: weights 8.99GiB + graph 0.09GiB leaves 1.5 GiB KV → 76,088-token pool, 18.58x concurrency at max-model-len 4096 (max_num_seqs=4, so plenty of margin). Do not go below 0.35 without re-verifying "Available KV cache memory" is comfortably positive.
+GPU_UTIL="${GPU_UTIL:-0.38}"           # was 0.44≈13.8GB, then 0.25 (OOM'd: measured weights+MTP-draft=8.99GiB, not the hoped ~4GB — bf16 262k-vocab embeddings dominate despite NVFP4-quantized linears, so the real floor is close to the pre-quantization ~0.43 estimate below). 0.25 gave "Available KV cache memory: -1.7 GiB"; 0.28 (the documented fallback) still OOM'd at -0.7 GiB. 0.35 (~11.1GB) is the smallest value verified clean on 2026-07-14: weights 8.99GiB + graph 0.09GiB leaves 1.5 GiB KV → 76,088-token pool, 18.58x concurrency at max-model-len 4096 (max_num_seqs=4, so plenty of margin). Do not go below 0.35 without re-verifying "Available KV cache memory" is comfortably positive.
 MAXLEN="${MAXLEN:-4096}"               # caps the largest single-request KV alloc; summaries+dictation are short (was 8192)
 KV_DTYPE="${KV_DTYPE:-fp8}"            # halve KV vs bf16 (Gemma SWA already keeps KV small); set 'auto' to disable
 

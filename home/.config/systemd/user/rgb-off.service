@@ -1,0 +1,18 @@
+[Unit]
+# Turn every OpenRGB-controllable light off at login. ASUS Aura controllers can
+# fall back to their default effect after a power cycle, so reapply each boot.
+# Devices are selected by name (indices can shift if hardware changes):
+#   GPU  : ENE SMBus on the 5090 (supports a real "off" mode)
+#   Board: ASUS Aura USB (can't read back its mode, so force static black,
+#          which also covers the three ARGB headers)
+# Not controllable here: Q-LED debug lights, the GPU power-connector LED, and
+# the Corsair PSU status LED (blinks orange/green while USB telemetry is polled).
+Description=Turn off motherboard and GPU RGB lighting (OpenRGB)
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/openrgb --noautoconnect -d "ASUS TUF GeForce RTX 5090 Gaming OC" -m off -d "ASUS TUF GAMING B650-PLUS" -m static -c 000000
+
+[Install]
+WantedBy=default.target

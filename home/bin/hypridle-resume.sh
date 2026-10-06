@@ -18,7 +18,10 @@ set -u
 
 # DPMS on only the OLED (DP-1); DP-2 was never parked (see suspend script) so it
 # needs no wake — and DPMS-cycling the rotated DP-2 is what kicked the race.
-hyprctl dispatch dpms on DP-1 >/dev/null 2>&1
+# hypr-dispatch picks the right call for the active config manager (hyprlang or Lua);
+# the raw hyprctl form is a last-resort fallback so a missing helper can never leave DP-1 dark.
+"$HOME/bin/hypr-dispatch" dpms on DP-1 >/dev/null 2>&1 \
+    || hyprctl dispatch dpms on DP-1 >/dev/null 2>&1
 sleep 0.5   # DP link train + AUX settle before DDC travels over it
 
 oled_num=""

@@ -174,7 +174,13 @@ hl.bind(mod .. " + SHIFT + minus", hl.dsp.exec_cmd("~/bin/brightness-ctl -10"), 
 -- anyway — it sits right next to SUPER+ALT+H for HDR.
 -- ============================================================================
 
-hl.bind(mod .. " + ALT + f", hl.dsp.exec_cmd("sh -c 'cur=$(hyprctl getoption -j misc:vrr | jq .int); new=$([ \"$cur\" -eq 0 ] && echo 2 || echo 0); hyprctl keyword misc:vrr $new; notify-send \"Adaptive Sync\" \"$([ $new -eq 2 ] && echo \"on (fullscreen)\" || echo off)\"'"), { description = "Toggle VRR / FreeSync" })
+-- Native Lua: `hyprctl keyword` is refused under the Lua config manager (HyprCtl.cpp dispatchKeyword).
+hl.bind(mod .. " + ALT + f", function()
+    local cur = tonumber((hl.get_config("misc.vrr"))) or 0
+    local new = (cur == 0) and 2 or 0
+    hl.config({ misc = { vrr = new } })
+    hl.exec_cmd("notify-send \"Adaptive Sync\" \"" .. (new == 2 and "on (fullscreen)" or "off") .. "\"")
+end, { description = "Toggle VRR / FreeSync" })
 
 -- ============================================================================
 -- Lock & system mode
@@ -372,7 +378,11 @@ hl.bind(mod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 -- the omarchy stock lock binding (omarchy-system-lock) — we explicitly
 -- unbind it first; lock now lives on CTRL+ALT+Delete + the power menu.
 hl.unbind("SUPER + CTRL + L")
-hl.bind(mod .. " + CTRL + l", hl.dsp.exec_cmd("hyprctl --batch \"dispatch resizeactive 1 0 ; dispatch resizeactive -1 0\""), { description = "Wiggle window (fix TUI render corruption)" })
+-- Native Lua: `hyprctl dispatch resizeactive ...` would be parsed as Lua under this config manager.
+hl.bind(mod .. " + CTRL + l", function()
+    hl.dispatch(hl.dsp.window.resize({ x = 1, y = 0, relative = true }))
+    hl.dispatch(hl.dsp.window.resize({ x = -1, y = 0, relative = true }))
+end, { description = "Wiggle window (fix TUI render corruption)" })
 
 -- ============================================================================
 -- Workspaces

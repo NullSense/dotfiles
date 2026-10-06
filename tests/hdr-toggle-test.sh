@@ -27,6 +27,25 @@ cat >"$TMP/bin/hyprctl" <<'EOF'
 set -euo pipefail
 
 case "$*" in
+    'eval return true')
+        # mode probe from hypr-dispatch: the hyprlang (legacy) manager refuses eval
+        if [ "${HDR_TEST_LUA:-0}" = 1 ]; then printf 'ok\n'; else
+            printf 'eval is only supported with the lua config manager\n'
+        fi
+        ;;
+    'eval hl.monitor('*)
+        # Lua manager: hl.monitor({...}) replaces `keyword monitor`
+        printf '%s\n' "$2" >>"$HDR_TEST_DIR/lua_commands"
+        case "$2" in
+            *'cm = "hdr"'*) printf 'hdr\n' >"$HDR_TEST_DIR/preset" ;;
+            *'cm = "srgb"'*) printf 'srgb\n' >"$HDR_TEST_DIR/preset" ;;
+        esac
+        printf 'ok\n'
+        ;;
+    'eval hl.config('*)
+        printf '%s\n' "$2" >>"$HDR_TEST_DIR/lua_shader_commands"
+        printf 'ok\n'
+        ;;
     '-j monitors all')
         preset=$(cat "$HDR_TEST_DIR/preset")
         jq -n --arg preset "$preset" '[{
@@ -104,6 +123,7 @@ EOF
 
 chmod +x "$TMP/bin/hyprctl" "$TMP/bin/colortemp-ctl" "$TMP/bin/notify-send" "$TMP/bin/modetest"
 export HDR_HYPRCTL="$TMP/bin/hyprctl"
+export HDR_HYPR_DISPATCH="$ROOT/home/bin/hypr-dispatch"
 export HDR_COLORTEMP_CTL="$TMP/bin/colortemp-ctl"
 export HDR_NOTIFY_SEND="$TMP/bin/notify-send"
 export HDR_MODETEST="$TMP/bin/modetest"
@@ -128,6 +148,19 @@ fi
 assert_eq srgb "$(cat "$TMP/preset")" "rejected HDR signal rolls back to SDR"
 assert_eq auto "$(tail -n 1 "$TMP/colortemp")" \
     "rejected HDR signal restores scheduled night color"
+
+# Same flow under the Lua config manager (hyprland.lua): keyword -> eval hl.monitor/hl.config.
+printf 'srgb\n' >"$TMP/preset"
+export HDR_TEST_LUA=1
+"$CTL"
+assert_eq hdr "$(cat "$TMP/preset")" "Lua mode: SDR toggles to HDR"
+assert_eq 'hl.monitor({ output = "DP-7", mode = "3840x2160@239.97", position = "100x20", scale = 1.5, bitdepth = 10, cm = "hdr" })' \
+    "$(tail -n 1 "$TMP/lua_commands")" "Lua mode targets the live connector and geometry"
+assert_eq 'hl.config({ decoration = { screen_shader = "" } })' "$(tail -n 1 "$TMP/lua_shader_commands")" \
+    "Lua mode removes the compositor night-color shader"
+"$CTL"
+assert_eq srgb "$(cat "$TMP/preset")" "Lua mode: HDR toggles back to SDR"
+unset HDR_TEST_LUA
 
 grep -Fq 'bindd = SUPER ALT, H,           Toggle HDR (DP-1),       exec, /home/nullsense/bin/hdr-toggle' "$BINDINGS"
 

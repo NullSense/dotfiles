@@ -73,7 +73,8 @@ done
 if [[ -z "$agent_id" || -z "$term_pid" ]]; then
   exit 0
 fi
-tag="attention-$agent_id"
+# Strip anything but [A-Za-z0-9_-]: the tag is interpolated into a Lua expression below.
+tag="attention-${agent_id//[^A-Za-z0-9_-]/}"
 
 # Find the Hyprland window whose .pid matches the terminal.
 addr=$(hyprctl clients -j 2>/dev/null | \
@@ -81,8 +82,11 @@ addr=$(hyprctl clients -j 2>/dev/null | \
 [[ -z "$addr" ]] && exit 0
 
 case "$action" in
-  set)   hyprctl dispatch    tagwindow "+$tag" "address:$addr" >/dev/null 2>&1 || true ;;
-  clear) hyprctl dispatch -- tagwindow "-$tag" "address:$addr" >/dev/null 2>&1 || true ;;
+  # hypr-dispatch: works under both hyprlang and Lua config managers.
+  set)   "$HOME/bin/hypr-dispatch" dispatch "tagwindow +$tag address:$addr" \
+           "hl.dsp.window.tag({ tag = \"+$tag\", window = \"address:$addr\" })" >/dev/null 2>&1 || true ;;
+  clear) "$HOME/bin/hypr-dispatch" dispatch "tagwindow -$tag address:$addr" \
+           "hl.dsp.window.tag({ tag = \"-$tag\", window = \"address:$addr\" })" >/dev/null 2>&1 || true ;;
   *)     echo "usage: $0 {set|clear} [agent-id]" >&2; exit 2 ;;
 esac
 

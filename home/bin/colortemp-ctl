@@ -5,6 +5,8 @@
 set -eu
 
 HYPRCTL=${COLORTEMP_HYPRCTL:-hyprctl}
+# Dual-mode (hyprlang `keyword` | Lua `hl.config`) setter; see hypr-dispatch.
+HYPR_DISPATCH=${COLORTEMP_HYPR_DISPATCH:-"$HOME/bin/hypr-dispatch"}
 STATE_DIR=${COLORTEMP_STATE_DIR:-${XDG_STATE_HOME:-"$HOME/.local/state"}/colortemp}
 STATE_FILE="$STATE_DIR/kelvin"
 LOCK_FILE="$STATE_DIR/lock"
@@ -76,7 +78,8 @@ send_shader() {
     # The graphical-session oneshot can race Hyprland's command socket during
     # login. Normal scrolls succeed on the first attempt.
     attempt=1
-    while ! "$HYPRCTL" keyword decoration:screen_shader "$shader_file" >/dev/null 2>&1; do
+    while ! HYPR_DISPATCH_HYPRCTL="$HYPRCTL" "$HYPR_DISPATCH" keyword decoration:screen_shader "$shader_file" \
+        "hl.config({ decoration = { screen_shader = [=[$shader_file]=] } })" >/dev/null 2>&1; do
         if [ "$attempt" -ge 25 ]; then
             printf 'colortemp-ctl: Hyprland IPC did not become ready\n' >&2
             return 1

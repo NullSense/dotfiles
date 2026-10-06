@@ -35,8 +35,16 @@ def hypr_json(*args):
         return None
 
 
-def dispatch(*args):
-    subprocess.run(["hyprctl", "dispatch", *args],
+HYPR_DISPATCH = os.path.expanduser("~/bin/hypr-dispatch")
+
+
+def dispatch(legacy, lua):
+    """Run one dispatcher under whichever config manager is active (hyprlang | Lua).
+
+    `legacy` is the hyprlang dispatch string, `lua` the equivalent hl.dsp expression;
+    ~/bin/hypr-dispatch probes the mode and sends the right one.
+    """
+    subprocess.run([HYPR_DISPATCH, "dispatch", legacy, lua],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -108,7 +116,8 @@ def main():
         return 0  # window never showed; nothing to do
 
     addr = win["address"]
-    dispatch("focuswindow", f"address:{addr}")
+    dispatch(f"focuswindow address:{addr}",
+             f'hl.dsp.focus({{ window = "address:{addr}" }})')
 
     if not iw or not ih:
         return 0  # couldn't measure; leave tev at its default size
@@ -127,20 +136,24 @@ def main():
     want_w, want_h = iw / scale, ih / scale
 
     if want_w >= FULLSCREEN_FRAC * lw_mon or want_h >= FULLSCREEN_FRAC * lh_mon:
-        dispatch("fullscreen", "0")  # total fullscreen on this monitor
+        dispatch("fullscreen 0",  # total fullscreen on this monitor
+                 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" })')
     else:
         w = max(MIN_W, round(want_w))
         h = max(MIN_H, round(want_h))
-        dispatch("resizewindowpixel", f"exact {w} {h},address:{addr}")
-        dispatch("centerwindow")  # centers the focused (tev) window
+        dispatch(f"resizewindowpixel exact {w} {h},address:{addr}",
+                 f'hl.dsp.window.resize({{ x = {w}, y = {h}, window = "address:{addr}" }})')
+        dispatch("centerwindow", "hl.dsp.window.center()")  # centers the focused (tev) window
 
     # tev's --auto-fit fit the image to its INITIAL window; after our resize the
     # zoom is stale (image small with padding). Re-send tev's "fit to window"
     # key (F -> fitImageToScreen) so the image fills the final window. Small
     # delay lets GLFW process the resize first so the fit uses the new size.
     time.sleep(0.25)
-    dispatch("focuswindow", f"address:{addr}")
-    dispatch("sendshortcut", f",f,address:{addr}")
+    dispatch(f"focuswindow address:{addr}",
+             f'hl.dsp.focus({{ window = "address:{addr}" }})')
+    dispatch(f"sendshortcut ,f,address:{addr}",
+             f'hl.dsp.send_shortcut({{ mods = "", key = "f", window = "address:{addr}" }})')
     return 0
 
 

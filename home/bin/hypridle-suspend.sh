@@ -49,4 +49,5 @@ done < <(ddcutil detect 2>/dev/null)
 
 wait
 # DPMS only the OLED (DP-1). Blanket `dpms off` also parked DP-2 and fed the race.
-hyprctl dispatch dpms off DP-1 >/dev/null 2>&1
+"$HOME/bin/hypr-dispatch" dpms off DP-1 >/dev/null 2>&1 \
+    || hyprctl dispatch dpms off DP-1 >/dev/null 2>&1

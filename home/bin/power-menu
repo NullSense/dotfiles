@@ -22,7 +22,7 @@ choice=$(printf '%b' "$options" | launch-walker \
 case "$choice" in
     *Lock*)     exec hyprlock ;;
     *Suspend*)  exec systemctl suspend ;;
-    *Logout*)   exec hyprctl dispatch exit ;;
+    *Logout*)   exec "$HOME/bin/hypr-dispatch" dispatch exit 'hl.dsp.exit()' ;;
     *Restart*)  exec systemctl reboot ;;
     *Shutdown*) exec systemctl poweroff ;;
 esac

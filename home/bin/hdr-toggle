@@ -13,6 +13,15 @@
 set -eu
 
 HYPRCTL=${HDR_HYPRCTL:-hyprctl}
+# Dual-mode (hyprlang `keyword` | Lua `hl.config`/`hl.monitor`) setter; see hypr-dispatch.
+HYPR_DISPATCH=${HDR_HYPR_DISPATCH:-"$HOME/bin/hypr-dispatch"}
+
+# hypr_monitor OUTPUT WIDTH HEIGHT REFRESH X Y SCALE PRESET
+hypr_monitor() {
+    HYPR_DISPATCH_HYPRCTL="$HYPRCTL" "$HYPR_DISPATCH" keyword monitor \
+        "$1, ${2}x${3}@${4}, ${5}x${6}, $7, bitdepth, 10, cm, $8" \
+        "hl.monitor({ output = \"$1\", mode = \"${2}x${3}@${4}\", position = \"${5}x${6}\", scale = $7, bitdepth = 10, cm = \"$8\" })" >/dev/null
+}
 NOTIFY_SEND=${HDR_NOTIFY_SEND:-notify-send}
 COLORTEMP_CTL=${HDR_COLORTEMP_CTL:-"$HOME/bin/colortemp-ctl"}
 MODETEST=${HDR_MODETEST:-modetest}
@@ -58,12 +67,12 @@ case "$current_preset" in
     *)
         target_preset=hdr
         "$COLORTEMP_CTL" default
-        "$HYPRCTL" keyword decoration:screen_shader '[[EMPTY]]' >/dev/null
+        HYPR_DISPATCH_HYPRCTL="$HYPRCTL" "$HYPR_DISPATCH" keyword decoration:screen_shader '[[EMPTY]]' \
+            'hl.config({ decoration = { screen_shader = "" } })' >/dev/null
         ;;
 esac
 
-monitor_spec="$output, ${width}x${height}@${refresh}, ${x}x${y}, $scale, bitdepth, 10, cm, $target_preset"
-"$HYPRCTL" keyword monitor "$monitor_spec" >/dev/null
+hypr_monitor "$output" "$width" "$height" "$refresh" "$x" "$y" "$scale" "$target_preset"
 
 actual_preset=$(
     "$HYPRCTL" -j monitors all |
@@ -93,8 +102,7 @@ if [ "$target_preset" = hdr ]; then
         '
     )
     if [ "$kms_colorspace" != 9 ]; then
-        fallback_spec="$output, ${width}x${height}@${refresh}, ${x}x${y}, $scale, bitdepth, 10, cm, srgb"
-        "$HYPRCTL" keyword monitor "$fallback_spec" >/dev/null
+        hypr_monitor "$output" "$width" "$height" "$refresh" "$x" "$y" "$scale" srgb
         "$COLORTEMP_CTL" auto
         "$NOTIFY_SEND" -u critical "HDR signal rejected" \
             "NVIDIA left $output in SDR; restored correct colors automatically"

@@ -66,7 +66,10 @@ EOF
 # via hyprctl. Sway: swaymsg seat directive.
 case "${XDG_CURRENT_DESKTOP:-}" in
     Hyprland)
-        hyprctl keyword cursor:default "${THEME_CURSOR}" "${CURSOR_SIZE}" >/dev/null 2>&1 || true
+        # (Removed `hyprctl keyword cursor:default ...`: that option does not exist, so the call was a
+        # silent no-op under hyprlang and is refused under the Lua manager. The compositor cursor comes
+        # from HYPRCURSOR_*/XCURSOR_* in env.conf; `hyprctl setcursor` would work in both modes but
+        # CURSOR_SIZE here (32) deliberately differs from the session size (24), so it is not wired in.)
         # Also push to systemd user env so children inherit
         systemctl --user set-environment XCURSOR_THEME="${THEME_CURSOR}" XCURSOR_SIZE="${CURSOR_SIZE}" 2>/dev/null || true
         ;;

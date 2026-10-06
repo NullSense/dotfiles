@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# hypr-dispatch — run a Hyprland command that works under BOTH config managers.
+#
+# Hyprland 0.55+ has two config managers, chosen once at compositor start:
+#   legacy (hyprlang, hyprland.conf)  -> `hyprctl dispatch <name> <args>`, `hyprctl keyword`
+#   lua    (hyprland.lua)             -> `hyprctl dispatch` is `return hl.dispatch(<lua>)`,
+#                                        `hyprctl keyword` is refused, `hyprctl eval` runs Lua.
+# Source: src/debug/HyprCtl.cpp @ v0.56.2 (dispatchRequest, dispatchKeyword, evalRequest).
+# Dispatcher/field names for the Lua side: src/config/lua/bindings/LuaBindingsDispatchers.cpp.
+#
+# Mode probe: `hyprctl eval 'return true'` answers `ok` only under the Lua manager; under the
+# legacy manager it answers "eval is only supported with the lua config manager". Probed on
+# every call (a few ms) because `hyprctl reload full-reset` can switch managers at runtime.
+#
+# Usage:
+#   hypr-dispatch mode                                  # prints: lua | legacy
+#   hypr-dispatch dispatch '<hyprlang dispatch>' '<lua dispatcher expression>'
+#   hypr-dispatch keyword  '<name>' '<value>' '<lua statements>'
+#   hypr-dispatch dpms on|off [<monitor>]               # power-critical convenience wrapper
+#
+# Examples:
+#   hypr-dispatch dispatch 'dpms on DP-1' 'hl.dsp.dpms({ action = "on", monitor = "DP-1" })'
+#   hypr-dispatch keyword decoration:screen_shader /p/x.frag \
+#       'hl.config({ decoration = { screen_shader = [=[/p/x.frag]=] } })'
+#
+# Exit status: 0 when Hyprland answered `ok`, 1 when it answered anything else, 2 on usage
+# errors, 3 when hyprctl could not reach Hyprland (callers may retry on 3).
+#
+# Test hooks (tests/hypr-dispatch-test.sh): HYPR_DISPATCH_HYPRCTL (binary, default hyprctl),
+# HYPR_DISPATCH_FORCE_MODE=lua|legacy (skip probe), HYPR_DISPATCH_DRYRUN=1 (print, do not run).
+
+set -u
+
+HYPRCTL=${HYPR_DISPATCH_HYPRCTL:-hyprctl}
+
+# Cron/systemd/hypridle children occasionally lack the instance signature.
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" 2>/dev/null | head -1)
+    export HYPRLAND_INSTANCE_SIGNATURE
+fi
+
+usage() {
+    sed -n '/^# Usage:/,/^# Exit status/p' "$0" | sed 's/^# \{0,1\}//' | sed '$d' >&2
+    exit 2
+}
+
+detect_mode() {
+    if [ -n "${HYPR_DISPATCH_FORCE_MODE:-}" ]; then
+        printf '%s' "$HYPR_DISPATCH_FORCE_MODE"
+        return 0
+    fi
+    local out
+    out=$("$HYPRCTL" eval 'return true' 2>&1) || return 3
+    if [ "$out" = ok ]; then printf lua; else printf legacy; fi
+}
+
+run() {
+    if [ "${HYPR_DISPATCH_DRYRUN:-0}" = 1 ]; then
+        printf '%s\n' "$*"
+        return 0
+    fi
+    local out
+    out=$("$HYPRCTL" "$@" 2>&1) || { printf '%s\n' "$out" >&2; return 3; }
+    case "$out" in
+        ok*) return 0 ;;
+        *) printf '%s\n' "$out" >&2; return 1 ;;
+    esac
+}
+
+cmd=${1:-}
+[ -n "$cmd" ] || usage
+shift
+
+case "$cmd" in
+    mode)
+        detect_mode
+        rc=$?
+        [ "$rc" -eq 0 ] && printf '\n'
+        exit "$rc"
+        ;;
+    dispatch)
+        [ $# -eq 2 ] || usage
+        mode=$(detect_mode) || exit 3
+        # The whole dispatch is ONE argument: hyprctl's flag parser otherwise eats a leading `-`
+        # (e.g. `tagwindow -psel-d ...`).
+        if [ "$mode" = lua ]; then run dispatch "$2"; else run dispatch "$1"; fi
+        ;;
+    dpms)
+        # Convenience for the sleep/resume paths so their command lines stay quote-free.
+        case "${1:-}" in on | off) ;; *) usage ;; esac
+        [ $# -le 2 ] || usage
+        mode=$(detect_mode) || exit 3
+        if [ "$mode" = lua ]; then
+            if [ -n "${2:-}" ]; then
+                run dispatch "hl.dsp.dpms({ action = \"$1\", monitor = \"$2\" })"
+            else
+                run dispatch "hl.dsp.dpms({ action = \"$1\" })"
+            fi
+        else
+            run dispatch "dpms $1${2:+ $2}"
+        fi
+        ;;
+    keyword)
+        [ $# -eq 3 ] || usage
+        mode=$(detect_mode) || exit 3
+        if [ "$mode" = lua ]; then run eval "$3"; else run keyword "$1" "$2"; fi
+        ;;
+    *) usage ;;
+esac

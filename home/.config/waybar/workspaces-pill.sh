@@ -64,12 +64,12 @@ EOF
 }
 
 case "${1:-check}" in
-  next)              hyprctl dispatch workspace e+1 >/dev/null 2>&1 || true; exit 0 ;;
-  prev)              hyprctl dispatch workspace e-1 >/dev/null 2>&1 || true; exit 0 ;;
+  next)              "$HOME/bin/hypr-dispatch" dispatch "workspace e+1" 'hl.dsp.focus({ workspace = "e+1" })' >/dev/null 2>&1 || true; exit 0 ;;
+  prev)              "$HOME/bin/hypr-dispatch" dispatch "workspace e-1" 'hl.dsp.focus({ workspace = "e-1" })' >/dev/null 2>&1 || true; exit 0 ;;
   focus-attention)
     addr=$(hyprctl clients -j 2>/dev/null | jq -r --arg pre "$TAG_PREFIX" '
       [.[] | select((.tags // []) | any(startswith($pre)))][0].address // empty')
-    [[ -n "$addr" ]] && hyprctl dispatch focuswindow "address:$addr" >/dev/null 2>&1 || true
+    [[ -n "$addr" ]] && "$HOME/bin/hypr-dispatch" dispatch "focuswindow address:$addr" "hl.dsp.focus({ window = \"address:$addr\" })" >/dev/null 2>&1 || true
     exit 0 ;;
   check|"")          ;;
   *)                 usage ;;

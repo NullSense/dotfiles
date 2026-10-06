@@ -46,7 +46,8 @@ if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     export HYPRLAND_INSTANCE_SIGNATURE
 fi
 
-fallthrough() { exec hyprctl dispatch movewindoworgroup "$dir"; }
+HD="$HOME/bin/hypr-dispatch" # dual-mode (hyprlang | Lua) dispatch helper
+fallthrough() { exec "$HD" dispatch "movewindoworgroup $dir" "hl.dsp.window.move({ direction = \"$dir\", group_aware = true })"; }
 
 # `.grouped` is the group's member list in tab order; find where we sit in it.
 # NB bind the window object as $w FIRST. Writing `$g | index(.address)` looks
@@ -63,8 +64,8 @@ read -r idx count < <(
 [ "${idx:--1}" -ge 0 ] || fallthrough
 
 case "$dir" in
-"$TAB_PREV") [ "$idx" -gt 0 ] && exec hyprctl dispatch movegroupwindow b ;;
-"$TAB_NEXT") [ "$idx" -lt "$((count - 1))" ] && exec hyprctl dispatch movegroupwindow f ;;
+"$TAB_PREV") [ "$idx" -gt 0 ] && exec "$HD" dispatch "movegroupwindow b" "hl.dsp.group.move_window({ forward = false })" ;;
+"$TAB_NEXT") [ "$idx" -lt "$((count - 1))" ] && exec "$HD" dispatch "movegroupwindow f" "hl.dsp.group.move_window({ forward = true })" ;;
 esac
 
 fallthrough

@@ -20,7 +20,13 @@ fail() {
 
 cat >"$TMP/hyprctl" <<'EOF'
 #!/usr/bin/env bash
+# hypr-dispatch probes the config manager with `eval`; the legacy (hyprlang) manager refuses it.
+if [ "${1:-}" = eval ]; then
+    printf 'eval is only supported with the lua config manager\n'
+    exit 0
+fi
 printf '%s\n' "$*" >>"$COLORTEMP_TEST_STATE/commands"
+printf 'ok\n'
 EOF
 
 cat >"$TMP/systemctl" <<'EOF'
@@ -34,6 +40,7 @@ mkdir -p "$TMP/state/runtime"
 : >"$TMP/state/signals"
 
 export COLORTEMP_HYPRCTL="$TMP/hyprctl"
+export COLORTEMP_HYPR_DISPATCH="$ROOT/home/bin/hypr-dispatch"
 export COLORTEMP_HOUR=12
 export COLORTEMP_STATE_DIR="$TMP/state/runtime"
 export COLORTEMP_SHADER_DIR="$TMP/state/shaders"

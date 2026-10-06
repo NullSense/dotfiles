@@ -30,11 +30,11 @@ focused_browser_url() {
     *) return 1 ;;
   esac
   sleep 0.06                                            # let the keybind mods release
-  hyprctl dispatch sendshortcut "CTRL,L,activewindow" >/dev/null 2>&1
+  "$HOME/bin/hypr-dispatch" dispatch "sendshortcut CTRL,L,activewindow" 'hl.dsp.send_shortcut({ mods = "CTRL", key = "L" })' >/dev/null 2>&1
   sleep 0.12
-  hyprctl dispatch sendshortcut "CTRL,C,activewindow" >/dev/null 2>&1
+  "$HOME/bin/hypr-dispatch" dispatch "sendshortcut CTRL,C,activewindow" 'hl.dsp.send_shortcut({ mods = "CTRL", key = "C" })' >/dev/null 2>&1
   sleep 0.18
-  hyprctl dispatch sendshortcut ",escape,activewindow" >/dev/null 2>&1
+  "$HOME/bin/hypr-dispatch" dispatch "sendshortcut ,escape,activewindow" 'hl.dsp.send_shortcut({ mods = "", key = "escape" })' >/dev/null 2>&1
   local got; got=$(wl-paste 2>/dev/null | head -1 | tr -d '\r\n')
   is_url "$got" && { printf '%s' "$got"; return 0; }
   return 1

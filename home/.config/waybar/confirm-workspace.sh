@@ -19,7 +19,7 @@ fi
 
 # Only prompt for work workspaces (5-10). 1-4 switch instantly.
 if (( WS < 5 )); then
-  hyprctl dispatch workspace "$WS" >/dev/null 2>&1 || true
+  "$HOME/bin/hypr-dispatch" dispatch "workspace $WS" "hl.dsp.focus({ workspace = \"$WS\" })" >/dev/null 2>&1 || true
   exit 0
 fi
 
@@ -30,7 +30,7 @@ fi
 WORK_CONFIRM_AFTER_HOUR=18
 HOUR=$((10#$(date +%H)))          # 10# forces base-10 (avoids octal on 08/09)
 if (( HOUR < WORK_CONFIRM_AFTER_HOUR )); then
-  hyprctl dispatch workspace "$WS" >/dev/null 2>&1 || true
+  "$HOME/bin/hypr-dispatch" dispatch "workspace $WS" "hl.dsp.focus({ workspace = \"$WS\" })" >/dev/null 2>&1 || true
   exit 0
 fi
 
@@ -46,5 +46,5 @@ RESPONSE=$(zenity --question \
 
 # zenity exits 0 = user clicked Yes/OK, 1 = Cancel
 if [[ $? -eq 0 ]]; then
-  hyprctl dispatch workspace "$WS" >/dev/null 2>&1 || true
+  "$HOME/bin/hypr-dispatch" dispatch "workspace $WS" "hl.dsp.focus({ workspace = \"$WS\" })" >/dev/null 2>&1 || true
 fi

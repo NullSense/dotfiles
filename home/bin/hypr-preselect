@@ -46,6 +46,9 @@ fi
 arrow_of() { case "$1" in r) echo "▸" ;; d) echo "▾" ;; l) echo "◂" ;; u) echo "▴" ;; esac; }
 label_of() { case "$1" in r) echo right ;; d) echo down ;; l) echo left ;; u) echo up ;; esac; }
 
+# Dual-mode (hyprlang | Lua config manager) dispatch helper.
+HD="$HOME/bin/hypr-dispatch"
+
 active_addr() { hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty'; }
 
 # Read "<dir> <address>", empty when disarmed. There is deliberately NO state
@@ -73,14 +76,16 @@ unpaint() {
     [ -n "${1:-}" ] || return 0
     local d
     for d in r l u d; do
-        hyprctl dispatch "tagwindow -${TAG_PREFIX}${d} address:$1" >/dev/null 2>&1 || true
+        "$HD" dispatch "tagwindow -${TAG_PREFIX}${d} address:$1" \
+            "hl.dsp.window.tag({ tag = \"-${TAG_PREFIX}${d}\", window = \"address:$1\" })" >/dev/null 2>&1 || true
     done
 }
 
 paint() {
     local addr=$1 dir=$2
     unpaint "$addr" # never let two direction tags coexist
-    hyprctl dispatch "tagwindow +${TAG_PREFIX}${dir} address:$addr" >/dev/null 2>&1 || true
+    "$HD" dispatch "tagwindow +${TAG_PREFIX}${dir} address:$addr" \
+        "hl.dsp.window.tag({ tag = \"+${TAG_PREFIX}${dir}\", window = \"address:$addr\" })" >/dev/null 2>&1 || true
 }
 
 arm() {
@@ -93,7 +98,7 @@ arm() {
         return 1
     fi
     unpaint "$(state_addr)"
-    hyprctl dispatch layoutmsg "preselect $dir" >/dev/null 2>&1
+    "$HD" dispatch "layoutmsg preselect $dir" "hl.dsp.layout(\"preselect $dir\")" >/dev/null 2>&1
     paint "$addr" "$dir"
     poke_waybar
 }
@@ -101,7 +106,7 @@ arm() {
 clear_preselect() {
     unpaint "$(state_addr)"
     # Any non-direction token cancels dwindle's pending override.
-    hyprctl dispatch layoutmsg "preselect none" >/dev/null 2>&1
+    "$HD" dispatch "layoutmsg preselect none" 'hl.dsp.layout("preselect none")' >/dev/null 2>&1
     poke_waybar
 }
 

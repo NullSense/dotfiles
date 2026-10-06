@@ -1278,7 +1278,11 @@ matrix:
     # 2026-08-15: the `mineru` MODEL ENTRY itself is now also gone (see models: — it was still
     # bootable standalone via alias even though excluded from this set). Re-add both the entry and
     # M here together if MinerU is ever re-enabled in settings.py — the three must stay in sync.
-    ocr: "P & G & n"
+    # 2026-10-06: `m` (nemotron-rerank-1b, ~4.7 GB) ADDED so LegalKB/Hindsight search keeps its
+    # reranker during a vault OCR run instead of evicting OCR (or being evicted) on every query.
+    # Visible total ~20.0 GB + the pipeline's invisible in-process paddle (measured ~3.4 GiB on the
+    # 2026-10-06 canary) ≈ 23.4 GB of 32 GB: ~8 GB headroom, unlike `d` (11 GB) above.
+    ocr: "P & G & n & m"
     # ⚠ REMOVED 2026-08-06: `rag-nanbeige: "a & n & m & t"` was IMPOSSIBLE and this set
     # existing is what made every nanbeige start fail with "upstream command exited
     # prematurely" while the retrieval models were resident. The solver believed the

@@ -200,6 +200,49 @@ esac
 exit 0
 SLEEPHOOK_EOF
 
+# RTX 5090 power limit + clock offsets. Volatile: applied at boot by
+# nvidia-powerlimit.service, and re-applied after every sleep by the resume unit
+# (Arch Wiki: Power management/Suspend and hibernate#Sleep hooks, custom units).
+write_root_file /etc/systemd/system/nvidia-powerlimit.service 644 <<'NVPL_EOF'
+[Unit]
+Description=Set NVIDIA power limit to 520W + enable persistence
+Wants=nvidia-persistenced.service
+After=nvidia-persistenced.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/nvidia-smi -pm 1
+ExecStart=/usr/bin/nvidia-smi -pl 520
+
+[Install]
+WantedBy=multi-user.target
+NVPL_EOF
+
+write_root_file /etc/systemd/system/nvidia-powerlimit.service.d/clock-offset.conf 644 <<'NVOC_EOF'
+[Service]
+ExecStart=/usr/bin/nvidia_oc set --index 0 --freq-offset 150 --mem-offset 1000 --power-limit 520000 --min-clock 0 --max-clock 2800
+NVOC_EOF
+
+write_root_file /etc/systemd/system/nvidia-powerlimit-resume.service 644 <<'NVRES_EOF'
+[Unit]
+Description=Re-apply NVIDIA power limit + clock offsets after resume
+Documentation=https://wiki.archlinux.org/title/Power_management/Suspend_and_hibernate#Sleep_hooks
+# The GPU power limit and nvidia_oc clock offsets are volatile: the driver
+# re-initialises the GPU on S3 resume (limit back to 600 W, offsets lost).
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+After=nvidia-persistenced.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart nvidia-powerlimit.service
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+NVRES_EOF
+sudo systemctl daemon-reload
+sudo systemctl enable nvidia-powerlimit.service nvidia-powerlimit-resume.service
+
 write_root_file /etc/udev/rules.d/60-ioschedulers.rules 644 <<'UDEV_EOF'
 # Set I/O scheduler for NVMe and SSD drives
 # 'none' scheduler is best for NVMe drives

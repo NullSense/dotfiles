@@ -34,6 +34,9 @@ source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
 
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
+# --trust-request-mm-kwargs: vLLM >=0.31 rejects per-request mm_processor_kwargs without it, and PaddleX
+# sends per-block min_pixels/max_pixels (paddlex doc_vlm/predictor.py). Loopback-only server, single
+# trusted client (the vault OCR pipeline); approved by the user 2026-10-06.
 exec docker run --rm --init --gpus all --name "$CONTAINER_NAME" \
   "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
   --ipc=host \
@@ -47,4 +50,5 @@ exec docker run --rm --init --gpus all --name "$CONTAINER_NAME" \
   --no-enable-prefix-caching \
   --gpu-memory-utilization "$GPU_UTIL" \
   --mm-processor-cache-gb 0 \
+  --trust-request-mm-kwargs \
   "$@"

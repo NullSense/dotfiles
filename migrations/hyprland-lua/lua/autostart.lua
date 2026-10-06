@@ -1,0 +1,123 @@
+-- Autostart — OUR session-start additions, layered on top of omarchy's
+-- default/hypr/autostart.conf (sourced earlier in hyprland.conf so it fires
+-- first). omarchy already starts: hypridle, mako, waybar (skipped via the
+-- `waybar-off` toggle we set — our systemd unit handles waybar instead),
+-- fcitx5, swaybg, swayosd-server, polkit-gnome, omarchy-first-run,
+-- omarchy-powerprofiles-init, omarchy-hyprland-monitor-watch, plus the
+-- systemctl import-environment + dbus-update-activation-environment env
+-- propagation. We don't duplicate any of those here.
+--
+-- `exec-once` runs once per session; `exec` runs on every config reload.
+--
+-- uwsm wraps each app in a transient systemd user unit so logout cleanly
+-- stops everything; any app NOT wrapped in `uwsm app --` runs as a
+-- Hyprland-parented process (acceptable for short-lived helpers).
+--
+-- Apps that have XDG ~/.config/autostart entries (nm-applet, blueman-applet,
+-- bitwarden when Hidden=false) fire via uwsm's xdg-autostart target. We
+-- DO NOT duplicate those here.
+
+-- --- 1. Tray helpers + clipboard --------------------------------------------
+-- Clipboard history with three filter layers — any one match suppresses storage:
+--   1. CLIPBOARD_STATE=sensitive — wl-clipboard 2.3+ protocol extension,
+--      propagated by wl-paste --watch to its spawned command's env. This is
+--      what walker-rbw + any modern password manager should use.
+--   2. x-kde-passwordManagerHint MIME — legacy KDE convention, still used by
+--      Bitwarden Desktop and KeePassXC. Kept for compatibility.
+--   3. cliphist-secret-filter — content-based regex check for AWS/GitHub/
+--      Anthropic/OpenAI/Stripe/Slack/Google/PEM private keys. Notifies via
+--      mako (critical) when a paste is blocked. Catches `echo $TOKEN | wl-copy`
+--      and similar cases that have no Wayland-level signal attached.
+
+-- Color temperature is owned by colortemp.service + colortemp.timer. The
+-- monitor keeps its native-gamut hardware Picture Mode; a final-output shader
+-- supplies continuous warmth because NVIDIA drops Hyprland CTM/gamma controls.
+
+-- MPRIS most-recently-active tracker (waybar mediaplayer module reads this).
+
+-- i3-style split indicator (SUPER+V). Tails the Hyprland event socket and drops
+-- the armed-border gradient the instant dwindle consumes the preselect, so the
+-- on-screen hint can never claim to be armed when it isn't. Deliberately NOT
+-- under `uwsm app --` : this is a session-scoped helper, not a launched app, and
+-- it must inherit HYPRLAND_INSTANCE_SIGNATURE to find .socket2.sock.
+
+-- AORUS FO32U2 dual-mode: keep scale correct (4K=2.0 / FHD=1.0) across the
+-- hardware resolution-switch button. Refresh rate itself is handled by
+-- `mode = highres` in monitors.conf; this watcher only fixes scale on hotplug.
+
+-- --- 2. Polkit agent: hyprpolkitagent over omarchy's polkit-gnome ----------
+-- omarchy ships polkit-gnome via /usr/lib/polkit-gnome/polkit-gnome-
+-- authentication-agent-1 in their autostart. We use hyprpolkitagent
+-- (Hyprland-native, smaller deps) — kill the gnome one and start ours.
+
+-- --- 3. Launchers (resident GTK apps, summoned via keybindings) -------------
+-- Vicinae launcher — our SUPER+SPACE bind. Skip if not installed.
+
+-- walker.desktop in ~/.config/autostart already starts walker via XDG;
+-- elephant data provider is its dependency.
+
+-- --- 4. Theme application (every reload) ------------------------------------
+
+-- --- 5. Initial app placement on workspaces ---------------------------------
+-- Each app gets its own systemd transient unit via `uwsm app`, so logout
+-- cleanly stops every browser tab + chat client + terminal. Waybar is up
+-- (started by graphical-session.target via our systemd unit) before these
+-- fire, so SNI tray registration succeeds.
+--
+-- Electron tray hack: Electron's libappindicator integration only initialises
+-- when XDG_CURRENT_DESKTOP looks Unity/KDE/XFCE-like. Under Hyprland it
+-- silently skips tray init. Prefix `env XDG_CURRENT_DESKTOP=Unity` per
+-- Electron app so the rest of the session keeps the real value.
+-- Let native Wayland apps follow each output scale (4K 2x / 1440p 1x).
+-- Adjust reading size with app zoom instead of forcing a device scale.
+-- Bitwarden races waybar's StatusNotifierWatcher: it decides ONCE at startup
+-- whether to register a tray indicator and does NOT wait for the watcher to
+-- appear on DBus, so on a cold login it loses the race to waybar and the tray
+-- icon never shows (bitwarden/clients#17320). Gate launch on the watcher being
+-- owned (≤10s), then launch anyway as a fail-safe.
+-- Telegram (Qt6, system-linked) hits Qt bug QTBUG-137131 on this NVIDIA
+-- driver: its QtQuick emoji/animation panels try to create a native-Wayland
+-- EGL context and fail ("QEGLPlatformContext: Failed to create context: 3009"
+-- / "QRhiGles2: Failed to create context"), which is harmless but noisy.
+-- QT_QPA_PLATFORM=xcb routes just this app through XWayland's mature GLX
+-- path instead — the documented community workaround for this exact trace
+-- (telegramdesktop/tdesktop upstream reports, QTBUG-137131).
+-- Also races waybar's StatusNotifierWatcher the same way Bitwarden does
+-- (see the gate above): it decides once at startup whether to show a tray
+-- icon and doesn't wait, so on a cold login it loses the race and
+-- QDBusTrayIcon logs "ServiceUnknown: The name is not activatable." Reuse
+-- the same watcher-wait gate.
+
+-- --- 6. Dropdown terminal — managed by systemd unit (auto-restart) ---------
+-- ~/.config/systemd/user/dropdown-terminal.service has Restart=always, so
+-- closing the dropdown spawns a fresh instance. The unit is wanted by
+-- graphical-session.target so it auto-starts; this exec-once is a belt-
+-- and-braces in case the target ordering doesn't kick it.
+
+hl.on("hyprland.start", function()
+    hl.exec_cmd("uwsm app -- udiskie -t")
+    hl.exec_cmd("uwsm app -- sh -c 'wl-paste --watch sh -c '\"'\"'[ \"$CLIPBOARD_STATE\" = sensitive ] || wl-paste --list-types 2>/dev/null | grep -qi x-kde-passwordManagerHint || $HOME/.local/bin/cliphist-secret-filter'\"'\"''")
+    hl.exec_cmd("uwsm app -- playerctld daemon")
+    hl.exec_cmd("~/bin/hypr-preselect watch")
+    hl.exec_cmd("sh -c 'pkill -f polkit-gnome-authentication-agent-1; systemctl --user start hyprpolkitagent'")
+    hl.exec_cmd("sh -c 'command -v vicinae >/dev/null 2>&1 && uwsm app -- vicinae server >/dev/null 2>&1 || true'")
+    hl.exec_cmd("sh -c 'command -v elephant >/dev/null 2>&1 && uwsm app -- elephant >/dev/null 2>&1 || true'")
+    hl.exec_cmd("uwsm app -- helium --enable-features=UseOzonePlatform --ozone-platform=wayland", { workspace = "1 silent" })
+    hl.exec_cmd("uwsm app -- ghostty", { workspace = "2 silent" })
+    hl.exec_cmd("uwsm app -- sh -c 'i=0; while [ $i -lt 50 ] && ! gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.NameHasOwner org.kde.StatusNotifierWatcher 2>/dev/null | grep -q true; do sleep 0.2; i=$((i+1)); done; exec env XDG_CURRENT_DESKTOP=Unity bitwarden-desktop --hidden'")
+    hl.exec_cmd("uwsm app -- env XDG_CURRENT_DESKTOP=Unity signal-desktop --enable-features=UseOzonePlatform --ozone-platform=wayland", { workspace = "3 silent" })
+    hl.exec_cmd("uwsm app -- env XDG_CURRENT_DESKTOP=Unity discord --enable-features=UseOzonePlatform --ozone-platform=wayland", { workspace = "3 silent" })
+    hl.exec_cmd("uwsm app -- sh -c 'i=0; while [ $i -lt 50 ] && ! gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.NameHasOwner org.kde.StatusNotifierWatcher 2>/dev/null | grep -q true; do sleep 0.2; i=$((i+1)); done; exec env QT_QPA_PLATFORM=xcb QT_SCALE_FACTOR=0.75 Telegram'")
+    hl.exec_cmd("systemctl --user start dropdown-terminal.service")
+end)
+
+-- hyprlang `exec =` ran on every config load (startup AND reload). `config.reloaded`
+-- may not fire for the initial load, so run it once at start as well (theme-apply
+-- is idempotent).
+hl.on("hyprland.start", function()
+    hl.exec_cmd("~/bin/theme-apply")
+end)
+hl.on("config.reloaded", function()
+    hl.exec_cmd("~/bin/theme-apply")
+end)
+

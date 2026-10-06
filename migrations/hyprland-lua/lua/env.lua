@@ -1,0 +1,79 @@
+-- Hyprland environment variables.
+-- Many of these ALSO live in ~/.config/environment.d/*.conf (loaded by
+-- systemd user manager at session start). Defining them here too is
+-- belt-and-suspenders: ensures Hyprland-spawned children always see them
+-- even on first-session-after-boot edge cases.
+
+-- Identify the session
+hl.env("XDG_CURRENT_DESKTOP", "Hyprland")
+hl.env("XDG_SESSION_TYPE", "wayland")
+hl.env("XDG_SESSION_DESKTOP", "Hyprland")
+
+-- Cursor — Bibata Modern Classic at 24px (the standard XCursor default).
+-- 32px was set for sway on a low-DPI panel; on the 4K AORUS @ 2× scale it
+-- rendered at 64 native px — visibly oversized. 24 is the sane default.
+hl.env("HYPRCURSOR_THEME", "Bibata-Modern-Classic")
+hl.env("HYPRCURSOR_SIZE", "24")
+hl.env("XCURSOR_THEME", "Bibata-Modern-Classic")
+hl.env("XCURSOR_SIZE", "24")
+
+-- Qt theming — qt6ct via Kvantum (configured in ~/.config/Kvantum)
+hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")
+hl.env("QT_QPA_PLATFORM", "wayland;xcb")
+hl.env("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1")
+-- Mirror environment.d/wayland.conf for mixed-DPI output scaling.
+-- Keep global scale multipliers unset; use app-specific sizing when needed.
+hl.env("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+hl.env("QT_NO_SYNTHESIZED_BOLD", "1")
+
+-- NVIDIA (RTX 5090, Blackwell, nvidia-open-dkms) — per Hyprland wiki.
+-- Takes effect at the next Hyprland start, so safe to set while still on AMD;
+-- on AMD these are simply ignored. After the swap they route VA-API video
+-- decode and GLX through the NVIDIA stack. modeset=1 is enabled by default on
+-- Arch (nvidia-utils), so no /etc/modprobe.d/nvidia.conf needed — verify with
+-- `cat /sys/module/nvidia_drm/parameters/modeset` (should print Y).
+-- Add `env = WLR_NO_HARDWARE_CURSORS,1` ONLY if the cursor turns invisible.
+hl.env("LIBVA_DRIVER_NAME", "nvidia")
+hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
+
+-- Toolkits — prefer Wayland everywhere
+hl.env("GDK_BACKEND", "wayland,x11")
+hl.env("MOZ_ENABLE_WAYLAND", "1")
+hl.env("MOZ_DBUS_REMOTE", "1")
+hl.env("ELECTRON_OZONE_PLATFORM_HINT", "auto")
+hl.env("NIXOS_OZONE_WL", "1")
+hl.env("SDL_VIDEODRIVER", "wayland,x11")
+-- SDL3 renamed the var and ignores SDL_VIDEODRIVER — without this, SDL3 games
+-- (CS2 etc.) silently fall back to Xwayland, which tears on NVIDIA while the
+-- compositor stays vsynced. SCALE_TO_DISPLAY = native mode, not logical res.
+hl.env("SDL_VIDEO_DRIVER", "wayland,x11")
+hl.env("SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY", "1")
+hl.env("CLUTTER_BACKEND", "wayland")
+hl.env("BEMENU_BACKEND", "wayland")
+hl.env("_JAVA_AWT_WM_NONREPARENTING", "1")
+
+-- Screenshots — keep loose dumps out of ~/Pictures/ root by pinning the
+-- output dir for omarchy-capture-screenshot (PRINT key). Our own
+-- ~/bin/screenshot already defaults to Screenshots/, but the upstream
+-- omarchy-capture-screenshot defaults to $XDG_PICTURES_DIR which is
+-- $HOME/Pictures, leaving 20+ orphaned PNGs there over time.
+hl.env("OMARCHY_SCREENSHOT_DIR", "$HOME/Pictures/Screenshots")
+
+-- Screen recording — kept on the default KMS path (portal OFF) so the elephant
+-- menu and keybinds both get slurp region-select, the same UX as the screenshot
+-- tool. The waybar privacy dot no longer depends on portal: xt3-status.sh lights
+-- the screen dot directly from the live gpu-screen-recorder process (see
+-- ~/bin/screenrecord). This var is a fallback only — the actual recorder is
+-- ~/bin/omarchy-capture-screenrecording, a shim over ~/bin/screenrecord that
+-- shadows omarchy's stock command via PATH. Set to true only to restore
+-- omarchy's stock portal capture (whole-monitor, but HDR-aware / external-GPU).
+hl.env("OMARCHY_SCREENRECORD_USE_PORTAL", "false")
+
+-- Pin Aquamarine to the RTX 5090 only (multi-GPU: iGPU amdgpu card0 has no
+-- displays; 5090 = card1). Without this, picking the iGPU crashes the backend.
+-- NOTE: AQ_DRM_DEVICES is colon-separated — the value must be colon-free, so a
+-- by-path (pci-0000:01:00.0) value gets shredded and crashes. Use the card node.
+-- See ~/.config/environment.d/nvidia.conf for the full why + renumber caveat.
+-- PHASE-2 TEST 2026-06-26: pin removed — known-good (22:00) had NO pin and worked.
+-- Re-enable by uncommenting if the no-pin login crashes (CBackend on card0).
+-- env = AQ_DRM_DEVICES,/dev/dri/card1

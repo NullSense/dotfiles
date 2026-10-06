@@ -1,0 +1,264 @@
+local V = require("lua.vars")
+local blue, bg2 = V.blue, V.bg2
+
+-- Look & Feel — animations, decoration, layout, color management.
+-- Eye-candy choices (per migration plan): subtle animations, inactive-only
+-- blur, drop shadows on floating; rounded corners OFF (per user preference).
+
+hl.layer_rule({ match = { namespace = "rofi" }, no_anim = true })
+
+hl.layer_rule({ match = { namespace = "walker" }, no_anim = true })
+
+hl.layer_rule({ match = { namespace = "vicinae" }, no_anim = true })
+
+hl.curve("smoothEase", { type = "bezier", points = { { 0.25, 0.10 }, { 0.25, 1.00 } } })
+hl.curve("overshot", { type = "bezier", points = { { 0.05, 0.90 }, { 0.10, 1.05 } } })
+hl.curve("quick", { type = "bezier", points = { { 0.20, 0.40 }, { 0.20, 1.00 } } })
+hl.animation({
+    leaf = "windows",
+    enabled = true,
+    speed = 2,
+    bezier = "smoothEase",
+    style = "popin 80%",
+})
+hl.animation({
+    leaf = "windowsOut",
+    enabled = true,
+    speed = 2,
+    bezier = "smoothEase",
+    style = "popin 80%",
+})
+hl.animation({
+    leaf = "workspaces",
+    enabled = true,
+    speed = 2,
+    bezier = "smoothEase",
+    style = "slide",
+})
+hl.animation({
+    leaf = "specialWorkspace",
+    enabled = true,
+    speed = 2,
+    bezier = "smoothEase",
+    style = "slidefadevert -50%",
+})
+hl.animation({
+    leaf = "layers",
+    enabled = true,
+    speed = 2,
+    bezier = "smoothEase",
+    style = "fade",
+})
+hl.animation({
+    leaf = "fade",
+    enabled = true,
+    speed = 2,
+    bezier = "smoothEase",
+})
+hl.animation({
+    leaf = "border",
+    enabled = true,
+    speed = 3,
+    bezier = "smoothEase",
+})
+hl.animation({
+    leaf = "borderangle",
+    enabled = true,
+    speed = 3,
+    bezier = "smoothEase",
+})
+
+hl.config({
+    general = {
+        gaps_in = 2,
+        gaps_out = 4,
+        border_size = 1,
+        col = {
+            active_border = blue,
+            inactive_border = bg2,
+        },
+        -- Built-in layout: survives Hyprland ABI upgrades without a C++ plugin.
+        layout = "dwindle",
+        resize_on_border = true,
+        allow_tearing = false,
+    },
+    decoration = {
+        rounding = 0, -- opted out of rounded corners
+        active_opacity = 1.0,
+        inactive_opacity = 1.0,
+        fullscreen_opacity = 1.0,
+        -- Inactive-window blur via windowrule (see windows.conf)
+        blur = {
+            enabled = true,
+            size = 8,
+            passes = 2,
+            new_optimizations = true,
+            ignore_opacity = false,
+            xray = false,
+            special = false,
+            popups = false,
+        },
+        -- Soft drop shadow on floating windows (tiled windows skip via rule)
+        shadow = {
+            enabled = true,
+            range = 12,
+            render_power = 3,
+            color = "rgba(1a1a1aaa)",
+            color_inactive = "rgba(00000077)",
+        },
+    },
+    -- Launchers / pickers — disable open+close animation on these layers so the
+    -- screen-freeze that follows (hyprpicker -r -z) doesn't capture the menu
+    -- mid-fade. Same trick Omarchy uses on its walker layer.
+    -- Hyprland 0.54.x layerrule syntax: `no_anim on, match:namespace NAME`
+    -- (renamed from `noanim`, now requires explicit `on`, namespace via match:).
+    animations = {
+        enabled = true,
+        -- Curves — `smoothEase` is a quartic ease-out (close to Apple's "easeOutQuart")
+        -- Durations are in deciseconds (1 unit = 100ms). Trimmed ~40% from
+        -- original (4→2, 3→2, 5→3) for a snappier feel.
+    },
+    -- Hyprland 0.55.x removed `dwindle:pseudotile` as a config option — it is now
+    -- runtime-only via `hyprctl dispatch pseudo` (bind it in bindings.conf if wanted).
+    dwindle = {
+        -- --- i3/sway determinism -------------------------------------------------
+        -- The single biggest reason dwindle "felt random" compared to i3: with
+        -- force_split = 0 (the default) the new window lands left/top or right/bottom
+        -- depending on where the *mouse pointer* happens to sit inside the focused
+        -- window. Type-launch a terminal with the cursor parked on the left half and
+        -- it opens to the left; nudge the mouse and the same keystroke does the
+        -- opposite. force_split = 2 pins it: a new window ALWAYS takes the right or
+        -- bottom half — i.e. it opens *after* the focused window, which is exactly
+        -- i3's insertion order.
+        force_split = 2,
+        -- Splits stay where you put them instead of being re-derived from the
+        -- parent's W/H ratio on every relayout. Required for `layoutmsg togglesplit`
+        -- (SUPER+E) to do anything at all.
+        preserve_split = true,
+        -- Keyboard-driven, not pointer-driven: decide splits from the focused window
+        -- rather than the pointer. smart_split would reintroduce mouse dependence
+        -- (it quadrants the window under the cursor) *and* it silently force-enables
+        -- preserve_split, so it stays off.
+        smart_split = false,
+        use_active_for_splits = true,
+        -- One-shot preselect (SUPER+V) rather than a sticky mode. i3's split
+        -- direction applies to the next window and then the container keeps it;
+        -- leaving this false gives the same "arm once, fire once" behaviour, and it
+        -- is what lets ~/bin/hypr-preselect guarantee the on-screen indicator clears
+        -- the instant the window opens. Flip to true if you'd rather the direction
+        -- stick until you change it.
+        permanent_direction_override = false,
+        -- Resizing follows the pointer's nearest corner — mouse-only, no effect on
+        -- keyboard tiling determinism, so left at the default.
+        smart_resizing = true,
+    },
+    -- Tabbed groups (SUPER+W) — slim, theme-tinted strip atop a tabbed group.
+    -- omarchy stock groupbar is a 22px slab with default Hyprland chrome that
+    -- clashes with nullsense; this overrides it for a "super light" feel.
+    group = {
+        -- Match the `general` block's gruvbox borders. ($activeBorderColor /
+        -- $inactiveBorderColor used to come from omarchy's upstream looknfeel.conf,
+        -- which we stopped sourcing — see hyprland.conf for why.)
+        col = {
+            border_active = blue,
+            border_inactive = bg2,
+        },
+        -- Hyprland 0.55.x dropped the `-1` "use default" sentinel for gradient
+        -- colors. Omit `col.border_locked_*` entirely to inherit the active/inactive
+        -- colors above, or set a real rgba() literal.
+        groupbar = {
+            enabled = true,
+            font_family = "Hack Nerd Font",
+            font_size = 11,
+            height = 20, -- was 18; 20 gives the title room to breathe
+            -- Was 2 — BELOW Hyprland's own default of 3, which is why the active tab
+            -- was hard to pick out. The underline is no longer carrying the signal
+            -- on its own anyway (see the fill/weight/text split below), but a full
+            -- 4px reads cleanly at this bar height.
+            indicator_height = 4,
+            indicator_gap = 0,
+            gaps_in = 2,
+            gaps_out = 2,
+            gradients = false, -- flat, matches the omarchy aesthetic
+            round_only_edges = true,
+            rounding = 4,
+            -- Which tab am I on? The old scheme leaned entirely on a 20%-alpha tint
+            -- plus a 2px underline, which is close to invisible with 4 tabs open.
+            -- Now THREE signals stack, so it survives any one of them being subtle:
+            --   1. fill    — active is near-solid accent, inactive stays dark
+            --   2. text    — dark-on-accent for active, muted grey for inactive
+            --   3. weight  — active bold, inactive normal (font_weight_* are
+            --                separate options; both defaulted to 400 before)
+            -- To calm it down, lower col.active's alpha (last byte: ee -> 99 -> 55)
+            -- and drop font_weight_active back to 400 — the text colours alone still
+            -- carry it.
+            col = {
+                active = "rgba(fabd2fee)", -- nullsense accent #fabd2f, near-solid
+                inactive = "rgba(3c3836cc)", -- bg1 #3c3836 @ 80%
+                locked_active = "rgba(fb4934ee)", -- gruvbox red, near-solid (locked)
+                locked_inactive = "rgba(3c3836cc)",
+            },
+            -- Hyprland's groupbar text colors expect numeric literals, not `$vars`.
+            -- text_color is the ACTIVE title: dark, because it now sits on a solid
+            -- accent fill. text_color_inactive was previously unset (-1), so every
+            -- tab shared one colour — that was half the legibility problem.
+            text_color = "rgb(282828)", -- bg0, reads on the accent fill
+            text_color_inactive = "rgb(928374)", -- gruvbox grey, clearly recessed
+            text_color_locked_active = "rgb(282828)",
+            text_color_locked_inactive = "rgb(928374)",
+            font_weight_active = "bold",
+            font_weight_inactive = "normal",
+        },
+    },
+    -- HDR + scanout — both disabled. The AORUS FO32U2 does a real DP signal
+    -- handshake (panel blank + "HDR" OSD) on every colorspace mode change, and
+    -- direct_scanout triggers a KMS modeset whenever a fullscreen client requests
+    -- a buffer format different from XR24 (per hyprwm/Hyprland#7373). Together
+    -- they caused: workspace switches into borderless games (e.g. BF4, SDR) going
+    -- black for ~1s with the AORUS HDR OSD popping; mako notifications producing
+    -- a brief flicker because the overlay layer kicks the panel out of scanout;
+    -- and Super+Ctrl+F into HDR-tagged browser content forcing an unwanted HDR
+    -- colorspace flip. Maintainer position on this class of bug (hyprwm#9786):
+    -- "that's your hw feature... finding hw that doesn't do this is tricky."
+    --
+    -- Manual HDR is still available via SUPER+ALT+H (bin/hdr-toggle) when we
+    -- actually want it for movies / specific games.
+    --
+    -- cm_auto_hdr values (kept for reference if we ever re-enable):
+    --   0 = off  |  1 = `cm = hdr` on fullscreen  |  2 = `cm = hdredid` on fullscreen
+    -- `cm_fs_passthrough` removed in Hyprland 0.55.x (color-management semantics
+    -- rewritten — see hyprwm/Hyprland release notes). Removed; only `cm_auto_hdr`,
+    -- `direct_scanout`, and `send_content_type` are still valid here.
+    render = {
+        cm_auto_hdr = 0,
+        direct_scanout = 0,
+        send_content_type = true,
+    },
+    -- Quirks — `prefer_hdr = 1` makes Hyprland advertise HDR support to clients
+    -- even when the desktop is in SDR. Fixes auto-HDR firing reliably in mpv.
+    quirks = {
+        prefer_hdr = 0,
+    },
+    -- Prevent compositor enlargement of XWayland buffers. Legacy apps must
+    -- handle their own sizing; this does not enable native fractional scaling.
+    xwayland = {
+        force_zero_scaling = true,
+    },
+    -- Cursor
+    cursor = {
+        inactive_timeout = 3, -- hide cursor after 3s of no movement (sway: hide_cursor 3000)
+        no_warps = false,
+        persistent_warps = false,
+        -- HW cursors REVERTED to auto (2026-07-23): forcing them (0/1) offset the
+        -- visible cursor from the real hotspot — clicks landed pixels away. Cause:
+        -- NVIDIA's CPU-backed cursor buffer is allocated at cursor-PLANE max size,
+        -- and transform/hotspot math on scaled+rotated outputs used the full buffer
+        -- (Hyprland PR #14988, merged Jul 13 '26, only partially fixes; rest is in
+        -- Aquamarine #302/#322). Retry 0/1 after next Hyprland+aquamarine bump —
+        -- the goal was a lag-free pointer when compositing stalls (4K slurp
+        -- overlays, VRAM maxed by the LLM stack).
+        no_hardware_cursors = 2,
+        use_cpu_buffer = 2,
+    },
+})
+

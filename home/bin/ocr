@@ -20,7 +20,9 @@ TMP=$(mktemp --suffix=.png)
 trap 'rm -f "$TMP"' EXIT
 
 # Region select via slurp; capture via grim; OCR via tesseract; clip via wl-copy.
-if ! grim -g "$(slurp -d)" "$TMP" 2>/dev/null; then
+# grim runs under the colortemp bypass so the night-color tint never reaches
+# the image (it costs OCR contrast on dark themes).
+if ! REGION=$(slurp -d) || ! "$HOME/bin/colortemp-ctl" bypass grim -g "$REGION" "$TMP" 2>/dev/null; then
     notify-send -t 2000 "OCR" "Cancelled (no region selected)"
     exit 0
 fi

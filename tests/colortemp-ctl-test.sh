@@ -100,6 +100,55 @@ assert_eq 4000K "$($CTL get)" "automatic schedule selects night at 19:00"
 assert_eq "$(command_count)" "$(wc -l <"$TMP/state/signals")" \
     "every applied CTM update signals Waybar exactly once"
 
+# Screenshots must never carry the tint: `bypass` clears the shader for the
+# wrapped command only and restores the current Kelvin afterwards.
+export COLORTEMP_BYPASS_SETTLE=0
+CLEAR="keyword decoration:screen_shader [[EMPTY]]"
+$CTL night
+before=$(command_count)
+$CTL bypass sh -c 'tail -n 1 "$COLORTEMP_TEST_STATE/commands" >"$COLORTEMP_TEST_STATE/during"'
+assert_eq "$CLEAR" "$(cat "$TMP/state/during")" "capture runs with the shader cleared"
+assert_eq "keyword decoration:screen_shader $TMP/state/shaders/4000.frag" \
+    "$(tail -n 1 "$TMP/state/commands")" "bypass restores the current Kelvin"
+assert_eq $((before + 2)) "$(command_count)" "bypass costs exactly one clear and one restore"
+[[ ! -e $TMP/state/runtime/bypass ]] || fail "bypass marker survives the capture"
+
+status=0
+$CTL bypass sh -c 'exit 7' || status=$?
+assert_eq 7 "$status" "bypass propagates the capture's exit status"
+assert_eq "keyword decoration:screen_shader $TMP/state/shaders/4000.frag" \
+    "$(tail -n 1 "$TMP/state/commands")" "a failed capture still restores the shader"
+
+# Re-pressing the screenshot bind to cancel nests a second bypass; only the
+# outermost owner may touch the shader, or the tint returns mid-selection.
+before=$(command_count)
+$CTL bypass "$CTL" bypass sh -c 'tail -n 1 "$COLORTEMP_TEST_STATE/commands" >"$COLORTEMP_TEST_STATE/during"'
+assert_eq "$CLEAR" "$(cat "$TMP/state/during")" "nested bypass keeps the shader cleared"
+assert_eq $((before + 2)) "$(command_count)" "nested bypass performs no extra IPC"
+
+# A scroll or schedule tick mid-capture records the value but defers the shader.
+$CTL bypass sh -c '"$0" warmer; tail -n 1 "$COLORTEMP_TEST_STATE/commands" >"$COLORTEMP_TEST_STATE/during"' "$CTL"
+assert_eq "$CLEAR" "$(cat "$TMP/state/during")" "a transition during capture does not re-tint it"
+assert_eq 3900K "$($CTL get)" "a transition during capture is still recorded"
+assert_eq "keyword decoration:screen_shader $TMP/state/shaders/3900.frag" \
+    "$(tail -n 1 "$TMP/state/commands")" "restore applies the Kelvin chosen during capture"
+
+# A marker from a SIGKILLed owner must not disable future bypasses.
+sh -c 'exit 0' & dead_pid=$!
+wait "$dead_pid"
+printf '%s\n' "$dead_pid" >"$TMP/state/runtime/bypass"
+$CTL bypass sh -c 'tail -n 1 "$COLORTEMP_TEST_STATE/commands" >"$COLORTEMP_TEST_STATE/during"'
+assert_eq "$CLEAR" "$(cat "$TMP/state/during")" "a stale bypass marker is ignored"
+
+# Every screenshot path captures through the bypass.
+for capture in "$ROOT/home/bin/screenshot" "$ROOT/home/bin/ocr" \
+    "$ROOT/home/.local/bin/omarchy-capture-screenshot"; do
+    grep -Fq 'colortemp-ctl" bypass' "$capture" || fail "$capture captures without the colortemp bypass"
+    if grep -Fq hyprshade "$capture"; then
+        fail "$capture still depends on the removed hyprshade"
+    fi
+done
+
 # The Waybar commands intentionally contain a literal $HOME for runtime.
 # shellcheck disable=SC2016
 grep -Fq 'on-scroll-up": "$HOME/bin/colortemp-ctl cooler"' "$WAYBAR"
@@ -110,7 +159,7 @@ grep -Fq 'on-click": "$HOME/bin/colortemp-ctl default"' "$WAYBAR"
 grep -Fq '100K' "$WAYBAR"
 grep -Fq 'native gamut' "$WAYBAR"
 grep -Fq 'Hyprland screen shader' "$WAYBAR"
-grep -Fq 'Screenshots and recordings include the effect' "$WAYBAR"
+grep -Fq 'Screenshots exclude the effect; recordings include it' "$WAYBAR"
 grep -Fq 'ExecStart=%h/bin/colortemp-ctl auto' "$SERVICE"
 grep -Fq 'WantedBy=graphical-session.target' "$SERVICE"
 grep -Fq 'OnCalendar=*-*-* 06,19:00:00' "$TIMER"

@@ -288,7 +288,7 @@
         // This module has no useful high-frequency external event source.
         "interval": "once",
         "signal": 13,
-        "tooltip-format": "Night color — Hyprland screen shader\nContinuous final-output transform. Screenshots and recordings include the effect.\nMonitor Picture Mode and native gamut remain untouched.\n   scroll        100K warmer / cooler\n   left-click    accurate default (identity / 6500K)\n   right-click   night preset (4000K)\n   middle-click  follow automatic schedule\nAuto 4000K 19:00→06:00; range 2500–6500K",
+        "tooltip-format": "Night color — Hyprland screen shader\nContinuous final-output transform. Screenshots exclude the effect; recordings include it.\nMonitor Picture Mode and native gamut remain untouched.\n   scroll        100K warmer / cooler\n   left-click    accurate default (identity / 6500K)\n   right-click   night preset (4000K)\n   middle-click  follow automatic schedule\nAuto 4000K 19:00→06:00; range 2500–6500K",
         "on-scroll-up": "$HOME/bin/colortemp-ctl cooler",
         "on-scroll-down": "$HOME/bin/colortemp-ctl warmer",
         "smooth-scrolling-threshold": 1.0,

@@ -12,6 +12,14 @@
 #   OMARCHY_SCREENSHOT_DIR=/foo
 #   OMARCHY_SCREENSHOT_EDITOR=swappy   # default: satty
 
+# Screenshots never carry the night-color tint: the screen shader runs in
+# Hyprland's final pass, so grim and hyprpicker's freeze layer would both
+# capture it. Re-run under the colortemp bypass, which clears the shader for
+# this script's lifetime and restores it on any exit, cancel included.
+if [[ -z ${SCREENSHOT_COLORTEMP_BYPASSED:-} ]]; then
+    SCREENSHOT_COLORTEMP_BYPASSED=1 exec "$HOME/bin/colortemp-ctl" bypass "$0" "$@"
+fi
+
 [[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
 OUTPUT_DIR="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures/Screenshots}}"
 mkdir -p "$OUTPUT_DIR"

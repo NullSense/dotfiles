@@ -283,7 +283,7 @@ models:
   # metadata: { engine: "infinity", hf: "codefuse-ai/F2LLM-v2-1.7B", class: embedding, thinking: na, best_for: "German legal retrieval (legalkb; future sift legalkb tenant)", tags: [embedding, local, legal, infinity] }
 
   bge-rerank:
-    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-bge --init --gpus all -p 127.0.0.1:${PORT}:7997 -v /home/nullsense/.cache/huggingface:/hf infinity-serving:local --engine torch --device cuda --dtype float16 --no-bettertransformer --model-id BAAI/bge-reranker-v2-m3 --served-model-name bge-rerank --batch-size 16 --url-prefix /v1
+    cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-bge --init --gpus all -p 127.0.0.1:${PORT}:7997 -v /home/nullsense/.cache/huggingface:/hf infinity-serving:local --engine torch --device cuda --dtype float16 --no-bettertransformer --model-id BAAI/bge-reranker-v2-m3 --revision 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e --served-model-name bge-rerank --batch-size 16 --url-prefix /v1
     cmdStop: docker stop swap-bge
     proxy: http://127.0.0.1:${PORT}
     useModelName: bge-rerank
@@ -1111,8 +1111,9 @@ matrix:
                                # for the legal-q/legal-z A/B sets" was simply wrong (verified by
                                # grepping every `sets:` entry — zero contain a bare `r`). Left
                                # defined for direct-alias invocation (an occasional manual A/B run
-                               # is fine running solo/evicting); add it to a set only if a future
-                               # bench needs bge co-resident with something else.
+                               # is fine running solo/evicting). 2026-10-07: `r` is now in
+                               # `sift-serve-bge` — bge is sift's first qualified rerank reference
+                               # and must load beside the serving trio without evicting it.
     q: qwen3-reranker-4b       # llama.cpp Q8_0 (~4.3 GB)
     j: jina-reranker-v3        # transformers sidecar (~1.5 GB bf16)
     z: zerank-2                # Infinity fp16 (~8 GB) — heavy
@@ -1231,6 +1232,15 @@ matrix:
     # m is ttl:0 (pinned) so it is resident regardless; listing it keeps the set honest.
     # `t` DROPPED 2026-09-12 — was already redundant here (see matrix.vars' `t` comment).
     sift-serve: "n & x & m & d"
+    # sift-serve plus bge (2026-10-07): sift's first qualified rerank reference is
+    # BAAI/bge-reranker-v2-m3 (revision pinned on the bge-rerank cmd), and Nemotron rerank
+    # stays its second target, so both rerankers must be co-resident with the trio.
+    # Subset semantics make this a pure widening: requesting `r` while n/m/x are loaded is a
+    # subset of this set, so nothing is evicted. Without it `r` is in no set and runs solo,
+    # evicting the whole serving set.
+    #   measured trio 12.3 + d 11 (estimate) + r ~1.5-2.5 (ESTIMATE, Infinity fp16) ~= 25-26 GB
+    # Re-measure with nvidia-smi on first co-resident load; trim if it nears ~31 GB.
+    sift-serve-bge: "n & x & m & r & d"
     # sift Nemotron working set: embed→rerank in one query path, plus dictation (d).
     # n 3.8 + m 4.7 + d 11 ≈ 19.5 GB. Octen (e) deliberately excluded — a sift cutover
     # to nemotron means a NEW 2048-dim collection; during re-index keep an eye on

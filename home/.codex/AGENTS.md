@@ -41,12 +41,6 @@ or land on a protected branch with no feature branch.
 - Never read, pipe, log, or store the user's password. Never enable passwordless sudo or an
   infinite timestamp. Revoke the global ticket early with `sudo -K` after maintenance.
 
-## Heavy lane
-Workspace builds and model loads on this machine serialize on one `flock` at
-`/run/user/1000/heavy-lane.lock`; sift's heavy moon tasks take it automatically, and
-`bash scripts/heavy-lane.sh run -- <cmd>` (sift) holds it for manual work. Restart llama-swap only
-under it: `flock /run/user/1000/heavy-lane.lock systemctl --user restart llama-swap.service`.
-
 ## Keybindings
 Before binding any shortcut (Hyprland/app/shell), grep the config for the exact modifier+key and
 confirm it's free; also scan `hyprctl binds` live. If taken, don't clobber — pick a free mnemonic

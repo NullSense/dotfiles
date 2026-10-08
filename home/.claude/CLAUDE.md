@@ -18,7 +18,11 @@ repairs links and preserves conflicting files under `~/.local/state/dotfiles-bac
 
 ## Git
 Commit finished, verified work without being asked. For dotfiles, commit from `~/.dotfiles` and
-push deliberately; a push publishes immediately to a public repository. Pause
+push deliberately; a push publishes immediately to a public repository. The dotfiles index is
+shared by every session and often holds other sessions' staged files, so commit with an explicit
+pathspec (`git -C ~/.dotfiles commit -F <msg> -- <paths>`) and stage nothing you don't commit in
+the same command. A pathspec commit takes the whole working file, so name only files whose diff is
+entirely yours; leave mixed files to the user. Pause
 before pushing ONLY if it would bundle unrelated drift, include secrets, rewrite pushed history,
 or land on a protected branch with no feature branch.
 
@@ -31,6 +35,12 @@ or land on a protected branch with no feature branch.
   reviewed operation where practical, and never start parallel authentication prompts.
 - Never read, pipe, log, or store the user's password. Never enable passwordless sudo or an
   infinite timestamp. Revoke the global ticket early with `sudo -K` after maintenance.
+
+## Heavy lane
+Workspace builds and model loads on this machine serialize on one `flock` at
+`/run/user/1000/heavy-lane.lock`; sift's heavy moon tasks take it automatically, and
+`bash scripts/heavy-lane.sh run -- <cmd>` (sift) holds it for manual work. Restart llama-swap only
+under it: `flock /run/user/1000/heavy-lane.lock systemctl --user restart llama-swap.service`.
 
 ## Keybindings
 Before binding any shortcut (Hyprland/app/shell), grep the config for the exact modifier+key and

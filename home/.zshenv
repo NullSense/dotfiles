@@ -67,3 +67,13 @@ fi
 # Agent Vault is per-process via `agent-vault vault run`, not blanket-exported
 # in shells, so HTTPS_PROXY / NO_PROXY are not set here.
 . "$HOME/.cargo/env"
+
+# Claude Code's Bash tool runs `zsh -c 'source <shell snapshot> ...'`, and agents write
+# bash-idiomatic commands: an unquoted `$PATHS` list arrives as ONE argument and an
+# unmatched `--include=*.yml` aborts with "no matches found" (both broke agent commands
+# on 2026-10-07/08). Give that one top-level shell bash's splitting and glob semantics.
+# Keyed on the execution string rather than CLAUDECODE, which every child (scripts,
+# IDE terminals) inherits.
+if [[ $ZSH_EXECUTION_STRING == "source $HOME/.claude/shell-snapshots/snapshot-zsh-"* ]]; then
+    setopt SH_WORD_SPLIT NO_NOMATCH
+fi

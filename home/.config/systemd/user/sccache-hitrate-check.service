@@ -1,0 +1,9 @@
+[Unit]
+Description=Check sccache's Rust hit rate, version skew and cache cap
+After=sccache.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/sccache-hitrate-check
+Nice=10
+IOSchedulingClass=idle

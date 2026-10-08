@@ -1,0 +1,16 @@
+# Restart the user-level sccache server after pacman upgrades sccache.
+#
+# cargo's rustc-wrapper execs /usr/bin/sccache as the client, and
+# ~/.config/systemd/user/sccache.service starts the server from the same path.
+# An upgrade replaces the file on disk but leaves the old server running, so
+# clients and server would run different versions until the next login.
+# try-restart is a no-op when the service is not running.
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = sccache
+
+[Action]
+Description = Restarting user sccache server to match the upgraded client...
+When = PostTransaction
+Exec = /usr/bin/sh -c 'systemctl --user -M nullsense@ try-restart sccache.service || true'

@@ -1,4 +1,4 @@
 [cache.disk]
 dir = "/home/nullsense/.cache/sccache"
-# Match the shared daemon's SCCACHE_CACHE_SIZE=160G setting.
-size = 171798691840 # 160 GiB
+# Match the shared daemon's SCCACHE_CACHE_SIZE=100G setting.
+size = 107374182400 # 100 GiB

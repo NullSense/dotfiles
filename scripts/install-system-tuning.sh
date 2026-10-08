@@ -50,6 +50,9 @@ install_root_file \
 install_root_file \
     "$REPO_ROOT/arch-install/etc/NetworkManager/conf.d/20-systemd-resolved.conf" \
     /etc/NetworkManager/conf.d/20-systemd-resolved.conf 0644
+install_root_file \
+    "$REPO_ROOT/arch-install/etc/pacman.d/hooks/sccache-user-server-restart.hook" \
+    /etc/pacman.d/hooks/sccache-user-server-restart.hook 0644
 
 write_root_file /etc/systemd/network/00-wol.link 644 <<'WOL_EOF'
 # Enable Wake-on-LAN (magic packet) for the wired NIC.

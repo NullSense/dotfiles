@@ -939,7 +939,7 @@ models:
     cmd: >
       docker run --rm --name sglang-qwen38-dspark --init --gpus all
       --ipc host --network host --security-opt no-new-privileges
-      -v /home/nullsense/.lmstudio/models/RadixArk/Qwen3.8-27B-NVFP4:/models/target:ro
+      -v /home/nullsense/.lmstudio/models/gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090:/models/target:ro
       -v /home/nullsense/.lmstudio/models/RadixArk/Qwen3.8-27B-DSpark:/models/draft:ro
       lmsysorg/sglang@sha256:e35dfb0beaf6b1fb6619ae0dac9474b5cdda24b81cee7202316e371301425e46
       python3 -m sglang.launch_server

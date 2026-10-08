@@ -15,12 +15,16 @@ Environment=SCCACHE_CLIENT_SIDE=1
 # turns hits into misses no build-config change can recover. Measured hit rate
 # under that cap: 28%.
 #
-# 160G covers the working set with headroom while leaving the disk comfortable:
-# /home is 1.9T at 83% used with 331G free, so the worst case here consumes ~97G
-# more than the 63G in use today. Raise only alongside a df check.
-Environment=SCCACHE_CACHE_SIZE=160G
-ExecStart=%h/.local/bin/sccache --start-server
-ExecStop=%h/.local/bin/sccache --stop-server
+# Lowered 160G -> 100G on 2026-10-08. The 160G cache was full, but 122.5 GiB of
+# it had not been read in 30 days (sccache's LRU bumps mtime on every hit); the
+# entries actually used in those 30 days came to 38.1 GiB. / was at 85% used.
+# 100G keeps ~2.5x the observed 30-day working set. Raise only alongside a df check.
+Environment=SCCACHE_CACHE_SIZE=100G
+# Same binary cargo's rustc-wrapper execs (pacman's /usr/bin/sccache), so the
+# server and its clients are always one version. An unmanaged ~/.local/bin copy
+# ran here until 2026-10-08 and was left at 0.17.0 while pacman moved to 0.18.0.
+ExecStart=/usr/bin/sccache --start-server
+ExecStop=/usr/bin/sccache --stop-server
 
 [Install]
 WantedBy=default.target

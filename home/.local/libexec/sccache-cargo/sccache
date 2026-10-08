@@ -1,0 +1,224 @@
+#!/bin/sh
+# Cargo rustc-wrapper around /usr/bin/sccache that keeps CARGO_* variables
+# rustc's output does not depend on out of sccache's cache key, without
+# changing what any compile produces.
+#
+# Why: sccache (0.17/0.18) hashes every CARGO_* variable in the environment
+# into a Rust compile's cache key, and cargo hands rustc its whole environment.
+# Variables that only steer cargo itself therefore split the cache:
+#   - CARGO_TERM_*: agent shells export CARGO_TERM_COLOR=never and
+#     CARGO_TERM_PROGRESS_WHEN=never, interactive shells don't, so agent and
+#     human builds never shared entries (measured Rust hit rate: 6.7%).
+#   - CARGO_TARGET_DIR: set vs unset, or a different value, missed on all 328
+#     cacheable crates of an aiquota build (2026-10-08 experiment).
+#   - CARGO_HTTP_*, CARGO_PROFILE_*, CARGO_INCREMENTAL, ... whenever a script
+#     exports them.
+#
+# Guarantee: every compile produces exactly the output (artifacts, dep-info,
+# stdout, stderr, exit status) an unwrapped build would; only cache keys and
+# compile time differ. Design:
+#   1. Find the dep-info file from rustc's arguments: --emit containing
+#      dep-info writes <--out-dir>/<--crate-name><-C extra-filename>.d, and
+#      --emit dep-info=PATH writes PATH. If there is none (cargo's -vV and
+#      --print probes, -o, @argfiles, stdin input), run sccache with the full
+#      environment; if CARGO_INCREMENTAL or CARGO_BUILD_INCREMENTAL is 1
+#      (sccache 0.18 refuses to run then), run the compiler directly instead.
+#   2. Otherwise run sccache with every CARGO_* variable outside the allowlist
+#      below removed, capturing its stdout and stderr in files.
+#   3. rustc writes `# env-dep:NAME[=VALUE]` into the dep-info for every
+#      env!/option_env! lookup (checked on 1.95 and 1.97); sccache restores
+#      that file on cache hits, and rustc still writes it when env! fails
+#      (also for env!(NAME, "custom message")). If it names a removed
+#      variable, or a failed compile reports "environment variable `NAME` not
+#      defined" for one, discard sccache's result and exec the real compiler
+#      command ("$@") with the original environment, which is by definition
+#      an unwrapped compile: its outputs overwrite sccache's and only its
+#      stdout/stderr reach cargo. A stale dep-info left by an earlier build
+#      can only add such a retry, never skip one that is needed. Otherwise
+#      forward the captured output byte for byte with sccache's exit status.
+# Cost: a crate that reads a removed variable through env!/option_env! is
+# compiled twice; in ~/.cargo/registry only test targets (zerocopy,
+# portable-atomic, libloading) do that, plus rav1e's bin, whose build script
+# passes CARGO_ENCODED_RUSTFLAGS through cargo:rustc-env. Every other compile
+# pays ~2 ms per rustc call over a plain strip-and-exec wrapper (fork, dep-info
+# scan, cat, rm; 1.6-2.6 ms measured on 15-23 ms cache hits, 2026-10-08).
+#
+# CARGO_INCREMENTAL / CARGO_BUILD_INCREMENTAL: removed like any other variable
+# in step 2 (cargo already turned them into -C incremental, which sccache
+# declines to cache), and an env-dep on them triggers step 3, where the direct
+# compiler run keeps them. Step 1 is the only path that keeps the environment
+# for sccache, so it bypasses sccache when they would make it refuse.
+#
+# Allowlist: the variables cargo sets for the crate being compiled (Cargo
+# book, "Environment variables Cargo sets for crates") and CARGO_MAKEFLAGS
+# (rustc's jobserver; sccache ignores it). CARGO_HOME is removed like the
+# rest: a job-local CARGO_HOME would otherwise split workspace crates.
+#
+# Not covered by step 3: proc macros that read the environment through
+# std::env at expansion time are not recorded as env-dep. A 2026-10-08 survey
+# of ~/.cargo/registry and the host-side dependency closure of every proc
+# macro in sift (80) and aiquota (43) found such reads only of kept names
+# (CARGO_MANIFEST_DIR, CARGO_PKG_*, CARGO_CRATE_NAME, CARGO_TARGET_TMPDIR, and
+# CARGO, which has no CARGO_ prefix) and of non-CARGO names; paste's
+# [<env!(..)>] segments could name anything, and nothing uses them.
+# sqlx-macros-core and proc-macro-crate also spawn `cargo metadata --no-deps` /
+# `cargo locate-project --workspace` with the reduced environment and use only
+# the workspace root, which no CARGO_* variable changes. Re-check this when a
+# new proc macro reads CARGO_* through std::env.
+#
+# Build scripts are compiled through this wrapper but run by cargo directly
+# with the full environment.
+#
+# The file is named `sccache` on purpose: cc-rs reuses RUSTC_WRAPPER for C/C++
+# only if its file stem is "sccache", so this keeps build-script C caching on.
+# Regression test: ~/.dotfiles/tests/sccache-cargo-wrapper-test.sh.
+sccache=/usr/bin/sccache
+
+# Compile with the original environment: through sccache, or directly when
+# CARGO_INCREMENTAL/CARGO_BUILD_INCREMENTAL=1 would make sccache refuse.
+run_unchanged() {
+    if [ "${CARGO_INCREMENTAL-}" = 1 ] || [ "${CARGO_BUILD_INCREMENTAL-}" = 1 ]; then
+        exec "$@"
+    fi
+    exec "$sccache" "$@"
+}
+
+# 1. Locate the dep-info file. "$1" is the compiler (or a workspace wrapper
+# such as clippy-driver); none of the patterns below can match it.
+dep_path= emit_dep= out_dir=. crate= extra= has_o= opaque= want=
+for arg; do
+    if [ -n "$want" ]; then
+        opt=$want val=$arg want=
+    else
+        case $arg in
+            --emit | --out-dir | --crate-name | -C | --codegen | -o)
+                want=$arg
+                continue
+                ;;
+            --emit=* | --out-dir=* | --crate-name=* | --codegen=*)
+                opt=${arg%%=*} val=${arg#*=} ;;
+            -C?*) opt=-C val=${arg#-C} ;;
+            -o?*) opt=-o val= ;;
+            # An argfile can hold any option; stdin input can't be re-read.
+            @* | -)
+                opaque=1
+                continue
+                ;;
+            *) continue ;;
+        esac
+    fi
+    case $opt in
+        --emit)
+            case ,$val, in
+                *,dep-info=*)
+                    dep_path=${val#*dep-info=}
+                    dep_path=${dep_path%%,*}
+                    ;;
+                *,dep-info,*) emit_dep=1 ;;
+            esac
+            ;;
+        --out-dir) out_dir=$val ;;
+        --crate-name) crate=$val ;;
+        -C | --codegen)
+            case $val in extra-filename=*) extra=${val#extra-filename=} ;; esac
+            ;;
+        -o) has_o=1 ;;
+    esac
+done
+dep=
+if [ -z "$opaque" ]; then
+    if [ -n "$dep_path" ]; then
+        # dep-info=- writes to stdout.
+        [ "$dep_path" = - ] || dep=$dep_path
+    elif [ -n "$emit_dep" ] && [ -n "$crate" ] && [ -z "$has_o" ]; then
+        # -o would rename the dep-info after its own file stem.
+        dep=$out_dir/$crate$extra.d
+    fi
+fi
+[ -n "$dep" ] || run_unchanged "$@"
+
+# 2. Collect the CARGO_* variables to remove (export -p avoids exec'ing env).
+nl='
+'
+removed= alt=
+set -f
+IFS=$nl
+for line in $(export -p); do
+    case $line in
+        'export CARGO_'*) name=${line#export } ;;
+        'declare -x CARGO_'*) name=${line#declare -x } ;;
+        *) continue ;;
+    esac
+    name=${name%%=*}
+    case $name in
+        *[!A-Za-z0-9_]* | \
+        CARGO_MANIFEST_DIR | CARGO_MANIFEST_PATH | CARGO_PKG_* | \
+        CARGO_CRATE_NAME | CARGO_BIN_NAME | CARGO_BIN_EXE_* | \
+        CARGO_PRIMARY_PACKAGE | CARGO_TARGET_TMPDIR | CARGO_RUSTC_CURRENT_DIR | \
+        CARGO_MAKEFLAGS) ;;
+        *)
+            removed=$removed$nl$name
+            alt=$alt${alt:+|}$name
+            ;;
+    esac
+done
+set +f
+unset IFS
+[ -n "$removed" ] || exec "$sccache" "$@"
+
+# Capture files. XDG_RUNTIME_DIR is private to this user (0700) and pids are
+# unique among live processes, so a leftover from a SIGKILLed run is simply
+# overwritten. Anywhere else, create them exclusively and fall back to the
+# unchanged path if that fails. `true`, not `:`: a failed redirection on a
+# special builtin would exit the shell.
+if [ -n "${XDG_RUNTIME_DIR-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then
+    out=$XDG_RUNTIME_DIR/sccache-cargo.$$
+else
+    out=${TMPDIR:-/tmp}/sccache-cargo.$$
+    set -C
+fi
+err=$out.err
+out=$out.out
+true 2>/dev/null >"$out" || run_unchanged "$@"
+if ! true 2>/dev/null >"$err"; then
+    rm -f -- "$out"
+    run_unchanged "$@"
+fi
+set +C
+trap 'rm -f -- "$out" "$err"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# 2 (cont.). Run sccache without the removed variables.
+(
+    IFS=$nl
+    unset $removed
+    exec "$sccache" "$@"
+) >"$out" 2>"$err"
+rc=$?
+
+# 3. Verify, then forward either sccache's result or the direct compile's.
+# A read loop beats exec'ing grep for the typical dep-info (12 lines median,
+# 58 at p90 across sift's target dir).
+dep_reads_removed() {
+    [ -f "$dep" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        case $line in
+            '# env-dep:'*)
+                name=${line#'# env-dep:'}
+                case $removed$nl in *"$nl${name%%=*}$nl"*) return 0 ;; esac
+                ;;
+        esac
+    done <"$dep"
+    return 1
+}
+if dep_reads_removed ||
+    { [ "$rc" -ne 0 ] && LC_ALL=C grep -qE "environment variable \`($alt)\` not defined" "$err"; }; then
+    rm -f -- "$out" "$err"
+    trap - EXIT HUP INT TERM
+    exec "$@"
+fi
+[ -s "$out" ] && cat -- "$out"
+[ -s "$err" ] && cat -- "$err" >&2
+exit "$rc"

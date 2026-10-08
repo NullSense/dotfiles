@@ -15,8 +15,12 @@
 
 [build]
 # sccache wraps rustc to deduplicate compilation across projects/branches.
-# `which sccache` -> /usr/bin/sccache (Arch package).
-rustc-wrapper = "/usr/bin/sccache"
+# Goes through ~/.local/libexec/sccache-cargo/sccache, which keeps cargo-only
+# CARGO_* variables (CARGO_TARGET_DIR, CARGO_TERM_*, CARGO_HOME, ...) out of
+# sccache's cache key; sccache hashes every CARGO_* var, so they split the cache
+# by shell/target dir. A crate that reads one through env!/option_env! is
+# recompiled with the full environment, so outputs never change. See that script.
+rustc-wrapper = "/home/nullsense/.local/libexec/sccache-cargo/sccache"
 
 # Use all logical cores by default. Cargo defaults to physical cores; -j 0 = unlimited
 # but in practice cargo treats unset/auto as ncpus. Leave commented to keep cargo's default.

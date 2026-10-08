@@ -147,45 +147,6 @@ if command -v rustup &>/dev/null; then
   unset _rustup_comp
 fi
 
-# rtk (this user's own binary) has no `completion`/`completions` subcommand
-# upstream (confirmed: `rtk completion` falls through to rtk's passthrough
-# proxy and errors trying to exec a literal `completion` binary) — so this is
-# a minimal STATIC completion for rtk's own meta-subcommands only. Wrapped
-# commands (`rtk git`, `rtk gh`, `rtk cargo`, …) don't need coverage here: the
-# Claude Code hook rewrites e.g. `git status` -> `rtk git status` only after
-# the line is already typed/accepted, so the real `git` completion is what
-# completed it in the first place.
-if command -v rtk &>/dev/null; then
-  (( $+functions[compdef] )) || compdef() { ZINIT_COMPDEF_REPLAY+=( "${(j: :)${(q)@}}" ) }
-  _rtk() {
-    local -a subcmds
-    subcmds=(
-      'gain:Show token savings summary and history'
-      'discover:Discover missed RTK savings from Claude Code history'
-      'proxy:Execute command without filtering but track usage'
-    )
-    _arguments -C \
-      '(-V --version)'{-V,--version}'[Print version]' \
-      '(-h --help)'{-h,--help}'[Print help]' \
-      '1: :->cmd' \
-      '*::arg:->args'
-    case $state in
-      cmd) _describe 'rtk command' subcmds ;;
-      args)
-        case ${words[1]} in
-          gain)
-            _arguments \
-              '(-H --history)'{-H,--history}'[Show recent command history]'
-            ;;
-          discover) ;;
-          proxy) _message 'raw command to run without filtering (passthrough — no rtk completion)' ;;
-        esac
-        ;;
-    esac
-  }
-  compdef _rtk rtk
-fi
-
 command -v atuin    &>/dev/null && eval "$(atuin init zsh)"
 command -v direnv   &>/dev/null && eval "$(direnv hook zsh)"
 command -v starship &>/dev/null && eval "$(starship init zsh)"

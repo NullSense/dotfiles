@@ -37,10 +37,7 @@
       "Bash(git log:*)",
       "Bash(git show:*)",
       "Bash(git branch:*)",
-      "Bash(git stash list:*)",
-      "Bash(rtk proxy git diff:*)",
-      "Bash(rtk proxy git apply:*)",
-      "Bash(rtk proxy git format-patch:*)"
+      "Bash(git stash list:*)"
     ],
     "deny": [
       "Read(./.env)",
@@ -87,17 +84,6 @@
             "type": "command",
             "command": "zedra agent hook receive --agent claude --quiet",
             "timeout": 2
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "rtk hook claude"
           }
         ]
       }
@@ -257,8 +243,9 @@
       "### User-specific",
       "**Primary use of Claude Code**: software development (Rust — multi-tenant retrieval engine 'Sift'; also personal dotfiles management per global CLAUDE.md)",
       "**Trusted repo**: `/home/nullsense/Programming/sift`, remote `github.com:Cortiq-Lab/sift.git` (default branch `master`)",
-      "**Org-specific CLIs**: `moon` (Moon monorepo task runner — sanctioned entry point per CLAUDE.md), `rtk` (Rust Token Killer command wrapper, used heavily), `herdr`, `infisical`",
-      "**\"routine under <user>/ prefix\" qualifiers**: routine actions under `/home/nullsense/Programming/sift/` and `~/.dotfiles/` are user-owned routine work"
+      "**Org-specific CLIs**: `moon` (Moon monorepo task runner — sanctioned entry point per CLAUDE.md), `repowise` (code index and `repowise distill` output wrapper), `herdr`, `infisical`",
+      "**\"routine under <user>/ prefix\" qualifiers**: routine actions under `/home/nullsense/Programming/sift/` and `~/.dotfiles/` are user-owned routine work",
+      "**Local model serving**: `llama-swap.service` and `litellm*.service` are the user's own `systemctl --user` services on this workstation, serving local models only. Restarting one is routine user-owned work once the user, or a coordinating agent whose message the user relayed, has released the shared GPU/heavy lane for it. A restart evicts every loaded model, so outside such a release it interferes with other sessions' workloads."
     ],
     "soft_deny": [
       "$defaults",

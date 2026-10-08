@@ -86,20 +86,12 @@ Fix a bug → write a regression test immediately (TDD preferred).
 
 
 
-<!-- headroom:rtk-instructions -->
-# Shell output distillation — repowise (RTK parked 2026-08-22)
+# Shell output distillation — repowise
 
-**Do not prefix shell commands with `rtk`.** RTK is installed and still works, but the
-blanket-prefix mandate is suspended while `repowise distill` is on trial as the single
-distillation layer. Two distillers instructing at once is how tool output got corrupted before.
+`repowise distill <cmd>` is the single distillation layer (see Output Distillation below). Run a
+command bare when you need exact, unfiltered output — debugging, parsing, anything where a dropped
+line changes the answer.
 
-Use `repowise distill <cmd>` (see Output Distillation below). Run a command bare when you
-need exact, unfiltered output — debugging, parsing, anything where a dropped line changes
-the answer.
-
-To revert: restore the `rtk hook claude` PreToolUse entry in `settings.json`, then
-`rtk init` to rewrite this block.
-<!-- /headroom:rtk-instructions -->
 # Codebase navigation
 - **repowise** is the default for codebase questions in any indexed repo: `get_context`,
   `search_codebase`, `get_symbol`, `get_health`, `get_change_risk` via MCP, or the `repowise` CLI.

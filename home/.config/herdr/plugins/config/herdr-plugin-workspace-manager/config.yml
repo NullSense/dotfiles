@@ -4,6 +4,7 @@ layouts:
     env:
       INFISICAL_TOKEN_FILE: /run/user/1000/sift-infisical/access-token
       INFISICAL_SECRET_PATH: /sift-dev
+      INFISICAL_DOMAIN: https://infisical.cortiq-lab.sh
     setup:
       command: bash scripts/worktree-setup.sh
       blocking: true

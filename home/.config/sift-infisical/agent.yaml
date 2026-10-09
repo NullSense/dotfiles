@@ -1,8 +1,9 @@
 # Infisical Agent for keychainless Sift coding agents, run by
 # ~/.config/systemd/user/sift-infisical-agent.service.
 #
-# The Universal Auth pair belongs to the dedicated dev-only Sift machine
-# identity (Viewer on the Sift project only, eu.infisical.com). systemd unseals
+# The Universal Auth pair belongs to the dedicated read-only Sift machine
+# identity on the Cortiq instance (org-role No Access; in the sift project
+# No Access plus one read privilege on dev:/sift-dev/**). systemd unseals
 # it from ~/.config/credstore.encrypted/ into the service's private credentials
 # directory, so the secret is kept (sealed) and the Agent can re-authenticate
 # after its token's max TTL and after every reboot. The coding agents only
@@ -13,7 +14,7 @@
 # /run/user/1000/credentials/<unit>/ is $CREDENTIALS_DIRECTORY and
 # /run/user/1000/sift-infisical/ is the unit's RuntimeDirectory.
 infisical:
-  address: "https://eu.infisical.com"
+  address: "https://infisical.cortiq-lab.sh"
   exit-after-auth: false
   revoke-credentials-on-shutdown: true
   retry-strategy:

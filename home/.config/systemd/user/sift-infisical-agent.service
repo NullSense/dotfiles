@@ -10,16 +10,25 @@ Documentation=file://%h/Programming/sift/SETUP.md
 # died at every reboot and whenever the token hit its max TTL, and nothing
 # brought it back, so every agent worktree failed closed.
 #
-# One-time setup (and on credential rotation): mint a client secret for the
-# dedicated dev-only Sift machine identity (eu.infisical.com, NullSense org,
-# Viewer on the Sift project only), then seal both halves without putting
-# them on a command line:
-#   umask 077
-#   read -rp 'Client ID: ' v && printf %s "$v" | systemd-creds encrypt --user \
-#     --name=sift-infisical-client-id - ~/.config/credstore.encrypted/sift-infisical-client-id.cred
-#   read -rsp 'Client secret: ' v && printf %s "$v" | systemd-creds encrypt --user \
-#     --name=sift-infisical-client-secret - ~/.config/credstore.encrypted/sift-infisical-client-secret.cred; unset v
-#   systemctl --user enable --now sift-infisical-agent.service
+# Identity: `sift-local-dev` on infisical.cortiq-lab.sh, Terraform-managed in
+# the infra repo (registry/apps/sift.yaml secrets.localDev): org and project
+# role no-access plus read on dev:/sift-dev/** only.
+#
+# One-time setup (and on rotation), with a logged-in `cortiq` CLI profile:
+# mint a client secret and seal both halves without printing them.
+#   umask 077; B=https://infisical.cortiq-lab.sh/api
+#   ID=<terraform -chdir=terraform/infisical output -json local_dev_identity_ids | jq -r .sift>
+#   T="$(infisical user get token --plain --silent --profile cortiq)"
+#   curl -fsS -H "Authorization: Bearer $T" "$B/v1/auth/universal-auth/identities/$ID" \
+#     | jq -j .identityUniversalAuth.clientId | systemd-creds encrypt --user \
+#       --name=sift-infisical-client-id - ~/.config/credstore.encrypted/sift-infisical-client-id.cred
+#   curl -fsS -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+#     --data '{"description":"sift-infisical-agent.service","numUsesLimit":0,"ttl":0}' \
+#     "$B/v1/auth/universal-auth/identities/$ID/client-secrets" | jq -je .clientSecret \
+#     | systemd-creds encrypt --user --name=sift-infisical-client-secret - \
+#       ~/.config/credstore.encrypted/sift-infisical-client-secret.cred; unset T
+#   systemctl --user restart sift-infisical-agent.service
+# Revoke the superseded client secret in the dashboard afterwards.
 
 [Service]
 Type=exec
@@ -33,6 +42,8 @@ LoadCredentialEncrypted=sift-infisical-client-secret:%h/.config/credstore.encryp
 RuntimeDirectory=sift-infisical
 RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/infisical agent --config %h/.config/sift-infisical/agent.yaml
+# The Cortiq instance is tailnet-only (100.98.70.22): when tailscaled comes up
+# after this unit, the Agent's own retries plus Restart= cover the gap.
 Restart=on-failure
 RestartSec=5
 RestartSteps=4

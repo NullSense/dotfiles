@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# omp is a Bun script (#!/usr/bin/env bun), and Bun auto-loads ./.env from the
+# working directory into process.env. An omp started in a project checkout
+# then hands that project's .env (credentials and settings, frozen at start)
+# to every MCP server and everything they spawn. On 2026-10-09 that leaked the
+# Sift main checkout's stale SIFT_SPARSE_URL / SIFT_EXTERNAL_INFERENCE_GRANTS
+# into worktree services. A global ~/.bunfig.toml `env = false` is not honoured
+# for scripts (Bun 1.4.2, tested), so disable it per invocation.
+exec bun --no-env-file "$HOME/.bun/bin/omp" "$@"

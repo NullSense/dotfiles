@@ -6,20 +6,9 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=SCCACHE_IDLE_TIMEOUT=0
 Environment=SCCACHE_CLIENT_SIDE=1
-# Sized to the actual build working set, not a round number. Measured 2026-08-14
-# on the sift repo: the main checkout's target/ alone is ~99 GiB and three live
-# git worktrees add ~18 GiB, so ~118 GiB of artifacts feed this cache — while the
-# effective cap was 100 GiB (the daemon's built-in default; this unit never set
-# one, and the install script's 20G never reached the running server). A cap
-# below the working set evicts entries the next build would have reused, which
-# turns hits into misses no build-config change can recover. Measured hit rate
-# under that cap: 28%.
-#
-# Lowered 160G -> 100G on 2026-10-08. The 160G cache was full, but 122.5 GiB of
-# it had not been read in 30 days (sccache's LRU bumps mtime on every hit); the
-# entries actually used in those 30 days came to 38.1 GiB. / was at 85% used.
-# 100G keeps ~2.5x the observed 30-day working set. Raise only alongside a df check.
-Environment=SCCACHE_CACHE_SIZE=100G
+# Keep the shared cache at 40 GiB to preserve room for active build outputs
+# on the workstation's root filesystem.
+Environment=SCCACHE_CACHE_SIZE=40G
 # Same binary cargo's rustc-wrapper execs (pacman's /usr/bin/sccache), so the
 # server and its clients are always one version. An unmanaged ~/.local/bin copy
 # ran here until 2026-10-08 and was left at 0.17.0 while pacman moved to 0.18.0.

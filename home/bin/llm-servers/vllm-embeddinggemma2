@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# vllm-embeddinggemma2 — serve google/embeddinggemma-2 @914f7f8 (Apache-2.0) on vLLM as a
+# text+image 768-dim mean-pooled embedder (sift Q2 image-qualification eval).
+#
+# Audio tower SKIPPED via --limit-mm-per-prompt audio:0 (vLLM drops a tower whose
+# modalities are all limited to 0); vision kept at image:1, 280 soft tokens max.
+# Encoder-only attention ⇒ no KV pool; the reservation is weights + graphs + activations.
+#
+# ⚠ SM120 SHARED-MEMORY PLUGIN: vLLM forces TRITON_ATTN for this model's mixed head dims
+#   (256 sliding / 512 full), and that backend's encoder-only prefill kernel tiles at
+#   BLOCK=128, which needs 160 KiB of shared memory per block. The RTX 5090 has 99 KiB, so
+#   the stock image dies at the first warm-up forward ("OutOfResources: shared memory,
+#   Required: 163840, Hardware limit: 101376"). vllm-plugins/triton-prefill-smem clamps
+#   the tile to 64 on such devices. FLEX_ATTENTION is no escape: it fails warm-up on a
+#   CUDA-graph-overwritten block mask. Both measured 2026-10-09 on the digest below.
+#
+# ⚠ DIGEST PIN, NIGHTLY: no stable vLLM carries EmbeddingGemma2Model (added by
+#   vllm-project/vllm#60254; vllm/model_executor/models/embedding_gemma2.py is absent
+#   at v0.31.0 = VLLM_IMAGE_PIN, verified 2026-10-09). The digest below is
+#   nightly-8cbd5d03006c33185f402249ff2b448efd594986 (vLLM 8cbd5d03, transformers 5.19.x).
+#   `vllm-update` lists this as a DIGEST wrapper and never rewrites it. Move to the
+#   leading tier (VLLM_IMAGE_PIN) once a stable release contains embedding_gemma2.py,
+#   and RE-RUN THE PARITY GATE (SentenceTransformers 6.1.0 bf16 reference, cosine ≥ 0.999
+#   per item for query text, document text, and images) before trusting its vectors.
+#   PARITY 2026-10-09 on this digest + plugin vs ST 6.1.0 / transformers 5.19.0 bf16
+#   (config_kwargs audio_config=None): min cosine 0.99994 over query, document, the
+#   960×672 PNG and four natural images (4:3, 3:2, ~1:1, 2:3); an image request WITHOUT
+#   add_special_tokens scored 0.913 (negative control).
+#   NOTE: vllm-update's request gate has no case for this wrapper, so its default chat
+#   probe will report it ✗ even when it boots; that report does not block the leading pin.
+#
+# ⚠ CALLER CONTRACT (/v1/embeddings):
+#   - text via `input`, client-side prefixes: "task: search result | query: " for queries,
+#     "title: none | text: " for documents (vLLM's embed API has no prompt-name field).
+#   - images via chat-shaped `messages`, no text part, no prefix, and WITH
+#     "add_special_tokens": true — the chat default is false, which silently drops
+#     <bos>/<eos> and diverges from the reference. `input` strings get them by default.
+#   - 768-dim L2-normalised; NOT interchangeable with nemotron (2048) or EmbeddingGemma 1.
+#   - /tokenize (root, not /v1) with the same messages + "add_special_tokens": true,
+#     "add_generation_prompt": false counts the positions: 960×672 → 284 (bos boi 280 eoi eos).
+# ⚠ Never FP16: the card documents NaN / silently degraded embeddings. bf16 is forced below.
+#
+# llama-swap-MANAGED, dynamic port (env PORT=${PORT}); PORT=8014 for manual runs.
+set -euo pipefail
+: "${PORT:=8014}"
+
+MODEL="${MODEL:-google/embeddinggemma-2}"
+REVISION="${REVISION:-914f7f89142e33e77833254d9c9b90c3cef7303b}"   # also pins the tokenizer
+NAME="${SERVED_NAME:-google/embeddinggemma-2@$REVISION}"           # /v1/models shows the revision
+VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai@sha256:b25e8a046fdbe948987b3dba06ef2cf9ea0f02b36d9482a25113a445ee52ad21}"
+MAXLEN="${MAXLEN:-8192}"         # the card's shared text/image window; vLLM caps here anyway
+# MEASURED 2026-10-09 (nvidia-smi, EngineCore process): 3000 MiB idle after warm-up and
+# 3002 MiB after 8 × 2×8109-token text batches + 16 concurrent 280-soft-token images.
+# Weights 0.83 GiB (text+vision; audio tower skipped — checkpoint is 1.39 GiB).
+# Encoder-only ⇒ no KV pool to size; 0.10 × 31.4 GiB ≈ 3.1 GiB covers the measured peak.
+GPU_UTIL="${GPU_UTIL:-0.10}"
+
+VLLM_HOST_NET=1   # loopback-only, skips docker-proxy — see _vllm-common.sh
+# VLLM_SLEEP deliberately unset: a small pooling model reloads fast enough.
+source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
+PLUGIN_DIR="$(dirname "$(readlink -f "$0")")/vllm-plugins/triton-prefill-smem"
+
+# Overridable so a smoke test / bench runs its OWN container instead of killing the
+# live llama-swap one that shares this name. Default keeps the llama-swap identity.
+: "${CONTAINER_NAME:=vllm-embeddinggemma2}"
+
+docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+# --entrypoint bash: install the shared-memory plugin, then exec the normal serve path.
+# Copied to /tmp because the ro mount can't take egg-info; --no-build-isolation keeps
+# the install offline (setuptools ships in the image).
+exec docker run --rm --init --gpus all --name "$CONTAINER_NAME" \
+  "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
+  -v "$PLUGIN_DIR:/smem-plugin:ro" \
+  --ipc=host \
+  --entrypoint bash \
+  "$VLLM_IMAGE" \
+  -c 'cp -r /smem-plugin /tmp/smp && pip install --no-deps --no-build-isolation -q /tmp/smp && exec vllm serve "$@"' _ \
+  "$MODEL" \
+  --revision "$REVISION" \
+  --served-model-name "$NAME" \
+  --runner pooling \
+  --dtype bfloat16 \
+  --host 127.0.0.1 --port "$PORT" \
+  --max-model-len "$MAXLEN" \
+  --max-num-batched-tokens "$MAXLEN" \
+  --limit-mm-per-prompt '{"image":1,"video":0,"audio":0}' \
+  --mm-processor-kwargs '{"max_soft_tokens":280}' \
+  --gpu-memory-utilization "$GPU_UTIL" \
+  "$@"

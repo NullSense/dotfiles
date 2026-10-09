@@ -1,0 +1,14 @@
+[project]
+name = "triton-prefill-smem-vllm-plugin"
+version = "0.1.0"
+description = "Clamp vLLM's Triton prefill-attention tile on GPUs with <160 KiB shared memory (SM120)"
+
+[project.entry-points."vllm.general_plugins"]
+triton_prefill_smem = "triton_prefill_smem_vllm_plugin:register"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["triton_prefill_smem_vllm_plugin"]

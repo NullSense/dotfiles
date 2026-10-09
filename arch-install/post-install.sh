@@ -176,7 +176,7 @@ npm.bun = true
 # sccache wraps rustc to cache compiled crates across projects
 RUSTC_WRAPPER = "sccache"
 SCCACHE_DIR = "{{env.HOME}}/.cache/sccache"
-SCCACHE_CACHE_SIZE = "20G"
+SCCACHE_CACHE_SIZE = "40G"
 MISE
 mise install
 mise reshim || true

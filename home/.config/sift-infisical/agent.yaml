@@ -1,0 +1,35 @@
+# Infisical Agent for keychainless Sift coding agents, run by
+# ~/.config/systemd/user/sift-infisical-agent.service.
+#
+# The Universal Auth pair belongs to the dedicated dev-only Sift machine
+# identity (Viewer on the Sift project only, eu.infisical.com). systemd unseals
+# it from ~/.config/credstore.encrypted/ into the service's private credentials
+# directory, so the secret is kept (sealed) and the Agent can re-authenticate
+# after its token's max TTL and after every reboot. The coding agents only
+# ever see the short-lived access token in the sink below, which they reach
+# through INFISICAL_TOKEN_FILE (herdr layout env).
+#
+# Paths are literal because the Agent does not expand variables in this file:
+# /run/user/1000/credentials/<unit>/ is $CREDENTIALS_DIRECTORY and
+# /run/user/1000/sift-infisical/ is the unit's RuntimeDirectory.
+infisical:
+  address: "https://eu.infisical.com"
+  exit-after-auth: false
+  revoke-credentials-on-shutdown: true
+  retry-strategy:
+    max-retries: 5
+    max-delay: "10s"
+    base-delay: "500ms"
+
+auth:
+  type: "universal-auth"
+  config:
+    client-id: "/run/user/1000/credentials/sift-infisical-agent.service/sift-infisical-client-id"
+    client-secret: "/run/user/1000/credentials/sift-infisical-agent.service/sift-infisical-client-secret"
+    # The credentials directory is read-only and vanishes when the unit stops.
+    remove_client_secret_on_read: false
+
+sinks:
+  - type: "file"
+    config:
+      path: "/run/user/1000/sift-infisical/access-token"

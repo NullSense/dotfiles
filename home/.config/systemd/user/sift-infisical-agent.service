@@ -1,0 +1,53 @@
+[Unit]
+Description=Infisical Agent — Sift dev token sink for keychainless coding agents
+Documentation=file://%h/Programming/sift/SETUP.md
+# Sift dev tasks (scripts/with-env.sh) authenticate coding agents with the
+# short-lived token this Agent renews in /run/user/1000/sift-infisical/
+# access-token (INFISICAL_TOKEN_FILE, set by the herdr `sift` layout).
+#
+# It used to be a transient `systemd-run` unit whose client secret was a
+# one-time file under /run/user/1000, deleted after first read. That sink
+# died at every reboot and whenever the token hit its max TTL, and nothing
+# brought it back, so every agent worktree failed closed.
+#
+# One-time setup (and on credential rotation): mint a client secret for the
+# dedicated dev-only Sift machine identity (eu.infisical.com, NullSense org,
+# Viewer on the Sift project only), then seal both halves without putting
+# them on a command line:
+#   umask 077
+#   read -rp 'Client ID: ' v && printf %s "$v" | systemd-creds encrypt --user \
+#     --name=sift-infisical-client-id - ~/.config/credstore.encrypted/sift-infisical-client-id.cred
+#   read -rsp 'Client secret: ' v && printf %s "$v" | systemd-creds encrypt --user \
+#     --name=sift-infisical-client-secret - ~/.config/credstore.encrypted/sift-infisical-client-secret.cred; unset v
+#   systemctl --user enable --now sift-infisical-agent.service
+
+[Service]
+Type=exec
+UMask=0077
+# Both halves stay TPM2-sealed at rest; systemd unseals them into the
+# service-private $CREDENTIALS_DIRECTORY only while the Agent runs.
+LoadCredentialEncrypted=sift-infisical-client-id:%h/.config/credstore.encrypted/sift-infisical-client-id.cred
+LoadCredentialEncrypted=sift-infisical-client-secret:%h/.config/credstore.encrypted/sift-infisical-client-secret.cred
+# Owns /run/user/1000/sift-infisical (mode 0700). Removed on stop, so a
+# stopped Agent never leaves a stale token behind.
+RuntimeDirectory=sift-infisical
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/infisical agent --config %h/.config/sift-infisical/agent.yaml
+Restart=on-failure
+RestartSec=5
+RestartSteps=4
+RestartMaxDelaySec=60
+
+PrivateTmp=true
+ProtectSystem=strict
+# The CLI records its update check under ~/.infisical.
+ReadWritePaths=%h/.infisical
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+
+[Install]
+WantedBy=default.target

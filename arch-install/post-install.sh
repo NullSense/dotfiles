@@ -175,9 +175,13 @@ npm.bun = true
 [env]
 # sccache wraps rustc to cache compiled crates across projects
 RUSTC_WRAPPER = "sccache"
-SCCACHE_DIR = "{{env.HOME}}/.cache/sccache"
+SCCACHE_DIR = "{{env.HOME}}/.cache/sccache-vol"
 SCCACHE_CACHE_SIZE = "40G"
 MISE
+# The sccache directory is its own btrfs subvolume, so home snapshots never
+# retain evicted cache entries (plain directory on other filesystems).
+[[ -d ~/.cache/sccache-vol ]] || btrfs subvolume create ~/.cache/sccache-vol 2>/dev/null \
+  || mkdir -p ~/.cache/sccache-vol
 mise install
 mise reshim || true
 

@@ -1,4 +1,6 @@
 [cache.disk]
-dir = "/home/nullsense/.cache/sccache"
+# A btrfs subvolume of its own, so the home snapshots never retain evicted
+# cache entries (the same reason the build trees live outside them).
+dir = "/home/nullsense/.cache/sccache-vol"
 # Keep the shared daemon cache within the workstation's disk budget.
 size = 42949672960 # 40 GiB

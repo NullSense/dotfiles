@@ -105,8 +105,12 @@ if [[ -n "${VLLM_TEST_MALFORMED_ENDPOINT:-}" && "$url" == *"$VLLM_TEST_MALFORMED
     esac
     exit 0
 fi
+if [[ "${VLLM_TEST_EMBED_DIMS_MISMATCH:-}" == 1 && "$url" == */v1/embeddings ]]; then
+    printf '%s\n' '{"data":[{"embedding":[0.1,0.2]},{"embedding":[0.3]}]}'
+    exit 0
+fi
 case "$url" in
-    */v1/embeddings) printf '%s\n' '{"data":[{"embedding":[0.1]}]}' ;;
+    */v1/embeddings) printf '%s\n' '{"data":[{"embedding":[0.1,0.2]},{"embedding":[0.3,0.4]}]}' ;;
     */v1/rerank) printf '%s\n' '{"results":[{"index":0,"relevance_score":0.1}]}' ;;
     */v1/chat/completions)
         if [[ "${VLLM_TEST_THINKING_ONLY:-}" == 1 ]]; then
@@ -165,6 +169,37 @@ grep -Fq 'configured inventory pending' "$current_output" \
 if grep -Fq 'leading pin up to date' "$current_output"; then
     fail 'check-only inventory retained the false all-current message'
 fi
+
+# Regression 4: the live pin file annotates the leading pin with a trailing
+# rollback comment. The parser must accept trailing comments and surrounding
+# whitespace; the former updater exited "could not parse VLLM_IMAGE_PIN" in both
+# check and --apply mode, so neither pin could be read or advanced.
+commented_root="$tmp/commented"
+commented_output="$tmp/commented.out"
+make_fixture "$commented_root" v0.28.0 v0.26.0
+printf '%s\n' \
+    '# leading tier, annotated like the live file' \
+    'VLLM_IMAGE_PIN="vllm/vllm-openai:v0.28.0"   # 2026-10-06 (was v0.27.0; rollback = restore .bak)' \
+    $'  VLLM_IMAGE_PIN_HELD="vllm/vllm-openai:v0.26.0"\t' \
+    >"$commented_root/bin/llm-servers/_vllm-image.sh"
+PATH="$commented_root/fake-bin:$PATH" VLLM_TEST_DIR="$commented_root" \
+    "$updater" --servers-dir "$commented_root/bin/llm-servers" >"$commented_output" 2>&1 \
+    || fail "commented pin file failed check mode: $(cat "$commented_output")"
+grep -Fq 'leading pin : v0.28.0 ' "$commented_output" \
+    || fail 'commented leading pin was not parsed'
+grep -Fq 'held pin    : v0.26.0 ' "$commented_output" \
+    || fail 'indented held pin with trailing whitespace was not parsed'
+: >"$commented_root/wrappers.log"; : >"$commented_root/docker.log"; : >"$commented_root/curl.log"
+VLLM_TEST_DIR="$commented_root" TMPDIR="$commented_root" PATH="$commented_root/fake-bin:$PATH" \
+    "$updater" --servers-dir "$commented_root/bin/llm-servers" --apply >"$commented_output" 2>&1 || true
+grep -Fq 'leading vLLM pin bumped v0.28.0 → v0.29.0' "$commented_output" \
+    || fail 'commented leading pin did not advance under --apply'
+grep -Fqx 'VLLM_IMAGE_PIN="vllm/vllm-openai:v0.29.0"' \
+    "$commented_root/bin/llm-servers/_vllm-image.sh" \
+    || fail 'commented leading pin line was not rewritten'
+grep -Fq 'VLLM_IMAGE_PIN_HELD="vllm/vllm-openai:v0.26.0"' \
+    "$commented_root/bin/llm-servers/_vllm-image.sh" \
+    || fail 'held pin changed while bumping a commented leading pin'
 
 # A missing --servers-dir argument is CLI validation, and must fail before the
 # updater performs the Docker Hub query or any wrapper/model operation.
@@ -284,5 +319,58 @@ grep -Fq 'vllm-qwen38' "$failed_output" \
     || fail 'digest request failure was not attributed to Qwen'
 grep -Fq 'held/digest owners remain pending' "$failed_output" \
     || fail 'digest request failure lost partial-result truthfulness'
+
+# Regression 5: a wrapper that declares vLLM's pooling runner is an embedder and
+# must receive the embedding probe, whatever its name. The former gate chose the
+# probe from a fixed name list, so vllm-embeddinggemma2 (digest-pinned,
+# `--runner pooling`) fell through to a chat completion it cannot serve. A chat
+# wrapper that merely MENTIONS the flag in a comment must stay on the chat probe.
+pooling_root="$tmp/pooling"
+pooling_output="$tmp/pooling.out"
+make_fixture "$pooling_root" v0.28.0 v0.26.0
+cat >"$pooling_root/bin/llm-servers/vllm-embeddinggemma2" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
+SERVE_ARGS=(--runner pooling --dtype bfloat16)
+printf '%s %s\n' "$(basename "$0")" "$CONTAINER_NAME" >>"$VLLM_TEST_DIR/wrappers.log"
+while :; do /bin/sleep 60; done
+EOF
+chmod +x "$pooling_root/bin/llm-servers/vllm-embeddinggemma2"
+sed -i '2i # not a pooling model: --runner pooling would be wrong here' \
+    "$pooling_root/bin/llm-servers/vllm-qwen38"
+: >"$pooling_root/wrappers.log"; : >"$pooling_root/docker.log"; : >"$pooling_root/curl.log"
+VLLM_TEST_DIR="$pooling_root" TMPDIR="$pooling_root" PATH="$pooling_root/fake-bin:$PATH" \
+    "$updater" --servers-dir "$pooling_root/bin/llm-servers" --apply >"$pooling_output" 2>&1 || true
+# Digest owners are smoked in glob order after 3 leading + 3 held wrappers:
+# vllm-embeddinggemma2 on 8105, vllm-qwen38 on 8106.
+grep -Fqx 'http://127.0.0.1:8105/v1/embeddings' "$pooling_root/curl.log" \
+    || fail 'declared pooling wrapper did not receive the embedding probe'
+grep -Fq ':8105/v1/chat/completions' "$pooling_root/curl.log" \
+    && fail 'declared pooling wrapper was sent a chat completion'
+grep -Fqx 'http://127.0.0.1:8106/v1/chat/completions' "$pooling_root/curl.log" \
+    || fail 'chat digest wrapper lost its chat probe'
+grep -Fq '✓ vllm-embeddinggemma2 answers on v0.29.0' "$pooling_output" \
+    || fail 'declared pooling wrapper did not pass its embedding probe'
+PATH="$pooling_root/fake-bin:$PATH" VLLM_TEST_DIR="$pooling_root" \
+    "$updater" --servers-dir "$pooling_root/bin/llm-servers" >"$pooling_output" 2>&1 \
+    || fail "check mode failed with a declared pooling wrapper: $(cat "$pooling_output")"
+grep -Fq 'vllm-embeddinggemma2=embedding' "$pooling_output" \
+    || fail 'check mode did not report the embedding probe for the declared pooling wrapper'
+grep -Fq 'vllm-qwen38=chat' "$pooling_output" \
+    || fail 'a commented runner mention moved a chat wrapper off the chat probe'
+
+# The embedding probe sends a two-input batch and requires two vectors of one
+# positive dimension. A ragged batch is a broken pooling contract even when every
+# value is finite, and it must hold the leading pin back.
+mismatch_root="$tmp/embed-dims"
+mismatch_output="$tmp/embed-dims.out"
+export VLLM_TEST_EMBED_DIMS_MISMATCH=1
+status=$(run_case v0.28.0 v0.26.0 '' "$mismatch_output" "$mismatch_root")
+unset VLLM_TEST_EMBED_DIMS_MISMATCH
+[[ "$status" == 1 ]] || fail 'ragged embedding batch was accepted'
+grep -Fqx 'VLLM_IMAGE_PIN="vllm/vllm-openai:v0.28.0"' \
+    "$mismatch_root/bin/llm-servers/_vllm-image.sh" \
+    || fail 'ragged embedding batch still advanced the leading pin'
 
 printf 'PASS: vllm-update inventory, request-gate, and cleanup contract\n'

@@ -59,7 +59,16 @@ PIN_FILE="$SERVERS/_vllm-image.sh"
 
 note() { [ "$NOTIFY" = 1 ] && command -v notify-send >/dev/null && notify-send "vllm-update" "$1" || true; echo "$1"; }
 
-pin_of() { sed -n "s|^$1=\"vllm/vllm-openai:\(.*\)\"$|\1|p" "$PIN_FILE"; }
+# One assignment per pin, optionally indented, optionally followed by whitespace
+# and a shell comment (the live leading pin carries a rollback note). Anchoring
+# on `NAME=` keeps VLLM_IMAGE_PIN from matching VLLM_IMAGE_PIN_HELD. First match
+# wins, mirroring what `source` would see for a single assignment.
+pin_of() {
+  sed -n -E "/^[[:space:]]*$1=\"vllm\\/vllm-openai:[^\"[:space:]]+\"[[:space:]]*(#.*)?\$/{
+    s/^[[:space:]]*$1=\"vllm\\/vllm-openai:([^\"[:space:]]+)\".*/\\1/p
+    q
+  }" "$PIN_FILE"
+}
 current="$(pin_of VLLM_IMAGE_PIN)"
 held="$(pin_of VLLM_IMAGE_PIN_HELD)"
 [ -n "$current" ] || { echo "✗ could not parse VLLM_IMAGE_PIN from $PIN_FILE" >&2; exit 1; }
@@ -125,10 +134,39 @@ join_wrappers() {
   printf '%s' "$out"
 }
 
+# Request probe for a wrapper, chosen from what it declares to vLLM. A pooling
+# runner (`--runner pooling` / `--runner=pooling` on a non-comment line) is an
+# embedder and gets /v1/embeddings. The named entries are wrappers that leave
+# the runner to vLLM's architecture auto-detection (the Nemotron pair) or serve
+# OCR through chat; they come first so a later runner flag cannot flip the
+# reranker onto the embedding probe. Everything else is a generative chat model.
+# Until 2026-10-09 this was a name-only table, so a new pooling wrapper
+# (vllm-embeddinggemma2) silently fell through to a chat probe it cannot serve.
+probe_kind() {
+  local wrapper="$1"
+  case "$wrapper" in
+    vllm-nemotron-rerank) echo rerank; return ;;
+    vllm-glm-ocr|vllm-paddleocr-vl) echo ocr; return ;;
+    vllm-nemotron-embed) echo embedding; return ;;
+  esac
+  if grep -Eq '^[^#]*--runner[[:space:]=]+pooling([^[:alnum:]_-]|$)' "$SERVERS/$wrapper"; then
+    echo embedding
+  else
+    echo chat
+  fi
+}
+
+PROBES=""
+for f in "${WRAPPERS[@]}"; do
+  base="$(basename -- "$f")"
+  PROBES+="${PROBES:+ }$base=$(probe_kind "$base")"
+done
+
 echo "leading pin : $current   [$(join_wrappers "${LEADING[@]}")]"
 [ -n "$held" ] && echo "held pin    : $held   [$(join_wrappers "${HELD_WRAPPERS[@]}")]"
 [ "${#DIGEST_WRAPPERS[@]}" -gt 0 ] && \
   echo "digest pins : [$(join_wrappers "${DIGEST_WRAPPERS[@]}")] (independently owned; no automatic rewrite)"
+echo "probes      : $PROBES"
 echo "hub latest  : $latest"
 
 # Boot one wrapper standalone on a throwaway port/name and wait for /health.
@@ -188,19 +226,11 @@ request_gate() {
     | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(d[0]["id"] if d else "")')" \
     || return 1
   [ -n "$model" ] || return 1
-  case "$wrapper" in
-    vllm-nemotron-embed)
-      kind=embedding endpoint=/v1/embeddings
-      ;;
-    vllm-nemotron-rerank)
-      kind=rerank endpoint=/v1/rerank
-      ;;
-    vllm-glm-ocr|vllm-paddleocr-vl)
-      kind=ocr endpoint=/v1/chat/completions
-      ;;
-    *)
-      kind=chat endpoint=/v1/chat/completions
-      ;;
+  kind="$(probe_kind "$wrapper")"
+  case "$kind" in
+    embedding) endpoint=/v1/embeddings ;;
+    rerank) endpoint=/v1/rerank ;;
+    *) endpoint=/v1/chat/completions ;;
   esac
   payload="$(python3 - "$kind" "$model" <<'PY'
 import json
@@ -208,7 +238,8 @@ import sys
 
 kind, model = sys.argv[1:]
 if kind == "embedding":
-    body = {"model": model, "input": "vllm update smoke"}
+    # Two inputs, so the response must prove one consistent positive dimension.
+    body = {"model": model, "input": ["vllm update smoke", "vllm update smoke, second input"]}
 elif kind == "rerank":
     body = {
         "model": model,
@@ -245,11 +276,16 @@ kind=sys.argv[1]
 body=json.load(sys.stdin)
 if kind == "embedding":
     data=body.get("data")
-    vector=data[0].get("embedding") if isinstance(data, list) and data and isinstance(data[0], dict) else None
-    ok=isinstance(vector, list) and bool(vector) and all(
-        isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-        for value in vector
-    )
+    vectors=[item.get("embedding") if isinstance(item, dict) else None
+             for item in data] if isinstance(data, list) else []
+    dims={len(vector) for vector in vectors if isinstance(vector, list)}
+    ok=(len(vectors) == 2
+        and all(isinstance(vector, list) for vector in vectors)
+        and len(dims) == 1 and min(dims) > 0
+        and all(
+            isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+            for vector in vectors for value in vector
+        ))
 elif kind == "rerank":
     results=body.get("results")
     result=results[0] if isinstance(results, list) and results else None
@@ -384,7 +420,9 @@ fi
 if [ "$leading_ok" = 1 ]; then
   previous="$current"
   # --follow-symlinks: the pin file is a dotfiles symlink; plain -i would replace it.
-  sed -i --follow-symlinks "s|^VLLM_IMAGE_PIN=.*|VLLM_IMAGE_PIN=\"vllm/vllm-openai:$latest\"|" "$PIN_FILE"
+  # Same line forms pin_of accepts. The whole line is rewritten: a trailing rollback
+  # note describes the previous pin and would be stale after the bump.
+  sed -i --follow-symlinks "s|^[[:space:]]*VLLM_IMAGE_PIN=.*|VLLM_IMAGE_PIN=\"vllm/vllm-openai:$latest\"|" "$PIN_FILE"
   current="$latest"
   if [ "$held_ok" = 1 ] && [ "$digest_ok" = 1 ] \
       && all_configured_current; then

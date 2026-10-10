@@ -60,6 +60,19 @@ Fix a bug → write a regression test immediately (TDD preferred).
 - Before committing, review every newly added executable and scratch artifact. Explicitly remove
   those used only during the investigation and report any intentionally retained script with its
   owner and invocation path.
+- Keep bulk builds, tool caches, binaries, model data, source snapshots, archives, databases, and
+  acceptance/benchmark fixtures in verified disk-backed, owner-specific storage such as
+  `${XDG_CACHE_HOME:-$HOME/.cache}/agent-tmp/<project-or-agent>/`. Set each child’s `TMPDIR` and
+  relevant tool build/output roots there before launch; verify the filesystem, since a cache path
+  or `TMPDIR` may itself be RAM-backed.
+- Use `/tmp`, tmpfs/ramfs, and runtime directories only for small, short-lived scratch, sockets, or
+  control metadata—not bulk data. Keep fixture/build data on disk even when a Unix socket needs
+  a short path.
+- Track ownership of temporary directories and leases; promptly remove owned obsolete artifacts
+  after retaining needed evidence through existing project disk handoffs. Before cleanup, check
+  ownership and actual references; preserve unowned/live data and byte-verify any needed archive.
+  Do not stop services or processes to reclaim it. Report filesystem space freed separately from
+  physical RAM recovered.
 
 ## Documentation and web research — never answer third-party facts from memory
 - **Known libraries, SDKs, CLIs, and developer tools → Context7 MCP first.** Resolve the library ID,

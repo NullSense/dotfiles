@@ -69,7 +69,7 @@ docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 # --entrypoint bash: install the shared-memory plugin, then exec the normal serve path.
 # Copied to /tmp because the ro mount can't take egg-info; --no-build-isolation keeps
 # the install offline (setuptools ships in the image).
-exec docker run --rm --init --gpus all --name "$CONTAINER_NAME" \
+exec docker run --rm --init "${VLLM_GPU_ARGS[@]}" --name "$CONTAINER_NAME" \
   "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
   -v "$PLUGIN_DIR:/smem-plugin:ro" \
   --ipc=host \

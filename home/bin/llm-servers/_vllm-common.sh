@@ -69,6 +69,27 @@ VLLM_ENV=(
   -e VLLM_NO_USAGE_STATS=1
 )
 
+# A package upgrade can replace userspace before the loaded kernel driver.
+# A retained, byte-verified compute-library snapshot lets an opted-in wrapper
+# keep serving until reboot, without changing host libraries or other models.
+# Snapshot owner: ~/.cache/vllm/driver-compat/<loaded-version>/; populate from
+# a still-running GPU container, never from a different driver version.
+VLLM_GPU_ARGS=(--gpus all)
+vllm_loaded_driver=$(sed -nE 's/^NVRM version:.* ([0-9]+\.[0-9]+\.[0-9]+) .*$/\1/p' /proc/driver/nvidia/version 2>/dev/null || true)
+vllm_driver_root="${VLLM_DRIVER_COMPAT_ROOT:-$vllm_cache_root_host/driver-compat/$vllm_loaded_driver}"
+if [[ -n "$vllm_loaded_driver" && -d "$vllm_driver_root" ]]; then
+  for vllm_driver_lib in libcuda libnvidia-ml libnvidia-ptxjitcompiler libnvidia-gpucomp; do
+    if [[ ! -f "$vllm_driver_root/$vllm_driver_lib.so.$vllm_loaded_driver" ]]; then
+      printf 'incomplete retained NVIDIA driver snapshot: %s\n' "$vllm_driver_root" >&2
+      return 2
+    fi
+  done
+  VLLM_GPU_ARGS=(--runtime=runc --device /dev/nvidia0 --device /dev/nvidiactl --device /dev/nvidia-uvm --device /dev/nvidia-uvm-tools)
+  VLLM_MOUNTS+=(-v "$vllm_driver_root:/usr/local/nvidia/lib64:ro")
+  VLLM_ENV+=(-e NVIDIA_VISIBLE_DEVICES=void -e LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/cuda/lib64)
+  printf 'using retained NVIDIA compute libraries for loaded driver %s\n' "$vllm_loaded_driver" >&2
+fi
+
 # Opt-in sleep mode keeps the container and CUDA context alive while releasing
 # model allocations. It is intentionally not enabled globally: llama-swap must
 # use its matching vllm-wrapper lifecycle before a model may opt in.

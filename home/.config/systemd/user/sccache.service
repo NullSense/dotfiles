@@ -6,12 +6,8 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=SCCACHE_IDLE_TIMEOUT=0
 Environment=SCCACHE_CLIENT_SIDE=1
-# Keep the shared cache at 40 GiB to preserve room for active build outputs
-# on the workstation's root filesystem.
-Environment=SCCACHE_CACHE_SIZE=40G
-# The config file's cache.disk.dir names the same directory; a btrfs subvolume
-# so home snapshots never retain evicted entries.
-Environment=SCCACHE_DIR=%h/.cache/sccache-vol
+# Cache directory and size come only from ~/.config/sccache/config; an
+# Environment= copy here would silently override it.
 # Same binary cargo's rustc-wrapper execs (pacman's /usr/bin/sccache), so the
 # server and its clients are always one version. An unmanaged ~/.local/bin copy
 # ran here until 2026-10-08 and was left at 0.17.0 while pacman moved to 0.18.0.

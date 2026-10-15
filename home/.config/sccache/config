@@ -2,5 +2,8 @@
 # A btrfs subvolume of its own, so the home snapshots never retain evicted
 # cache entries (the same reason the build trees live outside them).
 dir = "/home/nullsense/.cache/sccache-vol"
-# Keep the shared daemon cache within the workstation's disk budget.
-size = 42949672960 # 40 GiB
+# The one cache-size authority (the systemd unit does not restate it). At
+# 40 GiB the cache sat at its cap and evicted entries between builds; Cargo
+# targets, not this cache, are what filled /home, and they are now bounded by
+# sift-target-maintenance.timer. Takes effect when the server restarts.
+size = 107374182400 # 100 GiB

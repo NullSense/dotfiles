@@ -54,6 +54,15 @@
 # (rustc's jobserver; sccache ignores it). CARGO_HOME is removed like the
 # rest: a job-local CARGO_HOME would otherwise split workspace crates.
 #
+# CARGO_MANIFEST_DIR stays in the key on purpose. It differs per checkout only
+# for workspace crates, and so does the compile's working directory, which
+# sccache 0.18 hashes itself (Rust ignores basedirs; checked in
+# src/compiler/rust.rs generate_hash_key and cargo's util/workspace.rs
+# path_args, 2026-10-15). Their outputs embed the checkout path too
+# (env!("CARGO_MANIFEST_DIR") fixture lookups, debuginfo), so a cross-worktree
+# hit would be wrong, not merely missed. Registry crates compile in their
+# registry directory and already hit from every checkout.
+#
 # Not covered by step 3: proc macros that read the environment through
 # std::env at expansion time are not recorded as env-dep. A 2026-10-08 survey
 # of ~/.cargo/registry and the host-side dependency closure of every proc

@@ -1,11 +1,18 @@
 [Unit]
-Description=Bound Sift Cargo targets across worktrees
+Description=Reap finished Sift worktrees and bound their Cargo targets
+# bash runs the scripts, so they need not carry an executable bit; an
+# executable-bit condition here silently skipped every run since it was added.
 ConditionPathIsDirectory=%h/Programming/sift/.git
-ConditionFileIsExecutable=%h/Programming/sift/scripts/target-maintenance.sh
+ConditionPathExists=%h/Programming/sift/scripts/target-maintenance.sh
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/Programming/sift
+# Policy lives in the repository; this unit is only the trigger. Worktree
+# removal is fail-closed and keeps its refusals in the journal, so a kept
+# worktree never stops the target bound that follows ('-' prefix).
+ExecStart=-/usr/bin/bash %h/Programming/sift/scripts/worktree-lifecycle.sh reap
+ExecStart=-/usr/bin/bash %h/Programming/sift/scripts/worktree-lifecycle.sh prune-cache
 ExecStart=/usr/bin/bash %h/Programming/sift/scripts/target-maintenance.sh --all-worktrees
 Nice=15
 IOSchedulingClass=idle

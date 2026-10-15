@@ -21,6 +21,12 @@ repairs links and preserves conflicting files under `~/.local/state/dotfiles-bac
 - New dotfiles go under the literal `home/` path, then run `~/.dotfiles/install.sh --install`.
 - Repository-only documentation and bootstrap tools stay outside `home/` and are not linked.
 
+## Delegation
+- The lead agent plans at high reasoning effort and gives each sub-agent a concrete plan,
+  owned files, acceptance criteria, and a narrow validation budget before dispatch.
+- Use medium reasoning effort for delegated implementation work. The lead agent orchestrates,
+  reviews results, and owns integration; keep expensive validation coordinated across agents.
+
 ## Git
 Commit finished, verified work without being asked. For dotfiles, commit from `~/.dotfiles` and
 push deliberately; a push publishes immediately to a public repository. The dotfiles index is

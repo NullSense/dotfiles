@@ -134,11 +134,15 @@ hl.window_rule({
 })
 
 -- --- Idle inhibit ------------------------------------------------------------
--- Native windowrule-based idleinhibit was rejected by your Hyprland version
--- ("invalid field type idleinhibit"), so we rely on hypridle's
--- `inhibit_sources = audio` (already set in hypridle.conf) — anything emitting
--- audio (mpv, browsers, games) keeps the session awake. Window-class targeting
--- would require a Hyprland version with the v1.0+ rule schema.
+-- Fullscreen video/games keep the session awake (no dim/lock/power-off mid-movie). Compositor-level
+-- Wayland idle-inhibit, honoured by hypridle (ignore_systemd_inhibit/dbus stay false). Scoped to
+-- media/game classes so a static fullscreen terminal still dims (OLED burn-in).
+hl.window_rule({
+    match = {
+        class = "^(helium|mpv|steam_app_.*)$",
+    },
+    idle_inhibit = "fullscreen",
+})
 
 -- --- OLED VRR flicker ---------------------------------------------------------
 -- Fullscreen video triggered visible brightness flicker on the AORUS FO32U2;

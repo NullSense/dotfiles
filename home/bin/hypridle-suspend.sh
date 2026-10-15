@@ -48,6 +48,8 @@ done < <(ddcutil detect 2>/dev/null)
 : "${msi_num:=}"  # (was: ddcutil --display "$msi_num" setvcp 10 0)
 
 wait
-# DPMS only the OLED (DP-1). Blanket `dpms off` also parked DP-2 and fed the race.
-"$HOME/bin/hypr-dispatch" dpms off DP-1 >/dev/null 2>&1 \
-    || hyprctl dispatch dpms off DP-1 >/dev/null 2>&1
+# NO `dpms off` here (2026-10-15). The OLED is already hardware-off via DDC D6=04 above, and a
+# DPMS cycle is what killed Hyprland: the wake-side modeset ("Modesetting DP-1") derefs a null
+# plane buffer in libaquamarine 0.15.1 (SEGV -> uwsm SIGHUP -> SDDM start-limit; see
+# aquamarine#434, omarchy#15440). Skipping DPMS removes that disable/modeset round trip
+# entirely; the compositor keeps scanning out to a panel that is dark.

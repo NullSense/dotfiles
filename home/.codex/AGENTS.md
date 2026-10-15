@@ -77,9 +77,12 @@ Fix a bug → write a regression test immediately (TDD preferred).
 - **Clean up after yourself before reporting done.** Every lane or sub-agent removes what it
   created: its `TMPDIR`/scratch directories, test stacks and containers (never their volumes),
   builder containers, throwaway databases, and `target/` dirs of its own disposable worktrees.
-  The coordinator verifies this in each hand-back. A refused cleanup is a permission bug: report
-  the exact command and the matching rule so the user can fix the settings. Never route it
-  through another agent.
+  Delete through `agent-clean` (`agent-clean path …`, `agent-clean [--running] docker …`). It is the
+  only allowlisted delete. `rm -rf` on absolute or home paths is denied, and the tool refuses
+  anything in use or outside agent-tmp, claude-tmp or worktree `target/`. Prefer an owner tool where
+  one exists (e.g. `sift-test-infra down`). The coordinator verifies cleanup in each hand-back.
+  A refused cleanup is a permission bug: report the exact command so the user can fix the
+  settings. Never route it through another agent.
 - Track ownership of temporary directories and leases; promptly remove owned obsolete artifacts
   after retaining needed evidence through existing project disk handoffs. Before cleanup, check
   ownership and actual references; preserve unowned/live data and byte-verify any needed archive.

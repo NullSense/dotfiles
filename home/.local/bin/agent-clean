@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""agent-clean: the one sanctioned way for agents to delete what they created.
+
+Claude Code denies `rm -rf` on absolute and home paths. This tool is allowlisted instead, and it
+deletes only inside fixed roots, only things no running process is using:
+
+  agent-clean path PATH...          a directory or file under an allowed root (never the root itself)
+  agent-clean docker NAME...        a stopped test-stack or builder container (never volumes,
+                                    never services); add --running for your own finished stack
+  agent-clean --dry-run ...         show what would be removed
+
+Allowed path roots: ~/.cache/agent-tmp/<x>, ~/.cache/claude-tmp/<x>, and the `target/` dir
+(or anything inside it) of a worktree under ~/Programming/.sift-worktrees/.
+"""
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+TMP_ROOTS = [HOME / ".cache/agent-tmp", HOME / ".cache/claude-tmp"]
+WORKTREES = HOME / "Programming/.sift-worktrees"
+CONTAINER_OK = re.compile(
+    r"^(sift-test-[0-9a-f]+-[a-z0-9-]+"
+    r"|[a-z0-9][a-z0-9_.-]*-(postgres|qdrant)-test-1"
+    r"|sift-la-[a-z0-9_.-]+"
+    r"|sift-lifecycle-[a-z0-9_.-]+"
+    r"|buildx_buildkit_sift-[a-z0-9_.-]+)$"
+)
+CONTAINER_NEVER = re.compile(r"(oracle|infra|litellm|vllm|llama|hindsight|grafana|prometheus|loki|tempo)", re.I)
+
+
+def fail(msg):
+    print(f"agent-clean: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def allowed_path(raw):
+    p = Path(os.path.abspath(os.path.expanduser(raw)))
+    # Resolve the parent, never the final component: a symlink is removed as a link and never
+    # followed, and `..`/symlinked parents cannot escape the roots.
+    real = Path(os.path.realpath(p.parent)) / p.name
+    if any(root in real.parents for root in TMP_ROOTS):
+        return real
+    if WORKTREES in real.parents:
+        rel = real.relative_to(WORKTREES)
+        if len(rel.parts) >= 2 and rel.parts[1] == "target":
+            return real
+    fail(f"refused: {raw} is outside the allowed roots (agent-tmp, claude-tmp, worktree target/)")
+
+
+def users_of(path):
+    prefix = str(path)
+    hits = set()
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit() or int(proc.name) == os.getpid():
+            continue
+        try:
+            links = [proc / "cwd", proc / "root"] + list((proc / "fd").iterdir())
+        except OSError:
+            continue
+        for link in links:
+            try:
+                target = os.readlink(link)
+            except OSError:
+                continue
+            if target == prefix or target.startswith(prefix + "/"):
+                hits.add(int(proc.name))
+                break
+    return sorted(hits)
+
+
+def size_of(path):
+    if path.is_symlink() or path.is_file():
+        return path.lstat().st_size
+    total = 0
+    for dirpath, _, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(dirpath, f)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def clean_paths(raws, dry):
+    freed = 0
+    for raw in raws:
+        path = allowed_path(raw)
+        if not path.exists() and not path.is_symlink():
+            print(f"absent  {path}")
+            continue
+        pids = users_of(path)
+        if pids:
+            fail(f"refused: {path} is in use by pid(s) {pids}")
+        size = size_of(path)
+        if not dry:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        freed += size
+        print(f"{'would remove' if dry else 'removed'} {path} ({size / 2**30:.2f} GiB)")
+    print(f"total {freed / 2**30:.2f} GiB")
+
+
+def clean_containers(names, dry, running_ok):
+    for name in names:
+        if CONTAINER_NEVER.search(name) or not CONTAINER_OK.match(name):
+            fail(f"refused: container {name} is not an agent test stack or builder")
+        state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name],
+                               capture_output=True, text=True)
+        if state.returncode != 0:
+            print(f"absent  container {name}")
+            continue
+        if state.stdout.strip() == "true" and not running_ok:
+            fail(f"refused: container {name} is running; pass --running only for a stack you created "
+                 "and have finished with (prefer the owner tool, e.g. `sift-test-infra down`)")
+        if dry:
+            print(f"would remove container {name}")
+            continue
+        # `docker rm -f` without `-v`: named and anonymous volumes are kept.
+        subprocess.run(["docker", "rm", "-f", name], check=True)
+
+
+def main(argv):
+    dry = "--dry-run" in argv
+    running_ok = "--running" in argv
+    args = [a for a in argv if a not in ("--dry-run", "--running")]
+    if len(args) < 2 or args[0] not in ("path", "docker"):
+        fail("usage: agent-clean [--dry-run] path PATH... | [--dry-run] [--running] docker NAME...")
+    if args[0] == "path":
+        clean_paths(args[1:], dry)
+    else:
+        clean_containers(args[1:], dry, running_ok)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -11,7 +11,8 @@ deletes only inside fixed roots, only things no running process is using:
 
 Allowed path roots: ~/.cache/agent-tmp/<x>, ~/.cache/claude-tmp/<x>, ~/.cache/sift-la/<x>
 (local-acceptance stack data), and the `target/` dir
-(or anything inside it) of a worktree under ~/Programming/.sift-worktrees/.
+(or anything inside it) of a worktree under ~/Programming/.sift-worktrees/. Root-owned files left
+by rootful Docker/BuildKit under an allowed path are removed through a throwaway alpine container.
 """
 import os
 import re
@@ -28,8 +29,13 @@ CONTAINER_OK = re.compile(
     r"|[a-z0-9][a-z0-9_.-]*-(postgres|qdrant)-test-1"
     r"|sift-la-[a-z0-9_.-]+"
     r"|sift-lifecycle-[a-z0-9_.-]+"
-    r"|buildx_buildkit_sift-[a-z0-9_.-]+)$"
+    r"|buildx_buildkit_sift-[a-z0-9_.-]+"
+    r"|buildx_buildkit_oracle-[a-z0-9_.-]+"
+    r"|oracle-cache-[a-z0-9_.-]+-[0-9]{8})$"
 )
+# Agent-owned name prefixes exempt from CONTAINER_NEVER: oracle's agent build/acceptance containers
+# carry a dated `oracle-cache-…-YYYYMMDD` name; its services (oracle-postgres-dev, …) don't.
+CONTAINER_AGENT_OWNED = re.compile(r"^(oracle-cache-|buildx_buildkit_oracle-)")
 CONTAINER_NEVER = re.compile(r"(oracle|infra|litellm|vllm|llama|hindsight|grafana|prometheus|loki|tempo)", re.I)
 
 
@@ -105,6 +111,18 @@ def size_of(path):
     return total
 
 
+def remove_root_owned(path):
+    """Finish a removal that hit root-owned files, e.g. the runc/overlay state a rootful BuildKit
+    leaves in a bind-mounted state dir. The path was already validated and its parent resolved, so
+    only the parent is mounted into a throwaway container, and `rm -rf` never follows symlinks."""
+    print(f"root-owned files under {path}; removing through a throwaway container")
+    subprocess.run(["docker", "run", "--rm", "--network", "none",
+                    "-v", f"{path.parent}:/parent", "alpine:3",
+                    "rm", "-rf", "--", f"/parent/{path.name}"], check=True)
+    if path.exists() or path.is_symlink():
+        fail(f"could not remove {path}")
+
+
 def clean_paths(raws, dry):
     freed = 0
     for raw in raws:
@@ -121,7 +139,10 @@ def clean_paths(raws, dry):
         size = size_of(path)
         if not dry:
             if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
+                try:
+                    shutil.rmtree(path)
+                except PermissionError:
+                    remove_root_owned(path)
             else:
                 path.unlink()
         freed += size
@@ -131,7 +152,8 @@ def clean_paths(raws, dry):
 
 def clean_containers(names, dry, running_ok):
     for name in names:
-        if CONTAINER_NEVER.search(name) or not CONTAINER_OK.match(name):
+        never = CONTAINER_NEVER.search(name) and not CONTAINER_AGENT_OWNED.match(name)
+        if never or not CONTAINER_OK.match(name):
             fail(f"refused: container {name} is not an agent test stack or builder")
         state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name],
                                capture_output=True, text=True)

@@ -74,6 +74,12 @@ Fix a bug → write a regression test immediately (TDD preferred).
 - Use `/tmp`, tmpfs/ramfs, and runtime directories only for small, short-lived scratch, sockets, or
   control metadata—not bulk data. Keep fixture/build data on disk even when a Unix socket needs
   a short path.
+- **Clean up after yourself before reporting done.** Every lane or sub-agent removes what it
+  created: its `TMPDIR`/scratch directories, test stacks and containers (never their volumes),
+  builder containers, throwaway databases, and `target/` dirs of its own disposable worktrees.
+  The coordinator verifies this in each hand-back. A refused cleanup is a permission bug: report
+  the exact command and the matching rule so the user can fix the settings. Never route it
+  through another agent.
 - Track ownership of temporary directories and leases; promptly remove owned obsolete artifacts
   after retaining needed evidence through existing project disk handoffs. Before cleanup, check
   ownership and actual references; preserve unowned/live data and byte-verify any needed archive.

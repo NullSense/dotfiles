@@ -9,7 +9,8 @@ deletes only inside fixed roots, only things no running process is using:
                                     never services); add --running for your own finished stack
   agent-clean --dry-run ...         show what would be removed
 
-Allowed path roots: ~/.cache/agent-tmp/<x>, ~/.cache/claude-tmp/<x>, and the `target/` dir
+Allowed path roots: ~/.cache/agent-tmp/<x>, ~/.cache/claude-tmp/<x>, ~/.cache/sift-la/<x>
+(local-acceptance stack data), and the `target/` dir
 (or anything inside it) of a worktree under ~/Programming/.sift-worktrees/.
 """
 import os
@@ -20,7 +21,7 @@ import sys
 from pathlib import Path
 
 HOME = Path.home()
-TMP_ROOTS = [HOME / ".cache/agent-tmp", HOME / ".cache/claude-tmp"]
+TMP_ROOTS = [HOME / ".cache/agent-tmp", HOME / ".cache/claude-tmp", HOME / ".cache/sift-la"]
 WORKTREES = HOME / "Programming/.sift-worktrees"
 CONTAINER_OK = re.compile(
     r"^(sift-test-[0-9a-f]+-[a-z0-9-]+"
@@ -72,6 +73,25 @@ def users_of(path):
     return sorted(hits)
 
 
+def containers_mounting(path):
+    """Running containers whose bind-mount source is at or under `path` (their processes see
+    container-namespace paths, so /proc cannot show this use)."""
+    ids = subprocess.run(["docker", "ps", "-q"], capture_output=True, text=True)
+    if ids.returncode != 0 or not ids.stdout.split():
+        return []
+    out = subprocess.run(
+        ["docker", "inspect", "-f", "{{.Name}}{{range .Mounts}} {{.Source}}{{end}}", *ids.stdout.split()],
+        capture_output=True, text=True,
+    )
+    prefix = str(path)
+    hits = []
+    for line in out.stdout.splitlines():
+        name, *sources = line.split()
+        if any(s == prefix or s.startswith(prefix + "/") for s in sources):
+            hits.append(name.lstrip("/"))
+    return hits
+
+
 def size_of(path):
     if path.is_symlink() or path.is_file():
         return path.lstat().st_size
@@ -95,6 +115,9 @@ def clean_paths(raws, dry):
         pids = users_of(path)
         if pids:
             fail(f"refused: {path} is in use by pid(s) {pids}")
+        mounts = containers_mounting(path)
+        if mounts:
+            fail(f"refused: {path} is bind-mounted by running container(s) {mounts}")
         size = size_of(path)
         if not dry:
             if path.is_dir() and not path.is_symlink():

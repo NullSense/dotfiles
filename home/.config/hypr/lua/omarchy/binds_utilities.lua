@@ -19,7 +19,8 @@ hl.bind("XF86Calculator", hl.dsp.exec_cmd("gnome-calculator"), { description = "
 hl.bind("SUPER + SHIFT + SPACE", hl.dsp.exec_cmd("omarchy-toggle-waybar"), { description = "Toggle top bar" })
 hl.bind("SUPER + CTRL + SPACE", hl.dsp.exec_cmd("omarchy-menu background"), { description = "Theme background menu" })
 hl.bind("SUPER + SHIFT + CTRL + SPACE", hl.dsp.exec_cmd("omarchy-menu theme"), { description = "Theme menu" })
-hl.bind("SUPER + BACKSPACE", hl.dsp.exec_cmd("omarchy-hyprland-active-window-transparency-toggle"), { description = "Toggle window transparency" })
+-- Local fix: the upstream shell helper still sends hyprlang dispatch syntax.
+hl.bind("SUPER + BACKSPACE", hl.dsp.window.set_prop({ prop = "opaque", value = "toggle" }), { description = "Toggle window transparency" })
 hl.bind("SUPER + SHIFT + BACKSPACE", hl.dsp.exec_cmd("omarchy-hyprland-window-gaps-toggle"), { description = "Toggle window gaps" })
 hl.bind("SUPER + CTRL + BACKSPACE", hl.dsp.exec_cmd("omarchy-hyprland-window-single-square-aspect-toggle"), { description = "Toggle single-window square aspect" })
 

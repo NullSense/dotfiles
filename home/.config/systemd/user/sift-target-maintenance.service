@@ -13,6 +13,13 @@ WorkingDirectory=%h/Programming/sift
 # worktree never stops the target bound that follows ('-' prefix).
 ExecStart=-/usr/bin/bash %h/Programming/sift/scripts/worktree-lifecycle.sh reap
 ExecStart=-/usr/bin/bash %h/Programming/sift/scripts/worktree-lifecycle.sh prune-cache
-ExecStart=/usr/bin/bash %h/Programming/sift/scripts/target-maintenance.sh --all-worktrees
+# Each checkout bounds its own (path-bound) target with its OWN script. One
+# script run with --all-worktrees from the main checkout judged every target by
+# whatever branch the main checkout had checked out: an older copy there refused
+# targets the current rules accept, and the unit failed every hour while
+# worktree targets sat over the cap (2026-10-16). Pre-commit snapshot worktrees
+# have no target and are skipped by the script itself.
+ExecStart=/usr/bin/bash -c 'status=0; while IFS= read -r tree; do [ -f "$$tree/scripts/target-maintenance.sh" ] || continue; (cd "$$tree" && bash scripts/target-maintenance.sh) || status=1; done < <(git -C %h/Programming/sift worktree list --porcelain | sed -n "s/^worktree //p"); exit "$$status"'
+
 Nice=15
 IOSchedulingClass=idle

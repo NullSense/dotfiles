@@ -13,6 +13,7 @@ WorkingDirectory=%h/Programming/sift
 # worktree never stops the target bound that follows ('-' prefix).
 ExecStart=-/usr/bin/bash %h/Programming/sift/scripts/worktree-lifecycle.sh reap
 ExecStart=-/usr/bin/bash %h/Programming/sift/scripts/worktree-lifecycle.sh prune-cache
+ExecStart=-/usr/bin/bash %h/Programming/sift/scripts/worktree-lifecycle.sh prune-images
 # Each checkout bounds its own (path-bound) target with its OWN script. One
 # script run with --all-worktrees from the main checkout judged every target by
 # whatever branch the main checkout had checked out: an older copy there refused

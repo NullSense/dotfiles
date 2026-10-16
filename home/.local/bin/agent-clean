@@ -13,10 +13,14 @@ Allowed path roots: ~/.cache/agent-tmp/<x>, ~/.cache/claude-tmp/<x>, ~/.cache/si
 (local-acceptance stack data), and the `target/` dir
 (or anything inside it) of a worktree under ~/Programming/.sift-worktrees/. Root-owned files left
 by rootful Docker/BuildKit under an allowed path are removed through a throwaway alpine container.
+Python bytecode files directly inside __pycache__ in ~/bin, ~/.local/bin and
+their dotfile source directories are also allowed. Whole cache directories must
+contain only owned regular .pyc/.pyo files; links and other contents are refused.
 """
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +28,8 @@ from pathlib import Path
 HOME = Path.home()
 TMP_ROOTS = [HOME / ".cache/agent-tmp", HOME / ".cache/claude-tmp", HOME / ".cache/sift-la"]
 WORKTREES = HOME / "Programming/.sift-worktrees"
+BYTECODE_ROOTS = [HOME / "bin", HOME / ".local/bin", HOME / ".dotfiles/home/bin",
+                  HOME / ".dotfiles/home/.local/bin"]
 CONTAINER_OK = re.compile(
     r"^(sift-test-[0-9a-f]+-[a-z0-9-]+"
     r"|[a-z0-9][a-z0-9_.-]*-(postgres|qdrant)-test-1"
@@ -44,6 +50,25 @@ def fail(msg):
     sys.exit(2)
 
 
+def allowed_bytecode(path):
+    """Narrow exception for generated command caches, never arbitrary home files."""
+    cache = path if path.name == "__pycache__" else path.parent
+    if cache.name != "__pycache__" or cache.parent not in BYTECODE_ROOTS:
+        return False
+    if path.is_symlink():
+        return False
+    if not path.exists():
+        return path == cache or path.suffix in (".pyc", ".pyo")
+    if path == cache:
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            return False
+        return all(allowed_bytecode(child) for child in path.iterdir())
+    info = path.lstat()
+    return (path.suffix in (".pyc", ".pyo") and stat.S_ISREG(info.st_mode)
+            and info.st_uid == os.getuid())
+
+
 def allowed_path(raw):
     p = Path(os.path.abspath(os.path.expanduser(raw)))
     # Resolve the parent, never the final component: a symlink is removed as a link and never
@@ -55,7 +80,10 @@ def allowed_path(raw):
         rel = real.relative_to(WORKTREES)
         if len(rel.parts) >= 2 and rel.parts[1] == "target":
             return real
-    fail(f"refused: {raw} is outside the allowed roots (agent-tmp, claude-tmp, worktree target/)")
+    if allowed_bytecode(real):
+        return real
+    fail(f"refused: {raw} is outside the allowed roots or approved Python bytecode caches "
+         "(agent-tmp, claude-tmp, worktree target/, command __pycache__)")
 
 
 def users_of(path):

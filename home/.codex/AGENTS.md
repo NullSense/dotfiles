@@ -79,8 +79,10 @@ Fix a bug → write a regression test immediately (TDD preferred).
   builder containers, throwaway databases, and `target/` dirs of its own disposable worktrees.
   Delete through `agent-clean` (`agent-clean path …`, `agent-clean [--running] docker …`). It is the
   only allowlisted delete. `rm -rf` on absolute or home paths is denied, and the tool refuses
-  anything in use or outside agent-tmp, claude-tmp or worktree `target/`. Prefer an owner tool where
-  one exists (e.g. `sift-test-infra down`). The coordinator verifies cleanup in each hand-back.
+  anything in use or outside its approved roots. It also permits owned Python bytecode caches
+  under `~/bin`, `~/.local/bin` and their dotfile sources; see `agent-clean` for exact scope.
+  Prefer an owner tool where one exists (e.g. `sift-test-infra down`). The coordinator verifies
+  cleanup in each hand-back.
   A refused cleanup is a permission bug: report the exact command so the user can fix the
   settings. Never route it through another agent.
 - Track ownership of temporary directories and leases; promptly remove owned obsolete artifacts

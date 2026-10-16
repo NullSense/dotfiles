@@ -1,0 +1,400 @@
+#!/usr/bin/python3
+"""Native capture audio setup and post-recording review, called by screenrecord."""
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+
+# Helpers are imported from the dotfile tree; keep generated caches out of it.
+sys.dont_write_bytecode = True
+import gi
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gio, GLib, Gtk
+
+loader = importlib.machinery.SourceFileLoader("capture_share", str(Path(__file__).resolve().with_name("screenrecord-share")))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+share = importlib.util.module_from_spec(spec)
+loader.exec_module(share)
+
+
+def box(vertical=True, spacing=10):
+    return Gtk.Box(orientation=Gtk.Orientation.VERTICAL if vertical else Gtk.Orientation.HORIZONTAL, spacing=spacing)
+
+
+def label(text):
+    return Gtk.Label(label=text, xalign=0, wrap=True)
+
+
+def button(text, callback):
+    widget = Gtk.Button(label=text)
+    widget.connect("clicked", callback)
+    return widget
+
+
+def row(parent, text, widget):
+    line = box(False)
+    name = label(text)
+    name.set_size_request(125, -1)
+    line.append(name)
+    widget.set_hexpand(True)
+    line.append(widget)
+    parent.append(line)
+
+
+def entry(placeholder=""):
+    return Gtk.Entry(placeholder_text=placeholder)
+
+
+def audio_devices():
+    result = subprocess.run(["gpu-screen-recorder", "--list-audio-devices"], check=True,
+                            capture_output=True, text=True, timeout=8)
+    devices = []
+    for line in result.stdout.splitlines():
+        name, sep, description = line.partition("|")
+        if sep and name and "\n" not in name:
+            devices.append((name if name.startswith("default_") else "device:" + name, description))
+    return devices or [("default_output", "Default output"), ("default_input", "Default input")]
+
+
+class AudioSetup(Gtk.ApplicationWindow):
+    def __init__(self, app, args):
+        super().__init__(application=app, title="Recording · Audio setup", default_width=580)
+        self.result = None
+        self.settings = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "screenrecord/audio.json"
+        try:
+            saved = json.loads(self.settings.read_text())
+        except (OSError, ValueError):
+            saved = {}
+        devices = audio_devices()
+        self.devices = devices
+        outer = box(spacing=16)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(outer, "set_margin_" + side)(20)
+        self.set_child(outer)
+        outer.append(label("Choose audio, then select the recording area."))
+        self.controls = []
+        for kind, title, default, forced in (("desktop", "Desktop audio", "default_output", args.desktop),
+                                              ("microphone", "Microphone", "default_input", args.microphone)):
+            enabled = Gtk.CheckButton(label=title)
+            enabled.set_active(forced or saved.get(kind + "_enabled", False))
+            choices = devices  # Include monitor/cleaned inputs: user chooses the desired route.
+            dropdown = Gtk.DropDown.new_from_strings([description for _, description in choices])
+            selected = saved.get(kind + "_source", default)
+            dropdown.set_selected(next((i for i, (name, _) in enumerate(choices) if name == selected), 0))
+            dropdown.set_sensitive(enabled.get_active())
+            enabled.connect("toggled", lambda check, drop=dropdown: drop.set_sensitive(check.get_active()))
+            outer.append(enabled)
+            outer.append(dropdown)
+            self.controls.append((kind, enabled, dropdown))
+        outer.append(label("Sources are mixed into one AAC track. No sources selected records silently."))
+        mixer = button("Audio mixer…", lambda _: subprocess.Popen(["pavucontrol"], stdout=subprocess.DEVNULL,
+                                                                    stderr=subprocess.DEVNULL))
+        mixer.set_sensitive(shutil.which("pavucontrol") is not None)
+        outer.append(mixer)
+        outer.append(label("Use the mixer for input/output levels and mute. Those controls affect system audio."))
+        self.remember = Gtk.CheckButton(label="Remember these recording sources")
+        self.remember.set_active(True)
+        outer.append(self.remember)
+        actions = box(False)
+        actions.append(button("Cancel", lambda _: self.close()))
+        start = button("Select area & record", self.accept)
+        start.add_css_class("suggested-action")
+        actions.append(start)
+        outer.append(actions)
+
+    def accept(self, _):
+        sources, settings = [], {}
+        for kind, enabled, dropdown in self.controls:
+            if not self.devices and enabled.get_active():
+                return
+            source = self.devices[dropdown.get_selected()][0] if self.devices else ""
+            settings[kind + "_enabled"] = enabled.get_active()
+            settings[kind + "_source"] = source
+            if enabled.get_active() and source not in sources:
+                sources.append(source)
+        if self.remember.get_active():
+            self.settings.parent.mkdir(parents=True, exist_ok=True)
+            # Only source choices, no credentials or media, in private local state.
+            temporary = self.settings.with_suffix(".new")
+            temporary.write_text(json.dumps(settings))
+            temporary.replace(self.settings)
+        self.result = {"audio": "|".join(sources)}
+        self.close()
+
+
+class Review(Gtk.ApplicationWindow):
+    def __init__(self, app, path):
+        super().__init__(application=app, title="Recording · Review & export", default_width=940, default_height=820)
+        self.path = path.resolve(strict=True)
+        self.duration, video, self.audio = share.probe(self.path)
+        self.busy = False
+        self.cancel_event = threading.Event()
+        self.close_pending = False
+        self.connect("close-request", self.closing)
+        scroll = Gtk.ScrolledWindow()
+        self.set_child(scroll)
+        outer = box(spacing=14)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(outer, "set_margin_" + side)(18)
+        scroll.set_child(outer)
+        outer.append(label(f"{self.path.name} · {self.duration:.2f}s · {self.path.stat().st_size / 1_000_000:.2f} MB"
+                           f" · {video.get('width', '?')}×{video.get('height', '?')} · {'Audio' if self.audio else 'Silent'}"))
+        overlay = Gtk.Overlay()
+        self.video = Gtk.Video()
+        self.video.set_autoplay(False)
+        self.video.set_size_request(-1, 280)
+        overlay.set_child(self.video)
+        self.caption_preview = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
+        self.caption_preview.set_valign(Gtk.Align.END)
+        self.caption_preview.set_halign(Gtk.Align.CENTER)
+        self.caption_preview.set_margin_bottom(48)
+        self.caption_preview.set_max_width_chars(70)
+        overlay.add_overlay(self.caption_preview)
+        outer.append(overlay)
+        self.stream = Gtk.MediaFile.new_for_filename(str(self.path))
+        # GTK's GStreamer backend cannot set volume/mute until prepared.
+        self.stream.connect("notify::prepared", self.prepared)
+        self.stream.connect("notify::error", self.preview_error)
+        self.timer = GLib.timeout_add(100, self.preview_tick)
+        self.connect("destroy", lambda *_: GLib.source_remove(self.timer))
+        self.form = box()
+        outer.append(self.form)
+        self.title = entry("Optional title · used in export filename")
+        self.title.set_max_length(120)
+        row(self.form, "Title", self.title)
+        self.tags = entry("Optional local tags, comma separated")
+        row(self.form, "Tags", self.tags)
+        self.caption = entry("Visible caption · burned into exported video")
+        self.caption.set_max_length(500)
+        self.caption.connect("changed", self.caption_changed)
+        row(self.form, "Caption", self.caption)
+        times = box(False)
+        self.start = Gtk.SpinButton.new_with_range(0, self.duration, .1)
+        self.end = Gtk.SpinButton.new_with_range(0, self.duration, .1)
+        for spin in (self.start, self.end):
+            spin.set_digits(2)
+            spin.connect("value-changed", lambda *_: self.update())
+        self.end.set_value(self.duration)
+        times.append(label("In"))
+        times.append(self.start)
+        times.append(button("Set from playhead", lambda _: self.start.set_value(self.stream.get_timestamp() / 1e6)))
+        times.append(label("Out"))
+        times.append(self.end)
+        times.append(button("Set from playhead", lambda _: self.end.set_value(self.stream.get_timestamp() / 1e6)))
+        row(self.form, "Trim (seconds)", times)
+        playback = box(False)
+        playback.append(button("Preview selection", self.play_selection))
+        playback.append(button("Reset trim", self.reset_trim))
+        self.preview_sound = Gtk.CheckButton(label="Preview sound")
+        self.preview_sound.connect("toggled", lambda c: self.stream.set_muted(not c.get_active() or self.mute.get_active()))
+        playback.append(self.preview_sound)
+        self.mute = Gtk.CheckButton(label="Mute export")
+        self.mute.connect("toggled", self.mute_changed)
+        playback.append(self.mute)
+        self.form.append(playback)
+        self.app_keys = ["discord-free", "signal", "whatsapp-video", "whatsapp-file", "telegram", "telegram-premium",
+                         "discord-basic", "discord-server3", "discord-nitro", "slack", "teams", None]
+        self.destination = Gtk.DropDown.new_from_strings([share.APP_PRESETS[k][0] if k else "Custom / no app limit"
+                                                         for k in self.app_keys])
+        self.destination.connect("notify::selected", self.target_changed)
+        row(self.form, "Destination", self.destination)
+        limits = box(False)
+        self.budget = Gtk.SpinButton.new_with_range(.1, 4000, .5)
+        self.budget.set_digits(1)
+        self.budget.set_value(19)
+        limits.append(self.budget)
+        limits.append(label("MB maximum (decimal)"))
+        self.cap = Gtk.CheckButton(label="Limit size")
+        self.cap.set_active(True)
+        self.cap.connect("toggled", self.cap_changed)
+        limits.append(self.cap)
+        row(self.form, "File size", limits)
+        self.quality = Gtk.DropDown.new_from_strings(["Small · up to 720p", "Balanced · up to 1080p", "Clear · up to 1440p"])
+        self.quality.set_selected(1)
+        row(self.form, "Quality", self.quality)
+        self.folder = entry("Blank: Shared/ beside original")
+        row(self.form, "Output folder", self.folder)
+        self.form.append(label("MP4 · H.264 / AAC · NVIDIA NVENC · 30 fps. Size is checked after export. "
+                               "Title/tags stay in a local sidecar; only the video is attached. "
+                               "WhatsApp Document requires its Document picker. App/account limits may vary."))
+        actions = box(False)
+        self.copy_original = button("Copy original", self.original)
+        actions.append(self.copy_original)
+        self.copy_after = Gtk.CheckButton(label="Copy after export")
+        self.copy_after.set_active(True)
+        actions.append(self.copy_after)
+        self.export_button = button("Export", self.begin_export)
+        self.export_button.add_css_class("suggested-action")
+        actions.append(self.export_button)
+        self.form.append(actions)
+        outer.append(button("Keep saved / close", lambda _: self.close()))
+        self.cancel_button = button("Cancel export", lambda _: self.cancel_event.set())
+        self.cancel_button.set_visible(False)
+        outer.append(self.cancel_button)
+        self.status = label("Original saved. Choose Copy original or Export when ready; closing leaves the clipboard alone.")
+        self.status.set_selectable(True)
+        outer.append(self.status)
+        self.target_changed()
+        self.update()
+
+    def update(self):
+        if not hasattr(self, "copy_original"):
+            return
+        edited = (self.start.get_value() > 0 or self.end.get_value() < self.duration - .01
+                  or self.mute.get_active() or bool(self.caption.get_text()))
+        self.copy_original.set_sensitive(not edited)
+        self.export_button.set_sensitive(self.start.get_value() < self.end.get_value())
+
+    def prepared(self, *_):
+        if self.stream.is_prepared() and not self.stream.get_error():
+            self.stream.set_muted(self.mute.get_active() or not self.preview_sound.get_active())
+            self.video.set_media_stream(self.stream)
+
+    def caption_changed(self, *_):
+        # Escape markup; FFmpeg separately reads caption text from a private file.
+        text = GLib.markup_escape_text(self.caption.get_text())
+        self.caption_preview.set_markup(f'<span foreground="white" background="#202020" size="large">{text}</span>')
+        self.update()
+
+    def mute_changed(self, *_):
+        self.stream.set_muted(self.mute.get_active() or not self.preview_sound.get_active())
+        self.update()
+
+    def target_changed(self, *_):
+        key = self.app_keys[self.destination.get_selected()]
+        if key:
+            self.budget.set_range(.1, share.APP_PRESETS[key][1])
+            self.budget.set_value(share.APP_PRESETS[key][1])
+            self.cap.set_active(True)
+        else:
+            self.budget.set_range(.1, 4000)
+        self.cap.set_sensitive(key is None)
+
+    def cap_changed(self, *_):
+        self.budget.set_sensitive(self.cap.get_active())
+
+    def reset_trim(self, _):
+        self.start.set_value(0)
+        self.end.set_value(self.duration)
+
+    def play_selection(self, _):
+        self.stream.seek(int(self.start.get_value() * 1e6))
+        self.stream.play()
+
+    def preview_tick(self):
+        if self.stream.get_timestamp() / 1e6 >= self.end.get_value() and self.stream.get_playing():
+            self.stream.pause()
+        return True
+
+    def preview_error(self, *_):
+        if self.stream.get_error():
+            self.status.set_text("Preview unavailable: " + str(self.stream.get_error()) + ". Export controls still work.")
+
+    def original(self, _):
+        try:
+            if self.title.get_text() or self.tags.get_text():
+                share.metadata(self.path, title=self.title.get_text(), tags=self.tags.get_text().split(","))
+            share.copy_file(self.path)
+            self.status.set_text("Original copied as a file attachment. Paste into your chat app.")
+        except (OSError, subprocess.CalledProcessError) as error:
+            self.status.set_text(str(error))
+
+    def begin_export(self, _):
+        options = dict(preset=("small", "balanced", "clear")[self.quality.get_selected()],
+                       target_mb=self.budget.get_value() if self.cap.get_active() else None,
+                       app=self.app_keys[self.destination.get_selected()], start=self.start.get_value(),
+                       end=self.end.get_value(), mute=self.mute.get_active(), caption=self.caption.get_text(),
+                       title=self.title.get_text(), tags=self.tags.get_text().split(","),
+                       output_dir=self.folder.get_text().strip() or None, copy=False, cancel_event=self.cancel_event)
+        copy_after = self.copy_after.get_active()
+        self.cancel_event.clear()
+        self.busy = True
+        self.form.set_sensitive(False)
+        self.cancel_button.set_visible(True)
+        self.stream.pause()
+        self.status.set_text("Exporting with NVIDIA… Original preserved. You can cancel.")
+        def worker():
+            try:
+                result, error = share.export(self.path, **options), None
+            except Exception as exc:
+                result, error = None, str(exc)
+            GLib.idle_add(self.finished, result, error, copy_after)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finished(self, result, error, copy_after):
+        self.busy = False
+        self.form.set_sensitive(True)
+        self.cancel_button.set_visible(False)
+        if self.close_pending:
+            self.close()
+            return False
+        if self.cancel_event.is_set():
+            self.status.set_text("Export cancelled. Original preserved; clipboard unchanged.")
+        elif error:
+            self.status.set_text("Export failed: " + error)
+        else:
+            try:
+                if copy_after:
+                    share.copy_file(result)
+                self.status.set_text(f"{'Export copied' if copy_after else 'Export saved'} · "
+                                     f"{result.stat().st_size / 1_000_000:.2f} MB · {result}")
+            except (OSError, subprocess.CalledProcessError) as exc:
+                self.status.set_text(f"Saved {result}; clipboard failed: {exc}")
+        return False
+
+    def closing(self, _):
+        if self.busy:
+            self.close_pending = True
+            self.cancel_event.set()
+            self.status.set_text("Cancelling export before closing…")
+            return True
+        self.stream.pause()
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--audio-setup", action="store_true")
+    parser.add_argument("--desktop", action="store_true")
+    parser.add_argument("--microphone", action="store_true")
+    parser.add_argument("file", nargs="?", type=Path)
+    args = parser.parse_args()
+    if not args.audio_setup and args.file is None:
+        parser.error("Pass a recording or --audio-setup")
+    app_id = "local.screenrecord.Audio" if args.audio_setup else "local.screenrecord.Review"
+    app = Gtk.Application(application_id=app_id, flags=Gio.ApplicationFlags.NON_UNIQUE)
+    window = None
+    def activate(app):
+        nonlocal window
+        try:
+            window = AudioSetup(app, args) if args.audio_setup else Review(app, args.file)
+            window.present()
+        except Exception as error:
+            print(f"screenrecord-review: {error}", file=sys.stderr)
+            share.notify("Recording review unavailable", str(error))
+            app.quit()
+    app.connect("activate", activate)
+    def stop():
+        if window:
+            window.close()
+        else:
+            app.quit()
+        return False
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signum, stop)
+    app.run([])
+    if args.audio_setup and window and window.result is not None:
+        print(json.dumps(window.result))
+        return 0
+    return 1 if args.audio_setup or window is None else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

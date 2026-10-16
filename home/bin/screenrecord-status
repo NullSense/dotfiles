@@ -113,7 +113,7 @@ def payload():
         size = 0
     return {"text": f"{label} {minutes:02}:{seconds:02}", "class": status,
             "tooltip": f"Desktop recording · {size:.1f} MB\n{html.escape(file.name)}\n"
-                       "Left: pause / resume\nRight: stop and copy\nMiddle: share last finished recording"}
+                       "Left: pause / resume\nRight: stop and review\nMiddle: review last finished recording"}
 
 
 def watch():

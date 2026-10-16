@@ -196,6 +196,21 @@ hl.window_rule({
 })
 
 -- --- Pickers (clipboard/screenshot) — large floating ------------------------
+-- Capture dialogs open above the current workspace without disturbing tiling.
+-- Separate GTK app IDs let the audio picker stay compact and review stay large.
+hl.window_rule({
+    match = { class = "local\\.screenrecord\\.Review" },
+    float = true,
+    size = "(monitor_w*0.65) (monitor_h*0.88)",
+    center = true,
+})
+
+hl.window_rule({
+    match = { class = "local\\.screenrecord\\.Audio" },
+    float = true,
+    center = true,
+})
+
 hl.window_rule({
     match = {
         class = "clipboard-picker",

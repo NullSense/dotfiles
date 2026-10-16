@@ -24,13 +24,13 @@ DMENU=( "$HOME/bin/launch-walker" --dmenu --width 360 )
 top=$(printf '%s\n' \
     '  Screenshot' \
     '  Screenrecord' \
-    'Share last recording' \
+    'Review last recording' \
     '  Text extraction (OCR)' \
     '  Color picker' \
     | "${DMENU[@]}" --placeholder 'Capture')
 
 case "$top" in
-    'Share last recording') "$HOME/bin/screenrecord-share" --menu ;;
+    'Review last recording') "$HOME/bin/screenrecord-share" --menu ;;
     *Screenshot*)
         ~/bin/screenshot      # smart: drag for region, click for window/monitor
         ;;

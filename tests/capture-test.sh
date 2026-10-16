@@ -7,9 +7,9 @@ mkdir -p "$cache"
 case $(findmnt -n -o FSTYPE -T "$cache") in tmpfs|ramfs) echo 'Disk-backed test storage required' >&2; exit 1 ;; esac
 scratch=$(mktemp -d "$cache/run.XXXXXX")
 trap 'agent-clean path "$scratch"' EXIT
-export TMPDIR="$scratch" CAPTURE_TEST_ROOT="$ROOT" CAPTURE_TEST_GPU="${1:-}"
+export TMPDIR="$scratch" CAPTURE_TEST_ROOT="$ROOT" CAPTURE_TEST_GPU="${1:-}" PYTHONDONTWRITEBYTECODE=1
 python3 - <<'PY'
-import hashlib, importlib.machinery, importlib.util, json, os, pathlib, select, signal, subprocess, sys, time
+import hashlib, importlib.machinery, importlib.util, json, os, pathlib, select, signal, subprocess, sys, threading, time
 
 root = pathlib.Path(os.environ['CAPTURE_TEST_ROOT'])
 tmp = pathlib.Path(os.environ['TMPDIR'])
@@ -64,12 +64,17 @@ elif name == 'hyprpicker':
     while True: time.sleep(.02)
 elif name == 'pkill': sys.exit(1)
 elif name == 'grim': pathlib.Path(args[-1]).write_bytes(b'png')
+elif name == 'screenrecord-review' and '--audio-setup' in args:
+    if os.environ.get('CANCEL_SETUP'): sys.exit(1)
+    print(json.dumps({'audio': os.environ.get('SETUP_AUDIO','device:voice_cleaned|default_output')}))
 '''
 for name in ('wl-copy','gpu-screen-recorder','ffprobe','pgrep','systemctl','hyprctl',
              'slurp','hyprpicker','pkill','grim','notify-send'):
     p = stubs / name
     p.write_text(stub)
     p.chmod(0o755)
+(bin_dir/'screenrecord-review').write_text(stub)
+(bin_dir/'screenrecord-review').chmod(0o755)
 state = tmp / 'state'
 state.mkdir()
 runtime = tmp / 'runtime'
@@ -79,6 +84,8 @@ env = dict(os.environ, HOME=str(home), PATH=str(stubs)+':'+os.environ['PATH'],
            XDG_CACHE_HOME=str(tmp/'cache'), SCREENRECORD_OUTPUT_DIR=str(tmp/'Videos with # spaces'),
            SCREENSHOT_COLORTEMP_BYPASSED='1', OMARCHY_SCREENSHOT_DIR=str(tmp/'Pictures'))
 def run(name, *args, good=True, **overrides):
+    if name == 'screenrecord' and not overrides.pop('setup',False):
+        args = (*args, '--no-setup')
     r = subprocess.run([str(bin_dir/name),*args], env=dict(env,**overrides),
                        capture_output=True, text=True, timeout=15)
     assert (r.returncode == 0) == good, (name,args,r.returncode,r.stdout,r.stderr)
@@ -128,6 +135,12 @@ try:
     watch_until('idle')
     assert json.loads(run('screenrecord-status'))['text'] == ''
     assert (state/'stopped').exists()
+    assert not (state/'clipboard').exists()  # Stop opens review; no copy/convert before explicit action.
+    deadline = time.monotonic()+3
+    while ['screenrecord-review',[str(file)]] not in calls() and time.monotonic()<deadline:
+        time.sleep(.02)
+    assert ['screenrecord-review',[str(file)]] in calls()
+    run('screenrecord-share','--copy',str(file))
     assert (state/'clipboard').read_bytes() == (file.as_uri()+'\r\n').encode()
     assert '%23' in (state/'clipboard').read_text() and '%20' in (state/'clipboard').read_text()
     assert (state/'screenrecord/latest').read_text() == str(file)
@@ -153,6 +166,20 @@ try:
     args = next(a for n,a in calls()[before:] if n == 'gpu-screen-recorder')
     assert value(args,'-s') == '1920x1080'  # Logical 800x600 -> physical 1600x1200.
     run('screenrecord','--stop-recording')
+    # Audio setup precedes region selection and cancellation never starts a capture.
+    before = len(calls())
+    run('screenrecord',setup=True,CANCEL_SETUP='1',good=False)
+    assert not any(n in ('slurp','gpu-screen-recorder') for n,a in calls()[before:])
+    for sources in ('device:voice_cleaned|default_output', ''):
+        (runtime/'screenrecord/ipc.sock').unlink(missing_ok=True)
+        before = len(calls())
+        run('screenrecord',setup=True,SETUP_AUDIO=sources)
+        audio_calls = calls()[before:]
+        assert next(i for i,(n,a) in enumerate(audio_calls) if n == 'screenrecord-review') < next(i for i,(n,a) in enumerate(audio_calls) if n == 'slurp')
+        args = next(a for n,a in audio_calls if n == 'gpu-screen-recorder')
+        if sources: assert value(args,'-a') == sources
+        else: assert '-a' not in args
+        run('screenrecord','--stop-recording')
     (runtime/'screenrecord/ipc.sock').unlink(missing_ok=True)
     run('screenrecord',REJECT_PAUSE='1')
     run('screenrecord','--toggle-pause',good=False)
@@ -183,7 +210,7 @@ share = importlib.util.module_from_spec(spec)
 loader.exec_module(share)
 os.environ.update(env)
 # Invalid budgets fail without starting an encode.
-for budget in (float('nan'),float('inf'),0,-1,1001):
+for budget in (float('nan'),float('inf'),0,-1,4001):
     try: share.export(file,target_mb=budget)
     except ValueError: pass
     else: raise AssertionError(budget)
@@ -218,6 +245,20 @@ finally:
     share.run = original_run
 print('PASS: budget validation, oversize retries, and failed-export cleanup')
 
+for start,end in ((-1,2),(2,1),(0,4),(float('nan'),2)):
+    try: share.export(source,start=start,end=end,copy=False)
+    except ValueError: pass
+    else: raise AssertionError((start,end))
+cancel = threading.Event()
+cancel.set()
+try: share.export(file,app='discord-free',copy=False,cancel_event=cancel)
+except InterruptedError: pass
+else: raise AssertionError('Cancelled export copied')
+assert share.APP_PRESETS['discord-free'][1] == 19
+assert share.APP_PRESETS['whatsapp-video'][1:] == (60,480)
+assert share.APP_PRESETS['telegram-premium'][1] == 3800
+print('PASS: audio setup precedes capture; cancel/silent/cleaned-source selection; trim validation and preset budgets')
+
 if os.environ.get('CAPTURE_TEST_GPU') == '--gpu':
     # Real NVIDIA decode/scale/encode. Stub only UI/clipboard, never FFmpeg.
     (stubs/'ffprobe').unlink()
@@ -240,6 +281,24 @@ if os.environ.get('CAPTURE_TEST_GPU') == '--gpu':
     small = share.export(source,preset='small')
     assert small.exists()
     assert share.export(dest,target_mb=1) == dest  # No re-encode when it fits.
+    clipboard_before = (state/'clipboard').read_bytes()
+    edited = share.export(source,app='discord-free',target_mb=.2,start=1,end=4,mute=True,
+                          caption="Caption: 100% 'safe' [text] \\ test", title='Review test',tags=['test','video'],copy=False)
+    edit_duration, edit_video, edit_audio = share.probe(edited)
+    assert abs(edit_duration-3) <= .25 and not edit_audio
+    assert edit_video['codec_name'] == 'h264' and edited.stat().st_size <= 200000
+    meta = json.loads(edited.with_suffix('.capture.json').read_text())
+    assert meta['tags'] == ['test','video'] and meta['muted'] and meta['start_s'] == 1
+    assert (state/'clipboard').read_bytes() == clipboard_before
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
+    # Exercise cancellation of an actual owned FFmpeg child without publication.
+    cancel = threading.Event()
+    cancel.set()
+    before = set((source.parent/'Shared').iterdir())
+    try: share.export(source,caption='cancel me',copy=False,cancel_event=cancel)
+    except InterruptedError: pass
+    else: raise AssertionError('Cancelled GPU export succeeded')
+    assert before == set((source.parent/'Shared').iterdir())
     assert not list((tmp/'cache/screenrecord').glob('export-*'))
     print(f'PASS: real NVDEC/CUDA/NVENC, {dest.stat().st_size} bytes / 200000, full {duration}s + audio, faststart, original preserved ({time.monotonic()-start:.2f}s incl. second preset)')
 PY

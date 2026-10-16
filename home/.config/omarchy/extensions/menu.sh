@@ -127,10 +127,10 @@ show_capture_menu() {
   #     Color picker (fa-eyedropper)
   #     AI           (fa-magic / sparkles)
   #     Edit         (fa-pencil-square-o)
-  case $(menu "Capture" "  Screenshot\n  Recording\n  Share last recording\n  OCR\n  Color picker\n  AI…\n  Edit last screenshot") in
+  case $(menu "Capture" "  Screenshot\n  Recording\n  Review last recording\n  OCR\n  Color picker\n  AI…\n  Edit last screenshot") in
   *Screenshot*)       capture_with_disposal smart ;;
   *Recording*)        recording_action ;;
-  *Share*recording*)   "$HOME/bin/screenrecord-share" --menu ;;
+  *Review*recording*)  "$HOME/bin/screenrecord-share" --menu ;;
   *OCR*)              ocr_region_to_clipboard ;;
   *Color*picker*)     pkill hyprpicker || setsid hyprpicker -a >/dev/null 2>&1 & ;;
   *AI*)               show_ai_submenu ;;

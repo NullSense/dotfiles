@@ -14,8 +14,7 @@
 #   - First invocation:  pick monitor or region with slurp (same UX as the
 #                        screenshot tool), start recording. Saves to
 #                        ~/Videos/screenrecording-TIMESTAMP.mp4
-#   - Second invocation: stops only this recorder, copies the file for paste,
-#                        offers sharing/size presets in the notification.
+#   - Second invocation: stops only this recorder and opens review/export.
 #
 # Args (optional, can combine):
 #   --with-desktop-audio        record system audio
@@ -24,8 +23,9 @@
 #   --webcam-device=/dev/videoN pick the webcam (auto-detects first if omitted)
 #   --resolution=WxH            cap resolution
 #   --preset=share|small|native  default share = 1080p30; small = 720p30
-#   --share-last                copy/compress the last finished recording
+#   --share-last                review/export the last finished recording
 #   --stop-recording            stop if recording, else no-op (menu probe)
+#   --no-setup                  skip interactive audio setup (automation)
 #   --game                      toggle 4K60 AV1 HDR recording of DP-1 + game audio
 #   --replay                    toggle a 120-second HDR replay buffer in RAM
 #   --save-replay               save the current replay without stopping capture
@@ -64,6 +64,8 @@ mkdir -p "$OUTPUT_DIR"
 
 DESKTOP_AUDIO=false
 MIC_AUDIO=false
+AUDIO_SOURCES=""
+SETUP=true
 WEBCAM=false
 WEBCAM_DEVICE=""
 RESOLUTION=""
@@ -86,6 +88,7 @@ for arg in "$@"; do
         --resolution=*)          RESOLUTION="${arg#--resolution=}" ;;
         --preset=*)              PRESET="${arg#--preset=}" ;;
         --stop-recording)        STOP=true ;;
+        --no-setup)              SETUP=false ;;
         --game)                  GAME_ACTION=record ;;
         --replay)                GAME_ACTION=replay ;;
         --save-replay)           GAME_ACTION=save ;;
@@ -314,7 +317,16 @@ target_label() {
 }
 
 start_recording() {
-    local target
+    local target audio_config
+    if [[ $SETUP == true ]]; then
+        local setup_args=(--audio-setup)
+        [[ $DESKTOP_AUDIO == true ]] && setup_args+=(--desktop)
+        [[ $MIC_AUDIO == true ]] && setup_args+=(--microphone)
+        audio_config=$("$HOME/bin/screenrecord-review" "${setup_args[@]}" 9>&-) || return 1
+        AUDIO_SOURCES=$(jq -er '.audio | strings' <<<"$audio_config") || return 1
+        # An empty source string is an intentional silent recording.
+        DESKTOP_AUDIO=false MIC_AUDIO=false
+    fi
     target=$(select_target) || return 1   # user cancelled slurp → no notification
 
     local capture_args=()
@@ -355,6 +367,7 @@ start_recording() {
         [[ -n $audio_devs ]] && audio_devs+="|"
         audio_devs+="default_input"
     fi
+    [[ $SETUP == true ]] && audio_devs=$AUDIO_SOURCES
     local audio_args=()
     [[ -n $audio_devs ]] && audio_args=(-a "$audio_devs" -ac aac -ab 128)
 
@@ -380,7 +393,11 @@ start_recording() {
         toggle_indicator
         local body
         body="Capture:  $(target_label "$target")"$'\n'
-        body+="Audio:    $(audio_label)"$'\n'
+        if [[ $SETUP == true ]]; then
+            body+="Audio:    ${audio_devs:-None (muted)}"$'\n'
+        else
+            body+="Audio:    $(audio_label)"$'\n'
+        fi
         body+="Quality:  ${res_label} · ${FPS} fps"
         [[ $WEBCAM == true ]] && body+=$'\n'"Webcam:   on"
         body+=$'\n'"File:     $(basename "$file")"$'\n'
@@ -412,22 +429,18 @@ stop_recording() {
 
     cleanup_webcam
     toggle_indicator
-    # GSR finalized faststart MP4 itself; no full-file rewrite, audio encode,
-    # lossy keyframe trim or thumbnail generation on the stop-to-paste path.
+    # GSR finalized MP4 itself. Review precedes every clipboard/export action.
     : > "$PID_FILE"
     : > "$RECORDING_FILE"
     if ! "$HOME/bin/screenrecord-share" --saved "$f"; then
-        notify-send -u critical "Recording needs attention" "File kept at $f; check validity or clipboard availability."
+        notify-send -u critical "Recording needs attention" "File kept at $f; check validity."
         return 1
     fi
 
     (
-        ACTION=$(notify-send "Recording saved · copied" "Paste file · $(du -h "$f" | cut -f1) · click for sharing presets" -t 12000 \
-            -i video-x-generic -A "default=Share / resize" -A "open=Play")
-        case $ACTION in
-            default) "$HOME/bin/screenrecord-share" --menu "$f" ;;
-            open) xdg-open "$f" ;;
-        esac
+        notify-send "Recording saved" "Review, trim or caption before copying · $(du -h "$f" | cut -f1)" \
+            -t 5000 -i video-x-generic
+        "$HOME/bin/screenrecord-share" --menu "$f"
     ) 9>&- </dev/null >/dev/null 2>&1 &
 }
 

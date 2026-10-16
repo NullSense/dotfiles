@@ -20,19 +20,22 @@ if [[ -z ${SCREENSHOT_COLORTEMP_BYPASSED:-} ]]; then
     SCREENSHOT_COLORTEMP_BYPASSED=1 exec "$HOME/bin/colortemp-ctl" bypass "$0" "$@"
 fi
 
+# shellcheck source=/dev/null
 [[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
-OUTPUT_DIR="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures/Screenshots}}"
+OUTPUT_DIR="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures}/Screenshots}"
 mkdir -p "$OUTPUT_DIR"
 
 # Cancel an in-flight screenshot by re-pressing the bind (slurp running)
 pkill slurp && exit 0
 
 EDITOR_BIN="${OMARCHY_SCREENSHOT_EDITOR:-satty}"
+PRINT_PATH=false
 
 ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --editor=*) EDITOR_BIN="${arg#--editor=}" ;;
+        --print-path) PRINT_PATH=true ;;
         *)          ARGS+=("$arg") ;;
     esac
 done
@@ -47,7 +50,7 @@ JQ_MONITOR_GEO='
     (.width / .scale | floor) as $w |
     (.height / .scale | floor) as $h |
     .transform as $t |
-    if $t == 1 or $t == 3 then "\($x),\($y) \($h)x\($w)"
+    if ($t % 2) == 1 then "\($x),\($y) \($h)x\($w)"
     else                       "\($x),\($y) \($w)x\($h)" end;
 '
 
@@ -56,10 +59,10 @@ get_rectangles() {
     # monitor (dropdown, spotify, etc. — special IDs are negative). Without
     # the special id, smart-snap can't pick up the dropdown terminal even
     # though it's visibly on top of the desktop.
-    local mon_json
+    local mon_json ws sws
     mon_json=$(hyprctl monitors -j)
-    local ws=$(jq -r '.[] | select(.focused == true) | .activeWorkspace.id' <<<"$mon_json")
-    local sws=$(jq -r '.[] | select(.focused == true) | .specialWorkspace.id // empty' <<<"$mon_json")
+    ws=$(jq -r '.[] | select(.focused == true) | .activeWorkspace.id' <<<"$mon_json")
+    sws=$(jq -r '.[] | select(.focused == true) | .specialWorkspace.id // empty' <<<"$mon_json")
 
     jq -r --arg ws "$ws" "${JQ_MONITOR_GEO} .[] | select(.activeWorkspace.id == (\$ws | tonumber)) | format_geo" <<<"$mon_json"
     hyprctl clients -j | jq -r --arg ws "$ws" --arg sws "${sws:-0}" '
@@ -97,11 +100,11 @@ case "$MODE" in
         SELECTION=$(echo "$RECTS" | slurp 2>/dev/null)
 
         # Tiny click? snap to the rectangle it landed inside
-        if [[ $SELECTION =~ ^([0-9]+),([0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]]; then
+        if [[ $SELECTION =~ ^(-?[0-9]+),(-?[0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]]; then
             if (( ${BASH_REMATCH[3]} * ${BASH_REMATCH[4]} < 20 )); then
                 cx=${BASH_REMATCH[1]}; cy=${BASH_REMATCH[2]}
                 while IFS= read -r rect; do
-                    [[ $rect =~ ^([0-9]+),([0-9]+)[[:space:]]([0-9]+)x([0-9]+) ]] || continue
+                    [[ $rect =~ ^(-?[0-9]+),(-?[0-9]+)[[:space:]]([0-9]+)x([0-9]+) ]] || continue
                     rx=${BASH_REMATCH[1]}; ry=${BASH_REMATCH[2]}
                     rw=${BASH_REMATCH[3]}; rh=${BASH_REMATCH[4]}
                     if (( cx >= rx && cx < rx+rw && cy >= ry && cy < ry+rh )); then
@@ -116,23 +119,27 @@ esac
 
 [[ -z $SELECTION ]] && exit 0
 
-FILEPATH="$OUTPUT_DIR/screenshot-$(date +'%Y-%m-%d_%H-%M-%S').png"
+FILEPATH="$OUTPUT_DIR/screenshot-$(date +'%Y-%m-%d_%H-%M-%S-%N').png"
 
-grim -g "$SELECTION" "$FILEPATH" || exit 1
-wl-copy < "$FILEPATH"
+# Low PNG compression makes capture quick while preserving text pixel-for-pixel.
+grim -l 1 -g "$SELECTION" "$FILEPATH" || exit 1
+cleanup_freeze
+PID=
+wl-copy --type image/png < "$FILEPATH" || exit 1
+[[ $PRINT_PATH == true ]] && printf '%s\n' "$FILEPATH"
 
 # Clickable preview notification — clicking opens satty for annotation
 (
     ACTION=$(notify-send "Screenshot saved" "Click to edit · saved to $FILEPATH" \
-        -t 8000 -i "$FILEPATH" -A "default=edit")
+        -t 8000 -i "$FILEPATH" -A "default=edit" </dev/null)
     if [[ $ACTION == "default" ]]; then
         case "$EDITOR_BIN" in
             satty)
                 satty --filename "$FILEPATH" --output-filename "$FILEPATH" \
                       --actions-on-enter save-to-clipboard --save-after-copy \
-                      --copy-command 'wl-copy'
+                      --copy-command 'wl-copy --type image/png'
                 ;;
             *)  "$EDITOR_BIN" "$FILEPATH" ;;
         esac
     fi
-) &
+) </dev/null >/dev/null 2>&1 &

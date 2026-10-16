@@ -127,9 +127,10 @@ show_capture_menu() {
   #     Color picker (fa-eyedropper)
   #     AI           (fa-magic / sparkles)
   #     Edit         (fa-pencil-square-o)
-  case $(menu "Capture" "  Screenshot\n  Recording\n  OCR\n  Color picker\n  AI…\n  Edit last screenshot") in
+  case $(menu "Capture" "  Screenshot\n  Recording\n  Share last recording\n  OCR\n  Color picker\n  AI…\n  Edit last screenshot") in
   *Screenshot*)       capture_with_disposal smart ;;
   *Recording*)        recording_action ;;
+  *Share*recording*)   "$HOME/bin/screenrecord-share" --menu ;;
   *OCR*)              ocr_region_to_clipboard ;;
   *Color*picker*)     pkill hyprpicker || setsid hyprpicker -a >/dev/null 2>&1 & ;;
   *AI*)               show_ai_submenu ;;
@@ -254,7 +255,7 @@ _ocr_handle_failure() {
 # Open the most recent screenshot in satty for annotation. No AI involved —
 # pure UI shortcut (was previously `hyprwhspr-vision edit-last`).
 edit_last_screenshot() {
-  local shots_dir="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures/Screenshots}}"
+  local shots_dir="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures}/Screenshots}"
   local last
   last="$(/usr/bin/ls -t "${shots_dir}"/*.png 2>/dev/null | /usr/bin/head -1)"
   if [[ -z "$last" || ! -f "$last" ]]; then
@@ -262,7 +263,7 @@ edit_last_screenshot() {
     return
   fi
   setsid satty --filename "$last" --output-filename "$last" \
-    --early-exit --copy-command 'wl-copy' >/dev/null 2>&1 &
+    --actions-on-enter save-to-clipboard --save-after-copy --copy-command 'wl-copy --type image/png' >/dev/null 2>&1 &
   disown 2>/dev/null || true
 }
 
@@ -288,15 +289,16 @@ pick_target_language() {
 # Single Recording entry — toggle behavior. If gpu-screen-recorder is
 # running, this stops it. Otherwise it asks for audio mode and starts.
 recording_action() {
-  if pgrep -x gpu-screen-recorder >/dev/null 2>&1; then
+  if pgrep -f '^gpu-screen-recorder' >/dev/null 2>&1; then
     omarchy-capture-screenrecording --stop-recording
-    notify-send -a omarchy-menu -u low -t 2500 "Recording stopped" "Saved to ~/Videos"
     return
   fi
-  case $(menu "Start recording" "󰗇  No audio\n󰕾  Desktop audio\n󰍬  Desktop + microphone") in
+  case $(menu "Start recording · 1080p30 NVENC" "󰗇  No audio\n󰕾  Desktop audio\n󰍬  Desktop + microphone\n  Small · 720p30\n  Native · 60fps") in
   *No*audio*)       omarchy-capture-screenrecording ;;
   *Desktop*audio*)  omarchy-capture-screenrecording --with-desktop-audio ;;
   *microphone*)     omarchy-capture-screenrecording --with-desktop-audio --with-microphone-audio ;;
+  *Small*)          omarchy-capture-screenrecording --preset=small ;;
+  *Native*)         omarchy-capture-screenrecording --preset=native ;;
   *) back_to show_capture_menu ;;
   esac
 }
@@ -499,10 +501,8 @@ ai_run_translate() {
 # (edit / re-copy / save elsewhere / AI explain / AI ask / open / done).
 capture_with_disposal() {
   local mode="$1"
-  omarchy-capture-screenshot "$mode" || return
-  local shots_dir="${OMARCHY_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures/Screenshots}}"
   local file
-  file="$(/usr/bin/ls -t "${shots_dir}"/*.png 2>/dev/null | /usr/bin/head -1)"
+  file="$(omarchy-capture-screenshot "$mode" --print-path)" || return
   [[ -z "$file" || ! -f "$file" ]] && return
   capture_dispose "$file"
 }
@@ -515,11 +515,11 @@ capture_dispose() {
   case $(menu "Captured: $label" "  Edit in satty\n  Re-copy to clipboard\n  Save to specific location\n  Analyze: explain\n  Analyze: ask custom question\n  Open in image viewer\n  Discard (delete file)\n  Done") in
   *Edit*in*satty*)
     setsid satty --filename "$file" --output-filename "$file" \
-      --early-exit --copy-command 'wl-copy' >/dev/null 2>&1 &
+      --actions-on-enter save-to-clipboard --save-after-copy --copy-command 'wl-copy --type image/png' >/dev/null 2>&1 &
     disown 2>/dev/null || true
     ;;
   *Re-copy*to*clipboard*)
-    wl-copy < "$file"
+    wl-copy --type image/png < "$file"
     notify-send -a omarchy-menu -u low -t 2000 "Re-copied to clipboard" "$label"
     ;;
   *Save*to*specific*)

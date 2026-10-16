@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Desktop recording clipboard and exports; called by screenrecord and capture menu."""
+import argparse
+import json
+import math
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+def run(args, **kwargs):
+    return subprocess.run(args, check=True, **kwargs)
+
+
+def notify(title, body):
+    subprocess.run(["notify-send", title, body], check=False)
+
+
+def latest_path():
+    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "screenrecord/latest"
+
+
+def probe(path):
+    data = json.loads(run(["ffprobe", "-v", "error", "-show_format", "-show_streams",
+                           "-of", "json", str(path)], capture_output=True, text=True).stdout)
+    video = next(s for s in data["streams"] if s["codec_type"] == "video")
+    duration = float(data["format"]["duration"])
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError("Recording has no playable duration")
+    return duration, video, any(s["codec_type"] == "audio" for s in data["streams"])
+
+
+def copy_file(path):
+    # A URI is tiny even for a multi-GB recording. Percent-encoding preserves
+    # spaces, Unicode and #; file-aware applications request the actual file.
+    path = path.resolve(strict=True)
+    run(["wl-copy", "--type", "text/uri-list"], input=(path.as_uri() + "\r\n").encode())
+
+
+def saved(path):
+    probe(path)  # Never advertise a partial/corrupt MP4 as successfully saved.
+    state = latest_path()
+    state.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", dir=state.parent, delete=False) as f:
+        f.write(str(path.resolve()))
+    os.replace(f.name, state)
+    copy_file(path)
+
+
+def export(path, preset="balanced", target_mb=None):
+    duration, video, audio = probe(path)
+    if video.get("color_transfer") in ("smpte2084", "arib-std-b67"):
+        raise ValueError("HDR clips need tone mapping; these presets are for desktop SDR recordings")
+    limit = None
+    if target_mb is not None:
+        if not math.isfinite(target_mb) or not 0.1 <= target_mb <= 1000:
+            raise ValueError("Choose a size from 0.1 to 1000 MB")
+        limit = int(target_mb * 1_000_000)  # Decimal MB, matching upload limits.
+        if (path.stat().st_size <= limit and video.get("codec_name") == "h264"
+                and path.suffix.lower() == ".mp4"):
+            copy_file(path)
+            return path
+    height, quality = {"small": (720, 27), "balanced": (1080, 23), "clear": (1440, 20)}[preset]
+    bitrate = None
+    if limit:
+        bitrate = int(limit * 8 * .94 / duration) - (96_000 if audio else 0)
+        if bitrate < 32_000:
+            raise ValueError("Size too small for this duration; choose a larger MB limit")
+        # Tiny budgets need fewer pixels as well as fewer bits per second.
+        height = min(height, 360 if bitrate < 250_000 else 480 if bitrate < 600_000
+                     else 720 if bitrate < 1_500_000 else 1080)
+    # Fit either orientation, preserve aspect ratio, never upscale, even sizes.
+    width = height * 16 // 9
+    vf = (f"scale_cuda=w='min(iw,{width})':h='min(ih,{height})':"
+          "force_original_aspect_ratio=decrease:force_divisible_by=2:format=yuv420p,setsar=1,fps=30")
+    label = f"{target_mb:g}MB" if limit else preset
+    destination_dir = path.parent / "Shared"
+    destination_dir.mkdir(exist_ok=True)
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "screenrecord"
+    cache.mkdir(parents=True, exist_ok=True)
+    notify("Preparing recording", f"{label} export · original preserved")
+    # Isolated pass logs; a failed/cancelled export never leaves a final MP4.
+    with tempfile.TemporaryDirectory(prefix="export-", dir=cache) as scratch:
+        scratch = Path(scratch)
+        output = scratch / "output.mp4"
+        base = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", str(path),
+                "-map", "0:v:0", "-vf", vf, "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq",
+                "-rc", "vbr", "-multipass", "qres", "-spatial-aq", "1",
+                "-filter_threads", "2", "-map_metadata", "-1"]
+        tail = ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "96k", "-ac", "2",
+                "-movflags", "+faststart", str(output)]
+        if limit:
+            # Reserve container overhead and AAC bandwidth, then verify bytes.
+            # NVENC multipass VBR preserves the full duration (no -fs).
+            for attempt in range(3):
+                rate = ["-b:v", str(bitrate), "-maxrate", str(bitrate * 2), "-bufsize", str(bitrate * 2)]
+                run(base + rate + tail)
+                size = output.stat().st_size
+                if size <= limit:
+                    break
+                audio_bytes = 12_000 * duration if audio else 0
+                bitrate = int(bitrate * max(0, limit * .94 - audio_bytes) / max(1, size - audio_bytes) * .9)
+                if bitrate < 32_000:
+                    raise ValueError("Cannot meet this size without losing audio or duration")
+            else:
+                raise ValueError("Export exceeded the limit; original preserved")
+        else:
+            run(base + ["-cq", str(quality), "-b:v", "0"] + tail)
+        result_duration, _, _ = probe(output)
+        if abs(result_duration - duration) > max(.25, duration * .01):
+            raise ValueError("Export duration changed; original preserved")
+        # Unique filename and atomic publication, including across filesystems.
+        with tempfile.NamedTemporaryFile(prefix=f"{path.stem}-{label}-", suffix=".part",
+                                         dir=destination_dir, delete=False) as f:
+            staging = Path(f.name)
+            destination = staging.with_suffix(".mp4")
+        try:
+            shutil.copyfile(output, staging)
+            os.replace(staging, destination)
+        finally:
+            staging.unlink(missing_ok=True)
+    copy_file(destination)
+    notify("Recording ready · copied", f"{destination.stat().st_size / 1_000_000:.2f} MB · {destination.name}")
+    return destination
+
+
+def pick(prompt, choices):
+    args = [str(Path.home() / "bin/launch-walker"), "--dmenu", "--width", "420", "--placeholder", prompt]
+    if not choices:
+        args.append("-I")  # Walker input-only mode for a custom numeric limit.
+    result = subprocess.run(args, input="\n".join(choices),
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def menu(path):
+    choice = pick(f"Recording · {path.stat().st_size / 1_000_000:.2f} MB",
+                  ["Copy file", "Open", "Under 10 MB", "Under 25 MB", "Under 50 MB", "Custom MB limit…",
+                   "Small · 720p", "Balanced · 1080p", "Clear · 1440p"])
+    if choice == "Copy file":
+        copy_file(path)
+    elif choice == "Open":
+        run(["xdg-open", str(path)])
+    elif choice.startswith("Under "):
+        export(path, target_mb=float(choice.split()[1]))
+    elif choice.startswith("Custom"):
+        value = pick("Maximum size in MB (e.g. 8 or 24.5)", [])
+        if value:
+            export(path, target_mb=float(value))
+    elif choice:
+        preset = choice.split()[0].lower()
+        if preset in ("small", "balanced", "clear"):
+            export(path, preset=preset)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--copy", action="store_true")
+    action.add_argument("--saved", action="store_true")
+    action.add_argument("--menu", action="store_true")
+    action.add_argument("--target-mb", type=float)
+    action.add_argument("--preset", choices=("small", "balanced", "clear"))
+    parser.add_argument("file", nargs="?", type=Path)
+    args = parser.parse_args()
+    try:
+        path = args.file or Path(latest_path().read_text())
+        path = path.resolve(strict=True)
+        if args.saved:
+            saved(path)
+        elif args.copy:
+            copy_file(path)
+        elif args.target_mb is not None or args.preset:
+            print(export(path, preset=args.preset or "balanced", target_mb=args.target_mb))
+        else:
+            menu(path)
+        return 0
+    except (OSError, ValueError, KeyError, StopIteration, subprocess.CalledProcessError) as error:
+        print(f"screenrecord-share: {error}", file=sys.stderr)
+        notify("Recording sharing failed", str(error))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

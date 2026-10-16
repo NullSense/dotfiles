@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Waybar desktop recording status and acknowledged pause/resume via GSR IPC."""
+import argparse
+import ctypes
+import fcntl
+import html
+import json
+import os
+from pathlib import Path
+import select
+import socket
+import subprocess
+import sys
+import time
+
+
+def runtime():
+    return Path(os.environ["XDG_RUNTIME_DIR"]) / "screenrecord"
+
+
+def active():
+    try:
+        pid = int((runtime() / "pid").read_text())
+        file = (runtime() / "current").read_text().strip()
+        if pid <= 0 or not file:
+            return None
+        # A recycled PID cannot be mistaken for the owned recorder.
+        if file.encode() not in (Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")):
+            return None
+        return Path(file)
+    except (OSError, ValueError):
+        return None
+
+
+def read_state():
+    try:
+        return json.loads((runtime() / "status.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def write_state(state):
+    path = runtime() / "status.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state))
+    tmp.replace(path)
+
+
+def command(paused):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(2)
+        sock.connect(str(runtime() / "ipc.sock"))
+        sock.sendall(json.dumps({"id": 1, "name": "set-paused", "data": paused}).encode() + b"\n")
+        data = b""
+        while b"\n" not in data:
+            part = sock.recv(4096)
+            if not part or len(data) > 65536:
+                raise OSError("Recorder closed the pause connection")
+            data += part
+        reply = json.loads(data.split(b"\n", 1)[0])
+        if reply.get("id") != 1 or reply.get("result") != "ok":
+            raise OSError(f"Recorder rejected pause: {reply.get('data', 'unknown error')}")
+
+
+def control(action):
+    with (runtime() / "control.lock").open("w") as lock:
+        # The shell already owns this lock for --started/--finishing.
+        if action == "toggle":
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return
+        file = active()
+        if not file:
+            return
+        now = time.monotonic()
+        if action == "started":
+            write_state({"file": str(file), "started": now, "paused_at": None, "paused_total": 0})
+            return
+        state = read_state()
+        if state.get("file") != str(file):
+            raise OSError("Recording status is not initialized")
+        if action == "finishing":
+            state["finishing"] = True
+        elif state.get("finishing"):
+            return
+        elif state.get("paused_at") is None:
+            command(True)
+            state["paused_at"] = time.monotonic()
+        else:
+            command(False)
+            state["paused_total"] += time.monotonic() - state["paused_at"]
+            state["paused_at"] = None
+        write_state(state)
+
+
+def payload():
+    file = active()
+    if file is None:
+        return {"text": "", "class": "idle", "tooltip": ""}
+    state = read_state()
+    if state.get("file") != str(file):
+        return {"text": "● Starting", "class": "recording", "tooltip": "Starting desktop recording"}
+    paused = state.get("paused_at")
+    elapsed = max(0, int((paused if paused is not None else time.monotonic())
+                         - state["started"] - state["paused_total"]))
+    minutes, seconds = divmod(elapsed, 60)
+    status = "finishing" if state.get("finishing") else "paused" if paused is not None else "recording"
+    label = {"finishing": "Saving", "paused": "Ⅱ PAUSED", "recording": "● REC"}[status]
+    try:
+        size = file.stat().st_size / 1_000_000
+    except OSError:
+        size = 0
+    return {"text": f"{label} {minutes:02}:{seconds:02}", "class": status,
+            "tooltip": f"Desktop recording · {size:.1f} MB\n{html.escape(file.name)}\n"
+                       "Left: pause / resume\nRight: stop and copy\nMiddle: share last finished recording"}
+
+
+def watch():
+    # No polling/subprocesses while idle. File events wake this single process;
+    # active recordings get a one-second timer and stale PID detection.
+    libc = ctypes.CDLL(None, use_errno=True)
+    fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+    if fd < 0:
+        raise OSError(ctypes.get_errno(), "inotify_init1")
+    try:
+        mask = 0x8 | 0x80 | 0x100 | 0x200  # close-write, moved-to, create, delete
+        if libc.inotify_add_watch(fd, os.fsencode(runtime()), mask) < 0:
+            raise OSError(ctypes.get_errno(), "inotify_add_watch")
+        previous = None
+        while True:
+            value = payload()
+            encoded = json.dumps(value)
+            if encoded != previous:
+                print(encoded, flush=True)
+                previous = encoded
+            ready, _, _ = select.select([fd], [], [], 1 if value["text"] else None)
+            if ready:
+                try:
+                    while os.read(fd, 65536):
+                        pass
+                except BlockingIOError:
+                    pass
+    finally:
+        os.close(fd)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    actions = parser.add_mutually_exclusive_group()
+    for name in ("watch", "toggle-pause", "started", "finishing"):
+        actions.add_argument(f"--{name}", action="store_true")
+    args = parser.parse_args()
+    runtime().mkdir(parents=True, exist_ok=True)
+    try:
+        if args.watch:
+            watch()
+        elif args.toggle_pause or args.started or args.finishing:
+            control("toggle" if args.toggle_pause else "started" if args.started else "finishing")
+        else:
+            print(json.dumps(payload()))
+        return 0
+    except (OSError, ValueError, KeyError) as error:
+        print(f"screenrecord-status: {error}", file=sys.stderr)
+        if not args.watch:
+            subprocess.run(["notify-send", "Recording control failed", str(error)], check=False)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

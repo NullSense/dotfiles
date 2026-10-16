@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Print and the Omarchy capture menu share the same untinted PNG fast path.
+exec "$HOME/bin/screenshot" "$@"

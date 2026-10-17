@@ -7,6 +7,9 @@ deletes only inside fixed roots, only things no running process is using:
   agent-clean path PATH...          a directory or file under an allowed root (never the root itself)
   agent-clean docker NAME...        a stopped test-stack or builder container (never volumes,
                                     never services); add --running for your own finished stack
+  agent-clean network --owner-worktree PATH --owner-git-common-dir PATH ID_OR_NAME...
+                                    preview empty, exactly owned Sift test networks; --execute removes
+                                    only networks, preserving containers and volumes
   agent-clean --dry-run ...         show what would be removed
 
 Allowed path roots: ~/.cache/agent-tmp/<x>, ~/.cache/claude-tmp/<x>, ~/.cache/sift-la/<x>
@@ -18,6 +21,9 @@ their dotfile source directories are also allowed. Whole cache directories must
 contain only owned regular .pyc/.pyo files; links and other contents are refused.
 """
 import os
+import argparse
+import fcntl
+import json
 import re
 import shutil
 import stat
@@ -198,7 +204,116 @@ def clean_containers(names, dry, running_ok):
         subprocess.run(["docker", "rm", "-f", name], check=True)
 
 
+
+def docker_json(arguments):
+    result = subprocess.run(["docker", *arguments], capture_output=True, text=True)
+    if result.returncode:
+        fail(f"Docker inspection failed: {' '.join(arguments[:2])}")
+    try:
+        return json.loads(result.stdout)
+    except (ValueError, TypeError):
+        fail("Docker inspection returned invalid JSON")
+
+
+def network_facts(identifier, owner, common):
+    networks = docker_json(["network", "inspect", identifier])
+    if not isinstance(networks, list) or len(networks) != 1:
+        fail("expected exactly one network")
+    network = networks[0]
+    if identifier not in (network.get("Id"), network.get("Name")):
+        fail("refused: name or full network ID required; abbreviated IDs are ambiguous")
+    labels = network.get("Labels") or {}
+    project = labels.get("com.docker.compose.project", "")
+    # Reuse the container cleanup ownership boundary, then narrow to canonical
+    # inner test stacks. Acceptance/lifecycle cleanup remains with its owner.
+    witness = project + "-postgres-1"
+    if (not CONTAINER_OK.fullmatch(witness) or CONTAINER_NEVER.search(witness)
+            or not re.fullmatch(r"sift-test-[0-9a-f]{12}", project)):
+        fail("refused: network is not a canonical inner Sift test stack")
+    expected = {
+        "com.docker.compose.network": "default",
+        "dev.sift.test-infra.schema": "1",
+        "dev.sift.test-infra.uid": str(os.getuid()),
+        "dev.sift.test-infra.stack": project,
+        "dev.sift.test-infra.worktree": owner,
+        "dev.sift.test-infra.git-common-dir": common,
+        "dev.sift.test-infra.flavor": "inner",
+        "dev.sift.test-infra.run": "-",
+        "dev.sift.test-infra.state-dir": owner + "/.local/test-infra",
+    }
+    if any(labels.get(key) != value for key, value in expected.items()):
+        fail("refused: network ownership labels do not match the asserted owner")
+    if (network.get("Name") != project + "_default" or network.get("Driver") != "bridge"
+            or not re.fullmatch(r"[0-9a-f]{64}", network.get("Id", ""))):
+        fail("refused: system, foreign or noncanonical network")
+    if "Containers" not in network or network["Containers"] != {}:
+        fail("refused: network has attached endpoints or unknown endpoint state")
+    refs = subprocess.run(["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={project}"],
+                          capture_output=True, text=True)
+    if refs.returncode:
+        fail("could not inspect project containers")
+    ids = refs.stdout.split()
+    if ids:
+        containers = docker_json(["inspect", *ids])
+        if len(containers) != len(ids):
+            fail("incomplete project container inspection")
+        for container in containers:
+            state = container.get("State") or {}
+            if ((container.get("Config", {}).get("Labels") or {}).get("com.docker.compose.project") != project
+                    or state.get("Status") not in ("exited", "dead")
+                    or state.get("Running") is not False or state.get("Paused") is not False
+                    or state.get("Restarting") is not False):
+                fail("refused: project has running, transitional or unknown container references")
+    return network
+
+
+def clean_networks(argv):
+    parser = argparse.ArgumentParser(prog="agent-clean network")
+    parser.add_argument("--owner-worktree", required=True)
+    parser.add_argument("--owner-git-common-dir", required=True)
+    parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("networks", nargs="+")
+    options = parser.parse_args(argv)
+    if options.execute and options.dry_run:
+        fail("--execute and --dry-run cannot be combined")
+    owner, common = options.owner_worktree, options.owner_git_common_dir
+    if any(not Path(path).is_absolute() or os.path.normpath(path) != path for path in (owner, common)):
+        fail("owner paths must be exact absolute normalized ownership labels")
+    for identifier in options.networks:
+        first = network_facts(identifier, owner, common)
+        lock_path = Path(owner) / ".local/test-infra/use.lock"
+        # Do not create a missing fixture lease. Exact owner assertions are
+        # required even for preview, including fixtures whose owner has gone.
+        try:
+            lease = lock_path.open("rb")
+        except FileNotFoundError:
+            lease = None
+        try:
+            if lease is not None:
+                try:
+                    fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    fail("refused: test stack use.lock is held")
+            if not options.execute:
+                print(f"would remove network {first['Id']} ({first['Name']}); containers and volumes preserved")
+                continue
+            # Pin the resolved full ID and re-inspect endpoints, ownership and
+            # project container states while holding any existing use lease.
+            final = network_facts(first["Id"], owner, common)
+            if final != first:
+                fail("refused: network changed before removal")
+            # Docker also refuses removal if an endpoint attaches after the check.
+            subprocess.run(["docker", "network", "rm", first["Id"]], check=True)
+        finally:
+            if lease is not None:
+                lease.close()
+
+
 def main(argv):
+    if argv and argv[0] == "network":
+        clean_networks(argv[1:])
+        return
     dry = "--dry-run" in argv
     running_ok = "--running" in argv
     args = [a for a in argv if a not in ("--dry-run", "--running")]

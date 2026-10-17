@@ -76,6 +76,45 @@ assert clean.allowed_path(str(tmp)) == tmp
 rejected(clean.TMP_ROOTS[0])
 print('PASS: owned command bytecode accepted; sources, mixed caches, nested directories, symlinks and unrelated home paths refused; dry-run and scoped deletion preserved')
 
+# Packaged acceptance relays are fixtures, never their installation's services.
+import subprocess
+from unittest.mock import patch
+def relay_case(name, running=False, running_ok=False, dry=False, reject=False):
+    calls = []
+    def docker(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd == ['docker', 'inspect', '-f', '{{.State.Running}}', name]:
+            return subprocess.CompletedProcess(cmd, 0, str(running).lower(), '')
+        if cmd == ['docker', 'rm', '-f', name]:
+            return subprocess.CompletedProcess(cmd, 0, name, '')
+        raise AssertionError('Unexpected Docker call: '+repr(cmd))
+    with patch.object(clean.subprocess, 'run', side_effect=docker), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try: clean.clean_containers([name], dry, running_ok)
+        except SystemExit as error: assert reject and error.code == 2
+        else: assert not reject, 'Accepted unsafe container: '+name
+    removals = [cmd for cmd in calls if cmd[:2] == ['docker', 'rm']]
+    assert removals == ([] if dry or reject else [['docker', 'rm', '-f', name]]), calls
+    if reject and not running: assert calls == [], calls
+project = 'sift-f115623031524582b7b7f1cdf0e0590b'
+for suffix in ['api', 'cp']:
+    relay = project+'-acceptance-relay-'+suffix
+    relay_case(relay)
+    relay_case(relay, running=True, reject=True)
+    relay_case(relay, running=True, running_ok=True, dry=True)
+    relay_case(relay, running=True, running_ok=True)
+for name in [
+    'sift-'+('a'*31)+'-acceptance-relay-api',
+    'sift-'+('a'*33)+'-acceptance-relay-api',
+    'sift-'+('A'*32)+'-acceptance-relay-api',
+    'sift-'+('g'*32)+'-acceptance-relay-api',
+    project+'-acceptance-relay-api-extra',
+    project+'-acceptance-relay-indexer',
+    project+'-sift-api-1',
+    'sift-live-acceptance-relay-api',
+    'infra-'+project+'-acceptance-relay-api',
+]: relay_case(name, reject=True)
+print('PASS: exact packaged relays, running guard, dry-run and volume-preserving removal; near-miss IDs, suffixes and live services refused')
+
 # Network cleanup is opt-in, exact-owner scoped, and never removes containers/volumes.
 import copy, json, subprocess
 from unittest.mock import patch

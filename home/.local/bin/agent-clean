@@ -41,6 +41,7 @@ CONTAINER_OK = re.compile(
     r"|[a-z0-9][a-z0-9_.-]*-(postgres|qdrant)-test-1"
     r"|sift-la-[a-z0-9_.-]+"
     r"|sift-lifecycle-[a-z0-9_.-]+"
+    r"|sift-[0-9a-f]{32}-acceptance-relay-(api|cp)"
     r"|buildx_buildkit_sift-[a-z0-9_.-]+"
     r"|buildx_buildkit_oracle-[a-z0-9_.-]+"
     r"|oracle-cache-[a-z0-9_.-]+-[0-9]{8})$"

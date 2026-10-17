@@ -1,0 +1,18 @@
+[Unit]
+Description=Tailscale (personal tailnet, userspace) — Sift HTTPS endpoint
+# Dedicated Sift identity; independent of the system and personal Collie daemons.
+# Serve configuration persists in its state directory; never enable Funnel here.
+After=network-online.target
+
+[Service]
+Type=simple
+RuntimeDirectory=tailscale-sift
+StateDirectory=tailscale-sift
+ExecStart=/usr/bin/tailscaled --tun=userspace-networking --statedir=%S/tailscale-sift --socket=%t/tailscale-sift/tailscaled.sock --port=0
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

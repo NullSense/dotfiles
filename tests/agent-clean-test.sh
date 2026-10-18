@@ -169,10 +169,11 @@ owned_case(lambda c: c['Mounts'][0].update(Source=str(escape_mount/'data')), rej
 print('PASS: branch-independent owner-root containers; explicit running opt-in, exact ID, foreign binds, services, symlink escapes and volumes protected')
 
 # Explicit networks can be removed with their scratch-owned stack, without project allowlists.
-def stack_network_case(mutate=None, dry=False, reject=False, attach_race=False):
+def stack_network_case(mutate=None, dry=False, reject=False, attach_race=False, resume=False):
     net = {'Id': 'b'*64, 'Name': 'oracle-audit-20261018-edge', 'Driver': 'bridge',
            'Scope': 'local', 'Ingress': False, 'ConfigOnly': False,
            'Containers': {owned['Id']: {'Name': owned['Name'].removeprefix('/')}}}
+    if resume: net['Containers'] = {}
     if mutate: mutate(net)
     calls=[]
     removed=False
@@ -180,10 +181,13 @@ def stack_network_case(mutate=None, dry=False, reject=False, attach_race=False):
         nonlocal removed
         calls.append(cmd)
         if cmd == ['docker','inspect',owned['Name'].removeprefix('/')]:
+            if resume: return subprocess.CompletedProcess(cmd,1,'','error: no such object: gone')
             return subprocess.CompletedProcess(cmd,0,json.dumps([owned]),'')
         if cmd[:3] == ['docker','network','inspect']:
             result=copy.deepcopy(net)
-            if removed: result['Containers'] = {'f'*64:{'Name':'foreign'}} if attach_race else {}
+            if removed:
+                result['Containers'] = {'f'*64:{'Name':'foreign'}} if attach_race else {}
+                result['Status'] = {'IPAM': {'IPsInUse': 3}}
             return subprocess.CompletedProcess(cmd,0,json.dumps([result]),'')
         if cmd == ['docker','rm','-f',owned['Id']]:
             removed=True
@@ -200,14 +204,16 @@ def stack_network_case(mutate=None, dry=False, reject=False, attach_race=False):
     net_removals=[c for c in calls if c[:3]==['docker','network','rm']]
     assert net_removals == ([] if dry or reject else [['docker','network','rm',net['Id']]])
     if reject and not attach_race: assert not removed, calls
+stack_network_case(lambda n:n.update(Containers={}),reject=True)
 stack_network_case()
 stack_network_case(dry=True)
 stack_network_case(lambda n:n['Containers'].update({'f'*64:{'Name':'foreign'}}),reject=True)
-stack_network_case(lambda n:n.update(Containers={}),reject=True)
 stack_network_case(lambda n:n.update(Name='production-network'),reject=True)
 stack_network_case(lambda n:n.update(Driver='overlay'),reject=True)
 stack_network_case(lambda n:n.update(Ingress=True),reject=True)
 stack_network_case(attach_race=True,reject=True)
+stack_network_case(resume=True)
+stack_network_case(lambda n:n.update(Id='d'*64),resume=True,reject=True)
 print('PASS: explicit stack networks require exclusively proven owned endpoints; foreign, empty, service and raced networks protected; dry-run and full IDs preserved')
 
 # Network cleanup is opt-in, exact-owner scoped, and never removes containers/volumes.

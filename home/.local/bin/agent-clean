@@ -201,7 +201,7 @@ def owned_container(name, owner):
         fail(f"refused: {name} lacks a disposable test/audit/build name")
     result = subprocess.run(["docker", "inspect", name], capture_output=True, text=True)
     if result.returncode:
-        if "No such object:" in result.stderr or "No such container:" in result.stderr:
+        if "no such object:" in result.stderr.lower() or "no such container:" in result.stderr.lower():
             return None
         fail(f"could not inspect container {name}")
     try:
@@ -245,6 +245,19 @@ def clean_containers(names, dry, running_ok, owner_root=None, networks=()):
     if networks:
         if owner is None:
             fail("refused: --network requires --owner-root")
+        proof_path = owner / ".agent-clean-networks.json"
+        proofs = {}
+        if proof_path.exists() or proof_path.is_symlink():
+            info = proof_path.lstat()
+            if (proof_path.is_symlink() or not proof_path.is_file()
+                    or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 1048576):
+                fail("refused: unsafe stack network ownership receipt")
+            try:
+                proofs = json.loads(proof_path.read_text())
+            except (OSError, ValueError):
+                fail("refused: invalid stack network ownership receipt")
+            if not isinstance(proofs, dict):
+                fail("refused: invalid stack network ownership receipt")
         records = [owned_container(name, owner) for name in names]
         if any(record and record["State"]["Running"] for record in records) and not running_ok:
             fail("refused: stack has a running container; explicit --running required")
@@ -258,13 +271,22 @@ def clean_containers(names, dry, running_ok, owner_root=None, networks=()):
                 fail("refused: expected exactly one stack network")
             network = found[0]
             endpoints = network.get("Containers")
+            identity = {key: value for key, value in network.items() if key not in ("Containers", "Status")}
+            witnessed = isinstance(endpoints, dict) and endpoints and set(endpoints).issubset(owned_ids)
+            resumed = endpoints == {} and proofs.get(name) == identity
             if (network.get("Name") != name or not re.fullmatch(r"[0-9a-f]{64}", network.get("Id", ""))
                     or network.get("Driver") != "bridge" or network.get("Scope") != "local"
                     or network.get("Ingress") is not False or network.get("ConfigOnly") is not False
-                    or not isinstance(endpoints, dict) or not endpoints
-                    or not set(endpoints).issubset(owned_ids)):
+                    or not (witnessed or resumed)):
                 fail("refused: network is not exclusively attached to this proven owned stack")
             stack_networks.append(network)
+            proofs[name] = identity
+        if not dry:
+            # Save the proven full identity before removing its bind-owned endpoint witnesses.
+            # This allows a conservative refusal/interruption to resume after containers are gone.
+            descriptor = os.open(proof_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(descriptor, "w") as receipt:
+                json.dump(proofs, receipt)
     for name in names:
         identifier = name
         if owner is not None:
@@ -297,8 +319,9 @@ def clean_containers(names, dry, running_ok, owner_root=None, networks=()):
             print(f"would remove network {network['Name']} after removing its owned containers")
             continue
         found = docker_json(["network", "inspect", network["Id"]])
-        expected = dict(network, Containers={})
-        if found != [expected]:
+        identity = lambda item: {key: value for key, value in item.items() if key not in ("Containers", "Status")}
+        if (not isinstance(found, list) or len(found) != 1 or found[0].get("Containers") != {}
+                or identity(found[0]) != identity(network)):
             fail("refused: stack network changed or still has attached endpoints")
         # Docker independently refuses deletion if an endpoint attaches after inspection.
         subprocess.run(["docker", "network", "rm", network["Id"]], check=True)

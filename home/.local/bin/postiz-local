@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Owner interface for the persistent localhost Postiz installation.
+set -euo pipefail
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/postiz"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/postiz"
+compose=(docker compose --project-directory "$config_dir" --env-file "$state_dir/stack.env" -f "$config_dir/compose.yaml")
+
+case "${1:-status}" in
+  up) "${compose[@]}" up -d --wait --wait-timeout 300 ;;
+  down) "${compose[@]}" down ;; # Preserve every named volume.
+  status) "${compose[@]}" ps ;;
+  check)
+    "${compose[@]}" exec -T temporal temporal operator search-attribute list --namespace default --address temporal:7233 --output json \
+      | python3 -c 'import json,sys; a=json.load(sys.stdin)["customAttributes"]; assert all(a.get(k)=="INDEXED_VALUE_TYPE_TEXT" for k in ("organizationId","postId")), "Postiz Temporal search attributes missing"; print("Temporal: Postiz search attributes verified")'
+    python3 - <<'PY'
+import json, urllib.request
+with urllib.request.urlopen('http://localhost:4007/api/auth/can-register', timeout=10) as response:
+    assert json.load(response)['register'] is False, 'Local account setup is incomplete'
+print('Backend: healthy; additional registration disabled')
+PY
+    postiz integrations:list
+    ;;
+  logs) shift; "${compose[@]}" logs --tail 80 "$@" ;;
+  open) exec xdg-open http://localhost:4007 ;;
+  password-copy)
+    command -v wl-copy >/dev/null
+    wl-copy --paste-once < "$state_dir/password"
+    echo 'Local login password copied for one paste.'
+    ;;
+  *) echo 'Usage: postiz-local {up|down|status|check|logs [SERVICE]|open|password-copy}' >&2; exit 2 ;;
+esac

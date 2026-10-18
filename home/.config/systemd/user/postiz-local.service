@@ -1,0 +1,13 @@
+[Unit]
+Description=Local Postiz social publishing workspace
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/postiz-local up
+ExecStop=%h/.local/bin/postiz-local down
+TimeoutStartSec=360
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

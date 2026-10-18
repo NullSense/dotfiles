@@ -1,0 +1,142 @@
+name: postiz-local
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+services:
+  postiz:
+    image: ghcr.io/gitroomhq/postiz-app:v2.25.1@sha256:d2b37802e96757729fdea2d3d71287f841c2b619faa1cb4c21dac07df657fde1
+    restart: unless-stopped
+    cpus: 2
+    mem_limit: 3g
+    logging: *logging
+    ports:
+      - '127.0.0.1:4007:5000'
+    environment:
+      MAIN_URL: http://localhost:4007
+      FRONTEND_URL: http://localhost:4007
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:4007/api
+      BACKEND_INTERNAL_URL: http://localhost:3000
+      JWT_SECRET: ${POSTIZ_JWT_SECRET:?Missing private Postiz environment}
+      DATABASE_URL: postgresql://postiz:${POSTIZ_DB_PASSWORD:?Missing database password}@postgres:5432/postiz
+      REDIS_URL: redis://redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      IS_GENERAL: 'true'
+      DISABLE_REGISTRATION: 'true'
+      NOT_SECURED: 'true'
+      RUN_CRON: 'true'
+      STORAGE_PROVIDER: local
+      UPLOAD_DIRECTORY: /uploads
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: /uploads
+      NX_ADD_PLUGINS: 'false'
+      NEXT_TELEMETRY_DISABLED: '1'
+      DISABLE_X_ANALYTICS: 'true'
+      API_LIMIT: '90'
+      NODE_OPTIONS: --max-old-space-size=768
+    volumes:
+      - config:/config
+      - uploads:/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'node', '-e', "const r=require('http').get('http://localhost:5000/api/auth/can-register',s=>process.exit(s.statusCode===200?0:1));r.on('error',()=>process.exit(1));r.setTimeout(4000,()=>{r.destroy();process.exit(1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  postgres:
+    image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 384m
+    logging: *logging
+    environment:
+      POSTGRES_USER: postiz
+      POSTGRES_PASSWORD: ${POSTIZ_DB_PASSWORD:?Missing database password}
+      POSTGRES_DB: postiz
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postiz -d postiz']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.2.13-alpine@sha256:9907ac0c435717b4d95697cb4d0ce77d100b1d21269a01a0ce66f27335184c38
+    restart: unless-stopped
+    cpus: 0.25
+    mem_limit: 128m
+    logging: *logging
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory', '80mb', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  temporal-postgres:
+    image: postgres:16.13-alpine@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 384m
+    logging: *logging
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${POSTIZ_TEMPORAL_DB_PASSWORD:?Missing Temporal database password}
+    volumes:
+      - temporal-database:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U temporal']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.28.1@sha256:607d68caa111338d754771efb876c92dfcdae06d056e4530bb31cd0f37406e6a
+    restart: unless-stopped
+    cpus: 1
+    mem_limit: 768m
+    logging: *logging
+    environment:
+      DB: postgres12
+      DB_PORT: '5432'
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${POSTIZ_TEMPORAL_DB_PASSWORD:?Missing Temporal database password}
+      POSTGRES_SEEDS: temporal-postgres
+      ENABLE_ES: 'false'
+      # Sample Text fields otherwise exhaust SQL visibility's three Text slots
+      # before Postiz registers organizationId and postId.
+      SKIP_ADD_CUSTOM_SEARCH_ATTRIBUTES: 'true'
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CLI_ADDRESS: temporal:7233
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/postiz.yaml
+    volumes:
+      - ./temporal.yaml:/etc/temporal/config/dynamicconfig/postiz.yaml:ro
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'temporal', 'operator', 'cluster', 'health', '--address', 'temporal:7233']
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+volumes:
+  config:
+  uploads:
+  database:
+  redis:
+  temporal-database:

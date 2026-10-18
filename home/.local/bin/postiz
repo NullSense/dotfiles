@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Always use this workstation's Postiz, with credentials outside public dotfiles.
+set -euo pipefail
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/postiz"
+if [[ -r "$state_dir/client.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$state_dir/client.env"
+  set +a
+fi
+export POSTIZ_API_URL=http://localhost:4007/api
+exec node "${XDG_DATA_HOME:-$HOME/.local/share}/postiz/cli/node_modules/postiz/dist/index.js" "$@"

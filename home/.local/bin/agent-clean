@@ -7,6 +7,9 @@ deletes only inside fixed roots, only things no running process is using:
   agent-clean path PATH...          a directory or file under an allowed root (never the root itself)
   agent-clean docker NAME...        a stopped test-stack or builder container (never volumes,
                                     never services); add --running for your own finished stack
+  agent-clean docker --owner-root PATH NAME...
+                                    any project's disposable audit/test/bench/build containers;
+                                    verify ownership through binds into a private agent-tmp root
   agent-clean network --owner-worktree PATH --owner-git-common-dir PATH ID_OR_NAME...
                                     preview empty, exactly owned Sift test networks; --execute removes
                                     only networks, preserving containers and volumes
@@ -185,24 +188,85 @@ def clean_paths(raws, dry):
     print(f"total {freed / 2**30:.2f} GiB")
 
 
-def clean_containers(names, dry, running_ok):
+def owned_container(name, owner):
+    """Prove a disposable container belongs to the asserted scratch root, on any branch.
+
+    Names alone are insufficient for new project namespaces. Require a bind witness,
+    no foreign writable bind, and no service restart policy; pin deletion to the ID.
+    Docker volumes are deliberately excluded from ownership/deletion decisions.
+    """
+    if (not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", name)
+            or not re.search(r"(?:^|[-_.])(audit|test|bench|acceptance|cache|build)(?:[-_.]|$)", name)):
+        fail(f"refused: {name} lacks a disposable test/audit/build name")
+    result = subprocess.run(["docker", "inspect", name], capture_output=True, text=True)
+    if result.returncode:
+        if "No such object:" in result.stderr or "No such container:" in result.stderr:
+            return None
+        fail(f"could not inspect container {name}")
+    try:
+        records = json.loads(result.stdout)
+        if not isinstance(records, list) or len(records) != 1:
+            raise ValueError
+        record = records[0]
+        state = record["State"]
+        policy = record["HostConfig"]["RestartPolicy"]["Name"]
+        mounts = record["Mounts"]
+        if (record["Name"] != "/" + name or not re.fullmatch(r"[0-9a-f]{64}", record["Id"])
+                or policy not in ("", "no") or not isinstance(state["Running"], bool)
+                or state.get("Paused") is not False or state.get("Restarting") is not False
+                or not isinstance(mounts, list)):
+            raise ValueError
+        witnessed = False
+        for mount in mounts:
+            if mount["Type"] != "bind":
+                continue
+            source = Path(mount["Source"]).resolve()
+            inside = source == owner or owner in source.parents
+            witnessed |= inside
+            if not inside and mount.get("RW") is not False:
+                fail(f"refused: {name} has a writable bind outside its owner root")
+        if not witnessed:
+            fail(f"refused: {name} has no bind into the asserted owner root")
+    except (KeyError, TypeError, ValueError, OSError):
+        fail(f"refused: {name} has unknown ownership, identity or service state")
+    return record
+
+
+def clean_containers(names, dry, running_ok, owner_root=None):
+    owner = None
+    if owner_root is not None:
+        owner = allowed_path(owner_root)
+        if (not any(root in owner.parents for root in TMP_ROOTS) or owner.is_symlink()
+                or not owner.is_dir() or owner.stat().st_uid != os.getuid()
+                or owner.stat().st_mode & 0o022):
+            fail("refused: --owner-root must be an owned, non-shared directory inside an agent scratch root")
     for name in names:
-        never = CONTAINER_NEVER.search(name) and not CONTAINER_AGENT_OWNED.match(name)
-        if never or not CONTAINER_OK.match(name):
-            fail(f"refused: container {name} is not an agent test stack or builder")
-        state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name],
-                               capture_output=True, text=True)
-        if state.returncode != 0:
-            print(f"absent  container {name}")
-            continue
-        if state.stdout.strip() == "true" and not running_ok:
+        identifier = name
+        if owner is not None:
+            record = owned_container(name, owner)
+            if record is None:
+                print(f"absent  container {name}")
+                continue
+            identifier, running = record["Id"], record["State"]["Running"]
+        else:
+            never = CONTAINER_NEVER.search(name) and not CONTAINER_AGENT_OWNED.match(name)
+            if never or not CONTAINER_OK.match(name):
+                fail(f"refused: container {name} is not an agent test stack or builder; "
+                     "use --owner-root for a disposable stack bound to your agent scratch directory")
+            state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name],
+                                   capture_output=True, text=True)
+            if state.returncode != 0:
+                print(f"absent  container {name}")
+                continue
+            running = state.stdout.strip() == "true"
+        if running and not running_ok:
             fail(f"refused: container {name} is running; pass --running only for a stack you created "
                  "and have finished with (prefer the owner tool, e.g. `sift-test-infra down`)")
         if dry:
             print(f"would remove container {name}")
             continue
         # `docker rm -f` without `-v`: named and anonymous volumes are kept.
-        subprocess.run(["docker", "rm", "-f", name], check=True)
+        subprocess.run(["docker", "rm", "-f", identifier], check=True)
 
 
 
@@ -323,7 +387,11 @@ def main(argv):
     if args[0] == "path":
         clean_paths(args[1:], dry)
     else:
-        clean_containers(args[1:], dry, running_ok)
+        parser = argparse.ArgumentParser(prog="agent-clean docker")
+        parser.add_argument("--owner-root", help="owned agent scratch directory containing stack bind mounts")
+        parser.add_argument("names", nargs="+")
+        options = parser.parse_args(args[1:])
+        clean_containers(options.names, dry, running_ok, options.owner_root)
 
 
 if __name__ == "__main__":

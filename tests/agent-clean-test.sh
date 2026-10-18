@@ -115,6 +115,59 @@ for name in [
 ]: relay_case(name, reject=True)
 print('PASS: exact packaged relays, running guard, dry-run and volume-preserving removal; near-miss IDs, suffixes and live services refused')
 
+# Any project's branch may own a disposable stack through a private scratch root.
+import copy, json
+owner_root = tmp/'oracle-feature-branch'
+owner_root.mkdir()
+owned = {'Id': 'a'*64, 'Name': '/oracle-audit-20261018-api',
+         'HostConfig': {'RestartPolicy': {'Name': 'no'}},
+         'State': {'Running': False, 'Paused': False, 'Restarting': False},
+         'Mounts': [{'Type': 'bind', 'Source': str(owner_root/'source'), 'RW': False},
+                    {'Type': 'volume', 'Source': '/var/lib/docker/volumes/keep', 'RW': True}]}
+def owned_case(mutate=None, reject=False, dry=False, running_ok=False, root=None):
+    current = copy.deepcopy(owned)
+    if mutate: mutate(current)
+    calls = []
+    def docker(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd == ['docker', 'inspect', current['Name'].removeprefix('/')]:
+            return subprocess.CompletedProcess(cmd, 0, json.dumps([current]), '')
+        if cmd == ['docker', 'rm', '-f', current['Id']]:
+            return subprocess.CompletedProcess(cmd, 0, current['Id'], '')
+        raise AssertionError('Unexpected Docker call: '+repr(cmd))
+    args = ['docker', '--owner-root', str(root or owner_root), current['Name'].removeprefix('/')]
+    if dry: args.insert(0, '--dry-run')
+    if running_ok: args.insert(0, '--running')
+    with patch.object(clean.subprocess, 'run', side_effect=docker), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try: clean.main(args)
+        except SystemExit as error: assert reject and error.code == 2
+        else: assert not reject, 'Accepted foreign or service container'
+    removals = [c for c in calls if c[:2] == ['docker', 'rm']]
+    assert removals == ([] if dry or reject else [['docker', 'rm', '-f', current['Id']]]), calls
+owned_case()
+owned_case(dry=True)
+owned_case(lambda c: c['State'].update(Running=True), reject=True)
+owned_case(lambda c: c['State'].update(Running=True), running_ok=True)
+owned_case(lambda c: c.update(Name='/legalkb-bench-feature-xyz-api'))
+owned_case(lambda c: c.update(Name='/oracle-api'), reject=True)
+owned_case(lambda c: c['Mounts'][0].update(Source=str(tmp/'another-run/source')), reject=True)
+owned_case(lambda c: c['Mounts'][0].update(Source=str(owner_root)+'-other/source'), reject=True)
+owned_case(lambda c: c['Mounts'].append({'Type':'bind','Source':'/home/shared/data','RW':True}), reject=True)
+owned_case(lambda c: c['HostConfig']['RestartPolicy'].update(Name='unless-stopped'), reject=True)
+owned_case(lambda c: c['State'].update(Restarting=True), reject=True)
+owned_case(lambda c: c.update(Id='a'*12), reject=True)
+owned_case(root=home/'documents', reject=True)
+owner_root.chmod(0o777)
+owned_case(reject=True)
+owner_root.chmod(0o755)
+link_root = tmp/'linked-owner'
+link_root.symlink_to(owner_root, target_is_directory=True)
+owned_case(root=link_root, reject=True)
+escape_mount = owner_root/'escaped'
+escape_mount.symlink_to(home/'documents', target_is_directory=True)
+owned_case(lambda c: c['Mounts'][0].update(Source=str(escape_mount/'data')), reject=True)
+print('PASS: branch-independent owner-root containers; explicit running opt-in, exact ID, foreign binds, services, symlink escapes and volumes protected')
+
 # Network cleanup is opt-in, exact-owner scoped, and never removes containers/volumes.
 import copy, json, subprocess
 from unittest.mock import patch

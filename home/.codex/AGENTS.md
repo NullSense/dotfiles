@@ -81,6 +81,10 @@ Fix a bug → write a regression test immediately (TDD preferred).
   only allowlisted delete. `rm -rf` on absolute or home paths is denied, and the tool refuses
   anything in use or outside its approved roots. It also permits owned Python bytecode caches
   under `~/bin`, `~/.local/bin` and their dotfile sources; see `agent-clean` for exact scope.
+  For a new project's or branch's disposable stack, use `agent-clean [--running] docker
+  --owner-root <agent-scratch-dir> <names…>`. Keep its bind data in that owned scratch directory
+  and use audit/test/bench/build names; the tool verifies ownership instead of requiring a new
+  project-name allowlist entry. `agent-clean docker --help` describes the interface.
   Prefer an owner tool where one exists (e.g. `sift-test-infra down`). The coordinator verifies
   cleanup in each hand-back.
   A refused cleanup is a permission bug: report the exact command so the user can fix the

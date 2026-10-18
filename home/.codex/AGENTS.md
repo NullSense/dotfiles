@@ -84,7 +84,9 @@ Fix a bug → write a regression test immediately (TDD preferred).
   For a new project's or branch's disposable stack, use `agent-clean [--running] docker
   --owner-root <agent-scratch-dir> <names…>`. Keep its bind data in that owned scratch directory
   and use audit/test/bench/build names; the tool verifies ownership instead of requiring a new
-  project-name allowlist entry. `agent-clean docker --help` describes the interface.
+  project-name allowlist entry. Add `--network <name>` for each disposable network exclusively
+  attached to those containers; ownership is checked before deletion. `agent-clean docker --help`
+  describes the interface.
   Prefer an owner tool where one exists (e.g. `sift-test-infra down`). The coordinator verifies
   cleanup in each hand-back.
   A refused cleanup is a permission bug: report the exact command so the user can fix the

@@ -9,7 +9,8 @@ deletes only inside fixed roots, only things no running process is using:
                                     never services); add --running for your own finished stack
   agent-clean docker --owner-root PATH NAME...
                                     any project's disposable audit/test/bench/build containers;
-                                    verify ownership through binds into a private agent-tmp root
+                                    verify ownership through binds into a private agent-tmp root;
+                                    --network NAME also removes explicitly named, exclusively owned networks
   agent-clean network --owner-worktree PATH --owner-git-common-dir PATH ID_OR_NAME...
                                     preview empty, exactly owned Sift test networks; --execute removes
                                     only networks, preserving containers and volumes
@@ -232,7 +233,7 @@ def owned_container(name, owner):
     return record
 
 
-def clean_containers(names, dry, running_ok, owner_root=None):
+def clean_containers(names, dry, running_ok, owner_root=None, networks=()):
     owner = None
     if owner_root is not None:
         owner = allowed_path(owner_root)
@@ -240,6 +241,30 @@ def clean_containers(names, dry, running_ok, owner_root=None):
                 or not owner.is_dir() or owner.stat().st_uid != os.getuid()
                 or owner.stat().st_mode & 0o022):
             fail("refused: --owner-root must be an owned, non-shared directory inside an agent scratch root")
+    stack_networks = []
+    if networks:
+        if owner is None:
+            fail("refused: --network requires --owner-root")
+        records = [owned_container(name, owner) for name in names]
+        if any(record and record["State"]["Running"] for record in records) and not running_ok:
+            fail("refused: stack has a running container; explicit --running required")
+        owned_ids = {record["Id"] for record in records if record is not None}
+        for name in networks:
+            if (not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", name)
+                    or not re.search(r"(?:^|[-_.])(audit|test|bench|acceptance|cache|build)(?:[-_.]|$)", name)):
+                fail("refused: network lacks a disposable test/audit/build name")
+            found = docker_json(["network", "inspect", name])
+            if not isinstance(found, list) or len(found) != 1:
+                fail("refused: expected exactly one stack network")
+            network = found[0]
+            endpoints = network.get("Containers")
+            if (network.get("Name") != name or not re.fullmatch(r"[0-9a-f]{64}", network.get("Id", ""))
+                    or network.get("Driver") != "bridge" or network.get("Scope") != "local"
+                    or network.get("Ingress") is not False or network.get("ConfigOnly") is not False
+                    or not isinstance(endpoints, dict) or not endpoints
+                    or not set(endpoints).issubset(owned_ids)):
+                fail("refused: network is not exclusively attached to this proven owned stack")
+            stack_networks.append(network)
     for name in names:
         identifier = name
         if owner is not None:
@@ -267,6 +292,16 @@ def clean_containers(names, dry, running_ok, owner_root=None):
             continue
         # `docker rm -f` without `-v`: named and anonymous volumes are kept.
         subprocess.run(["docker", "rm", "-f", identifier], check=True)
+    for network in stack_networks:
+        if dry:
+            print(f"would remove network {network['Name']} after removing its owned containers")
+            continue
+        found = docker_json(["network", "inspect", network["Id"]])
+        expected = dict(network, Containers={})
+        if found != [expected]:
+            fail("refused: stack network changed or still has attached endpoints")
+        # Docker independently refuses deletion if an endpoint attaches after inspection.
+        subprocess.run(["docker", "network", "rm", network["Id"]], check=True)
 
 
 
@@ -389,9 +424,11 @@ def main(argv):
     else:
         parser = argparse.ArgumentParser(prog="agent-clean docker")
         parser.add_argument("--owner-root", help="owned agent scratch directory containing stack bind mounts")
+        parser.add_argument("--network", action="append", default=[],
+                            help="explicit disposable network attached exclusively to this owned stack")
         parser.add_argument("names", nargs="+")
         options = parser.parse_args(args[1:])
-        clean_containers(options.names, dry, running_ok, options.owner_root)
+        clean_containers(options.names, dry, running_ok, options.owner_root, options.network)
 
 
 if __name__ == "__main__":

@@ -76,6 +76,28 @@ assert clean.allowed_path(str(tmp)) == tmp
 rejected(clean.TMP_ROOTS[0])
 print('PASS: owned command bytecode accepted; sources, mixed caches, nested directories, symlinks and unrelated home paths refused; dry-run and scoped deletion preserved')
 
+# Worktree build/test output is removable; the tracked directories that contain it are not.
+worktree = clean.WORKTREES/'feature-x'
+for generated in ['target/debug/incremental', 'lints/target/debug', 'lints/mutants.out',
+                  'mutants.out', 'mutants.out.old']:
+    (worktree/generated).mkdir(parents=True)
+for tracked in ['lints/src/lib.rs', 'web/targeting/app.js']:
+    source = worktree/tracked
+    source.parent.mkdir(parents=True)
+    source.write_text('tracked')
+for relative in ['target', 'target/debug', 'target/debug/incremental', 'lints/target',
+                 'lints/target/debug', 'mutants.out', 'mutants.out.old', 'lints/mutants.out',
+                 'lints/mutants.out/survived.txt']:
+    assert clean.allowed_path(str(worktree/relative)) == worktree/relative, relative
+for relative in ['lints', 'lints/src', 'lints/src/lib.rs', 'web', 'web/targeting',
+                 'web/targeting/app.js']:
+    rejected(worktree/relative)
+rejected(worktree)
+rejected(clean.WORKTREES)
+rejected(home/'Programming/sift/target')
+rejected(home/'Programming/sift/lints/target')
+print('PASS: worktree cargo target and cargo-mutants output accepted; containing tracked source, near-miss names and main-checkout build output refused')
+
 # Packaged acceptance relays are fixtures, never their installation's services.
 import subprocess
 from unittest.mock import patch

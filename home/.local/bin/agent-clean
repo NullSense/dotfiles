@@ -17,10 +17,12 @@ deletes only inside fixed roots, only things no running process is using:
   agent-clean --dry-run ...         show what would be removed
 
 Allowed path roots: ~/.cache/agent-tmp/<x>, ~/.cache/claude-tmp/<x>, ~/.cache/sift-la/<x>
-(local-acceptance stack data), and the `target/` dir
-(or anything inside it) of a worktree under ~/Programming/.sift-worktrees/. Root-owned files left
-by rootful Docker/BuildKit under an allowed path are removed through a throwaway alpine container.
-Python bytecode files directly inside __pycache__ in ~/bin, ~/.local/bin and
+(local-acceptance stack data), and generated build/test output of a worktree under
+~/Programming/.sift-worktrees/: a `target/` dir at the worktree root or in a nested cargo project
+(e.g. `lints/target/`), and cargo-mutants' `mutants.out/` or `mutants.out.old/`. Those names are
+gitignored and never tracked, so a containing source directory is still refused. Root-owned files
+left by rootful Docker/BuildKit under an allowed path are removed through a throwaway alpine
+container. Python bytecode files directly inside __pycache__ in ~/bin, ~/.local/bin and
 their dotfile source directories are also allowed. Whole cache directories must
 contain only owned regular .pyc/.pyo files; links and other contents are refused.
 """
@@ -38,6 +40,10 @@ from pathlib import Path
 HOME = Path.home()
 TMP_ROOTS = [HOME / ".cache/agent-tmp", HOME / ".cache/claude-tmp", HOME / ".cache/sift-la"]
 WORKTREES = HOME / "Programming/.sift-worktrees"
+# Generated, gitignored build/test output that a worktree may own: cargo's `target` (the workspace
+# root, or a nested cargo project such as `lints/target/`) and cargo-mutants' run output. Tracked
+# trees never use these names, and a containing directory is still refused below.
+WORKTREE_OUTPUTS = frozenset({"target", "mutants.out", "mutants.out.old"})
 BYTECODE_ROOTS = [HOME / "bin", HOME / ".local/bin", HOME / ".dotfiles/home/bin",
                   HOME / ".dotfiles/home/.local/bin"]
 CONTAINER_OK = re.compile(
@@ -89,12 +95,15 @@ def allowed_path(raw):
         return real
     if WORKTREES in real.parents:
         rel = real.relative_to(WORKTREES)
-        if len(rel.parts) >= 2 and rel.parts[1] == "target":
+        # rel.parts[0] is the worktree itself, so only a build-output directory named inside the
+        # worktree's own path qualifies; the tracked directory containing it (`lints/`, `web/`) is
+        # still refused.
+        if len(rel.parts) >= 2 and WORKTREE_OUTPUTS & set(rel.parts[1:]):
             return real
     if allowed_bytecode(real):
         return real
     fail(f"refused: {raw} is outside the allowed roots or approved Python bytecode caches "
-         "(agent-tmp, claude-tmp, worktree target/, command __pycache__)")
+         "(agent-tmp, claude-tmp, worktree build output, command __pycache__)")
 
 
 def users_of(path):

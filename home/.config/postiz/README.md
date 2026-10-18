@@ -1,8 +1,13 @@
 # Local Postiz
 
 Open http://localhost:4007/auth/login. The local account is `nullsense@postiz.local`;
-`postiz-local password-copy` copies its password for one paste without printing it.
+`postiz-local password-copy` copies its password without printing it. The clipboard
+is marked sensitive and stays available until replaced or cleared with
+`wl-copy --clear`, including when desktop clipboard watchers read it first.
 Credentials live in `~/.local/state/postiz/` with owner-only permissions.
+
+The live clipboard regression check uses dummy text and clears the clipboard:
+`python3 ~/.dotfiles/tests/postiz-local-clipboard-test.py`.
 
 `postiz-local up`, `down`, `status`, `check`, `logs [service]`, and `open` operate this
 installation. `down` preserves data volumes. `systemctl --user enable --now

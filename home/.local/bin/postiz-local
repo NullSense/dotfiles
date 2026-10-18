@@ -24,8 +24,10 @@ PY
   open) exec xdg-open http://localhost:4007 ;;
   password-copy)
     command -v wl-copy >/dev/null
-    wl-copy --paste-once < "$state_dir/password"
-    echo 'Local login password copied for one paste.'
+    # Clipboard watchers and browsers can request the selection before a paste.
+    # Keep serving it, while telling clipboard managers this is sensitive.
+    wl-copy --sensitive --type text/plain < "$state_dir/password"
+    echo 'Local login password copied to clipboard.'
     ;;
   *) echo 'Usage: postiz-local {up|down|status|check|logs [SERVICE]|open|password-copy}' >&2; exit 2 ;;
 esac

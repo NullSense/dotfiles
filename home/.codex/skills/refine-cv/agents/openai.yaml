@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refine CV"
+  short_description: "Edit factual CV content and readable linked exports"
+  default_prompt: "Use $refine-cv to improve this CV for the target role while preserving supported claims and hyperlinks."

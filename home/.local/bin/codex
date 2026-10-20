@@ -57,6 +57,31 @@ case "${1:-}" in
     app-server|exec-server|exec|e|review|mcp|doctor|debug|features|plugin|login|logout|completion|agents|queue|archive|delete|migrate-rollouts|unarchive|cloud|sandbox|update|help|--help|-h|--version|-V)
         ;;
     *)
+        # Preserved Sift snapshots still declare the obsolete optional direct
+        # servers replaced by the host gateway. Recognize only that exact file;
+        # never rewrite a task checkout or disable a deliberately edited server.
+        # Explicit directory/MCP/remote choices retain their original behavior.
+        legacy_defaults=1
+        for arg in "$@"; do
+            case "$arg" in
+                --) break ;;
+                -C|-C?*|--cd|--cd=*|--remote|--remote=*|*mcp_servers*)
+                    legacy_defaults=0 ;;
+            esac
+        done
+        if (( legacy_defaults )); then
+            project_root=$(git rev-parse --show-toplevel 2>/dev/null) || project_root=
+            if [[ -n $project_root && -f $project_root/.codex/config.toml ]]; then
+                config_hash=$(sha256sum -- "$project_root/.codex/config.toml")
+                if [[ ${config_hash%% *} == a53e49c5b0b740d0c12cd55cec794dc5cf1e6a71258a8d38b1ae7268617f89a6 ]]; then
+                    set -- -c mcp_servers.context7.enabled=false \
+                        -c mcp_servers.postgres.enabled=false \
+                        -c mcp_servers.sift.enabled=false \
+                        -c mcp_servers.moon.enabled=false \
+                        -c mcp_servers.huggingface.enabled=false "$@"
+                fi
+            fi
+        fi
         embedded=0
         explicit_transport=0
         for arg in "$@"; do

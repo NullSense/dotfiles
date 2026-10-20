@@ -76,6 +76,23 @@ exit "${INSTALL_EXIT:-0}"
         assert run(command).returncode == 0
     assert run('exec', 'nested', CODEX_LAUNCH_ACTIVE='1').returncode == 0
     assert (root / 'checks').read_text() == checks
+    # Required Firstmate overrides select the actual embedded transport while
+    # preserving policy/effort/notify arguments. Ordinary and remote launches
+    # retain the shared-server path; prompt text after -- is never parsed.
+    import json
+    overrides = ('-c', 'model_reasoning_effort="medium"', '--disable', 'hooks',
+                 '-c', 'notify=["bash","-c","touch /owned/turn-end"]')
+    r = run(*overrides, CODEX_LAUNCH_ACTIVE='1')
+    assert json.loads(r.stdout) == ['--no-daemon', *overrides], r
+    for flag in ('--config=x=1', '--enable=memories', '--disable=hooks', '--search'):
+        r = run(flag, CODEX_LAUNCH_ACTIVE='1')
+        assert json.loads(r.stdout) == ['--no-daemon', flag], r
+    for args in (('ordinary prompt',), ('--', '--search'),
+                 ('--no-daemon', *overrides),
+                 ('--remote', 'unix:///owned/server.sock', *overrides),
+                 ('app-server', '-c', 'x=1')):
+        r = run(*args, CODEX_LAUNCH_ACTIVE='1')
+        assert json.loads(r.stdout) == list(args), r
     binary.unlink()
     r = run('resume', OFFLINE='1')
     assert r.returncode == 1 and 'standalone package missing' in r.stderr

@@ -50,6 +50,28 @@ if [[ ! -x "$binary" ]]; then
     printf 'codex: standalone package missing; run codex update while online.\n' >&2
     exit 1
 fi
+# Per-launch config overrides require an embedded TUI; select it explicitly
+# instead of first attempting the shared server and warning about the fallback.
+# Keep internal/control subcommands and explicit transport choices unchanged.
+case "${1:-}" in
+    app-server|exec-server|exec|e|review|mcp|doctor|debug|features|plugin|login|logout|completion|agents|queue|archive|delete|migrate-rollouts|unarchive|cloud|sandbox|update|help|--help|-h|--version|-V)
+        ;;
+    *)
+        embedded=0
+        explicit_transport=0
+        for arg in "$@"; do
+            case "$arg" in
+                --) break ;;
+                -c|--config|--config=*|--enable|--enable=*|--disable|--disable=*|--search)
+                    embedded=1 ;;
+                --no-daemon|--remote|--remote=*) explicit_transport=1 ;;
+            esac
+        done
+        if (( embedded && ! explicit_transport )); then
+            set -- --no-daemon "$@"
+        fi
+        ;;
+esac
 export CODEX_LAUNCH_ACTIVE=1
 # Preserve this destination for an update initiated from the Codex UI, too.
 export CODEX_INSTALL_DIR="$install_dir"

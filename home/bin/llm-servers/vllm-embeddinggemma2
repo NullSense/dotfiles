@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # vllm-embeddinggemma2 — serve google/embeddinggemma-2 @914f7f8 (Apache-2.0) on vLLM as a
-# text+image 768-dim mean-pooled embedder (sift Q2 image-qualification eval).
+# text/image/audio/video 768-dim mean-pooled embedder.
 #
-# Audio tower SKIPPED via --limit-mm-per-prompt audio:0 (vLLM drops a tower whose
-# modalities are all limited to 0); vision kept at image:1, 280 soft tokens max.
+# All towers enabled: one image, audio clip or video per request. Visual inputs
+# use at most 280 soft tokens/frame; file videos sample at most four frames at 2 fps.
+# Sift must independently admit complete short clips and source-time coverage.
 # Encoder-only attention ⇒ no KV pool; the reservation is weights + graphs + activations.
 #
 # ⚠ SM120 SHARED-MEMORY PLUGIN: vLLM forces TRITON_ATTN for this model's mixed head dims
@@ -51,9 +52,10 @@ VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai@sha256:b25e8a046fdbe948987b3dba06ef2c
 MAXLEN="${MAXLEN:-8192}"         # the card's shared text/image window; vLLM caps here anyway
 # MEASURED 2026-10-09 (nvidia-smi, EngineCore process): 3000 MiB idle after warm-up and
 # 3002 MiB after 8 × 2×8109-token text batches + 16 concurrent 280-soft-token images.
-# Weights 0.83 GiB (text+vision; audio tower skipped — checkpoint is 1.39 GiB).
-# Encoder-only ⇒ no KV pool to size; 0.10 × 31.4 GiB ≈ 3.1 GiB covers the measured peak.
-GPU_UTIL="${GPU_UTIL:-0.10}"
+# Historical image-only weights: 0.83 GiB, with the audio tower skipped.
+# The full checkpoint is 1.39 GiB. Reserve 20% for all towers and bounded single-
+# sequence profiling; this is a capacity budget, not a measured all-tower peak.
+GPU_UTIL="${GPU_UTIL:-0.20}"
 
 VLLM_HOST_NET=1   # loopback-only, skips docker-proxy — see _vllm-common.sh
 # VLLM_SLEEP deliberately unset: a small pooling model reloads fast enough.
@@ -84,7 +86,9 @@ exec docker run --rm --init "${VLLM_GPU_ARGS[@]}" --name "$CONTAINER_NAME" \
   --host 127.0.0.1 --port "$PORT" \
   --max-model-len "$MAXLEN" \
   --max-num-batched-tokens "$MAXLEN" \
-  --limit-mm-per-prompt '{"image":1,"video":0,"audio":0}' \
+  --max-num-seqs 1 \
+  --limit-mm-per-prompt '{"image":1,"video":1,"audio":1}' \
   --mm-processor-kwargs '{"max_soft_tokens":280}' \
+  --media-io-kwargs '{"video":{"fps":2,"max_frames":4,"overflow_strategy":"uniform","backend":"opencv"}}' \
   --gpu-memory-utilization "$GPU_UTIL" \
   "$@"

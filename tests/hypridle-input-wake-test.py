@@ -2,7 +2,7 @@
 """Run with python3 ~/.dotfiles/tests/hypridle-input-wake-test.py [--live].
 
 Live mode uses inert callbacks, opens/closes a terminal and sends virtual Shift,
-then waits for physical input. It never changes monitor power.
+then waits for a physical keyboard key. It never changes monitor power.
 """
 
 import argparse
@@ -21,19 +21,23 @@ spec.loader.exec_module(wake)
 
 
 class PhysicalWakeTest(unittest.TestCase):
-    def test_only_physical_keyboards_and_pointers(self):
+    def test_only_physical_keyboards(self):
         keyboard = 1 << 30  # KEY_A
         mouse = 1 << 272  # BTN_LEFT
         self.assertTrue(wake.is_input_device("/sys/devices/pci0000/usb1/input/event4", keyboard))
-        self.assertTrue(wake.is_input_device("/sys/devices/pci0000/usb2/input/event2", mouse))
+        self.assertFalse(wake.is_input_device("/sys/devices/pci0000/usb2/input/event2", mouse))
+        # Gaming mice can advertise letter keys for their macro buttons.
+        self.assertFalse(wake.is_input_device("/sys/devices/pci0000/usb2/input/event2", mouse | keyboard))
         self.assertFalse(wake.is_input_device("/sys/devices/virtual/input/event21", keyboard))
         self.assertFalse(wake.is_input_device("/sys/devices/pci0000/sound/input/event17", 0))
 
-    def test_activity_does_not_include_leds_or_sync(self):
-        for kind, value, expected in ((1, 1, True), (1, 0, False), (2, 4, True),
-                                      (2, 0, False), (3, 20, True), (0, 0, False), (17, 1, False)):
-            with self.subTest(kind=kind, value=value):
-                event = wake.EVENT.pack(0, 0, kind, 0, value)
+    def test_only_key_presses_wake_even_on_combined_devices(self):
+        for kind, code, value, expected in ((1, 30, 1, True), (1, 42, 1, True),
+                                           (1, 30, 2, True), (1, 30, 0, False),
+                                           (1, 272, 1, False), (2, 0, 4, False),
+                                           (3, 0, 20, False), (0, 0, 0, False), (17, 0, 1, False)):
+            with self.subTest(kind=kind, code=code, value=value):
+                event = wake.EVENT.pack(0, 0, kind, code, value)
                 self.assertEqual(wake.has_activity(event), expected)
 
     def test_kernel_capability_words(self):
@@ -64,9 +68,9 @@ def live():
         window.wait(timeout=5)
         subprocess.run(["wtype", "-k", "Shift_L"], check=True, timeout=5)
         assert not parent.poll(1), "window activity or virtual typing woke the physical watcher"
-        print("PASS: window open/close and virtual typing did not wake; move the physical mouse now", flush=True)
+        print("PASS: window open/close and virtual typing did not wake; press a physical keyboard key now", flush=True)
         assert parent.poll(60) and parent.recv() == "physical", "no physical input received"
-        print("PASS: physical keyboard/mouse wakes the same watcher", flush=True)
+        print("PASS: physical keyboard wakes the same watcher", flush=True)
     finally:
         if window and window.poll() is None:
             window.terminate()

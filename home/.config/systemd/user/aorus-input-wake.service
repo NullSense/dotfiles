@@ -1,5 +1,5 @@
 [Unit]
-Description=Wake idle AORUS OLED on physical keyboard or mouse input
+Description=Wake idle AORUS OLED on physical keyboard input
 PartOf=graphical-session.target
 After=graphical-session.target
 

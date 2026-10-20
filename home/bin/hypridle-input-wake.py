@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One idle cycle: wait for physical keyboard/mouse input, then restore OLED.
+"""One idle cycle: wait for a physical keyboard key, then restore OLED.
 
 Started on demand by hypridle-suspend.sh through a Type=notify user service.
 No input is grabbed, retained or logged. Virtual devices cannot trigger wake.
@@ -24,8 +24,8 @@ def capabilities(text):
 
 
 def is_input_device(real_path, keys):
-    # KEY_A or BTN_LEFT: exclude sound jack/power/LED/controller-only devices.
-    return "/virtual/" not in real_path and bool(keys & ((1 << 30) | (1 << 272)))
+    # KEY_A without BTN_LEFT: gaming mice may also advertise letter keys.
+    return "/virtual/" not in real_path and bool(keys & (1 << 30)) and not bool(keys & (1 << 272))
 
 
 def physical_devices():
@@ -41,10 +41,10 @@ def physical_devices():
 
 
 def has_activity(data):
-    # EV_KEY press/repeat, EV_REL movement/scroll, EV_ABS touch/tablet motion.
-    # Ignore key release, EV_SYN and LED updates caused by desktop focus changes.
-    return any((kind == 1 and value > 0) or (kind == 2 and value != 0) or kind == 3
-               for _, _, kind, _, value in EVENT.iter_unpack(data))
+    # Regular EV_KEY press/repeat only. BTN_* starts at 0x100: mouse buttons
+    # must stay inert even when a combined keyboard/pointer shares one device.
+    return any(kind == 1 and 0 < code < 0x100 and value > 0
+               for _, _, kind, code, value in EVENT.iter_unpack(data))
 
 
 def wait_for_input(ready):
@@ -66,7 +66,7 @@ def wait_for_input(ready):
 
             refresh()
             if not devices:
-                raise RuntimeError("No readable physical keyboard/mouse; refusing unattended OLED power-off")
+                raise RuntimeError("No readable physical keyboard; refusing unattended OLED power-off")
             ready()  # The off command may proceed only once all FDs are open.
             refreshed = time.monotonic()
             while True:
@@ -83,7 +83,7 @@ def wait_for_input(ready):
                     elif has_activity(data):
                         return
                 if time.monotonic() - refreshed >= 1:
-                    refresh()  # Keyboard/mouse unplug/replug while asleep.
+                    refresh()  # Keyboard unplug/replug while asleep.
                     refreshed = time.monotonic()
         finally:
             for fd in devices.values():

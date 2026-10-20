@@ -21,6 +21,11 @@ else
     printf 'ddcutil %s\n' "$*" >> "$FAKE_POWER_LOG"
 fi
 STUB
+cat > "$scratch/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+printf 'systemctl %s\n' "$*" >> "$FAKE_POWER_LOG"
+exit "${FAKE_WAKE_FAILURE:-0}"
+STUB
 cat > "$scratch/home/bin/hypr-dispatch" <<'STUB'
 #!/usr/bin/env bash
 printf 'dispatch %s\n' "$*" >> "$FAKE_POWER_LOG"
@@ -65,4 +70,15 @@ grep -qx 'brightness resync' "$FAKE_POWER_LOG" || fail 'explicit wake missed bri
 run_callback resume
 grep -q 'setvcp d6 01' "$FAKE_POWER_LOG" || fail 'ordinary wake stayed disabled after explicit wake'
 
-printf 'PASS: manual OLED hold blocks automatic wake until explicit resume\n'
+# Ordinary off arms hardware wake before DDC; failure leaves the display on.
+: > "$FAKE_POWER_LOG"
+run_callback suspend
+[ "$(head -n 1 "$FAKE_POWER_LOG")" = 'systemctl --user start aorus-input-wake.service' ] \
+    || fail 'physical wake was not armed before power-off'
+grep -q 'setvcp d6 04' "$FAKE_POWER_LOG" || fail 'ordinary idle missed OLED power-off'
+: > "$FAKE_POWER_LOG"
+export FAKE_WAKE_FAILURE=1
+if run_callback suspend; then fail 'failed wake watcher did not abort idle-off'; fi
+if grep -q 'setvcp d6 04' "$FAKE_POWER_LOG"; then fail 'powered off without a working wake watcher'; fi
+
+printf 'PASS: manual hold, physical wake readiness, and startup failure fallback\n'

@@ -30,6 +30,14 @@ if [ "${1:-}" = --hold ]; then
     printf '1\n' > "$power_runtime/aorus-power-hold" || exit 1
 fi
 
+# Arm physical-input wake BEFORE powering down. A Type=notify start waits until
+# the keyboard/mouse FDs are open; input arriving during DDC off queues a resume
+# behind our power lock. If the watcher cannot start, keep the screen usable.
+# A deliberate --hold remains off until an explicit --force resume.
+if [ "$(cat "$power_runtime/aorus-power-hold" 2>/dev/null)" != 1 ]; then
+    systemctl --user start aorus-input-wake.service || exit 1
+fi
+
 oled_num=""
 msi_num=""
 cur=""

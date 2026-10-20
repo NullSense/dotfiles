@@ -7,12 +7,28 @@
 #                         and reports 01 even though panel state diverges).
 #                         Brightness=0 is the well-tested write path that
 #                         actually extinguishes the backlight here.
-#   Plus DPMS off so any future third monitor parks too.
+# Manual stay-off: hypridle-suspend.sh --hold. Automatic resume stays blocked
+# until hypridle-resume.sh --force.
 #
 # Display numbers are detected by EDID model (positional `--display 1 2`
 # breaks silently when the kernel renumbers ddcutil's bus order).
 
 set -u
+
+case "${1:-}" in
+    ''|--hold) ;;
+    *) printf 'Usage: %s [--hold]\n' "$0" >&2; exit 2 ;;
+esac
+[ "$#" -le 1 ] || exit 2
+
+# Serialize with resume, including any wake already in flight. Keep the hold in
+# the user's runtime directory; ordinary idle-off never clears it.
+power_runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+exec 9>"$power_runtime/aorus-power.lock"
+flock -x 9 || exit 1
+if [ "${1:-}" = --hold ]; then
+    printf '1\n' > "$power_runtime/aorus-power-hold" || exit 1
+fi
 
 oled_num=""
 msi_num=""

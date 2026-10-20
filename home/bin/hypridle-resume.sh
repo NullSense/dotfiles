@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Hypridle wake sequence — used by both the 4-min idle on-resume and the
 # after_sleep_cmd path.
+# Manual stay-off is respected by both callers. Pass --force to deliberately
+# clear a hold set by hypridle-suspend.sh --hold and turn the OLED back on.
 #
 # Order matters:
 #   1. DPMS on FIRST. This re-trains the DP link / brings the AUX channel up
@@ -15,6 +17,21 @@
 #      special-casing here.
 
 set -u
+
+case "${1:-}" in
+    ''|--force) ;;
+    *) printf 'Usage: %s [--force]\n' "$0" >&2; exit 2 ;;
+esac
+[ "$#" -le 1 ] || exit 2
+
+power_runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+exec 9>"$power_runtime/aorus-power.lock"
+flock -x 9 || exit 1
+if [ "${1:-}" = --force ]; then
+    printf '0\n' > "$power_runtime/aorus-power-hold" || exit 1
+elif [ "$(cat "$power_runtime/aorus-power-hold" 2>/dev/null)" = 1 ]; then
+    exit 0
+fi
 
 # DPMS on only the OLED (DP-1); DP-2 was never parked (see suspend script) so it
 # needs no wake — and DPMS-cycling the rotated DP-2 is what kicked the race.

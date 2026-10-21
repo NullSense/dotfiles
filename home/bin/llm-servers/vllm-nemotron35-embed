@@ -8,7 +8,14 @@ set -euo pipefail
 : "${PORT:=8018}"
 MODEL="${MODEL:-$HOME/.lmstudio/models/nvidia/Nemotron-3.5-Embed-1B-NVFP4}"
 REVISION="${REVISION:-198164478bd2c4f2d3311d64eb563bc8564e0e6d}"
-NAME="${SERVED_NAME:-nvidia/Nemotron-3.5-Embed-1B-NVFP4@$REVISION}"
+REPOSITORY=nvidia/Nemotron-3.5-Embed-1B-NVFP4
+NAME="${SERVED_NAME:-$REPOSITORY@$REVISION}"
+# Sift's text wire uses the repository name; keep the pinned alias first for
+# discovery/provenance while accepting both names for these same loaded weights.
+SERVED_NAMES=("$NAME")
+if [[ "$NAME" != "$REPOSITORY" ]]; then
+  SERVED_NAMES+=("$REPOSITORY")
+fi
 CONTAINER_NAME="${CONTAINER_NAME:-vllm-nemotron35-embed}"
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "$0")")/_vllm-image.sh"
@@ -31,7 +38,7 @@ exec docker run --rm --pull never --init "${VLLM_GPU_ARGS[@]}" --name "$CONTAINE
   "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
   "$IMAGE" \
   "$MODEL" \
-  --served-model-name "$NAME" \
+  --served-model-name "${SERVED_NAMES[@]}" \
   --runner pooling --dtype bfloat16 \
   --host 127.0.0.1 --port "$PORT" \
   --max-model-len "$MAXLEN" \

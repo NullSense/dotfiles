@@ -2,7 +2,7 @@
 # vllm-embeddinggemma2 — serve google/embeddinggemma-2 @914f7f8 (Apache-2.0) on vLLM as a
 # text/image/audio/video 768-dim mean-pooled embedder.
 #
-# All towers enabled: one image, audio clip or video per request. Visual inputs
+# All towers enabled: up to four images/audio clips or one video per request. Visual inputs
 # use at most 280 soft tokens/frame; file videos sample at most four frames at 2 fps.
 # Sift must independently admit complete short clips and source-time coverage.
 # Encoder-only attention ⇒ no KV pool; the reservation is weights + graphs + activations.
@@ -23,7 +23,7 @@
 #   leading tier (VLLM_IMAGE_PIN) once a stable release contains embedding_gemma2.py,
 #   and RE-RUN THE PARITY GATE (SentenceTransformers 6.1.0 bf16 reference, cosine ≥ 0.999
 #   per item for query text, document text, and images) before trusting its vectors.
-#   PARITY 2026-10-09 on this digest + plugin vs ST 6.1.0 / transformers 5.19.0 bf16
+#   HISTORICAL PARITY 2026-10-09 on the prior nightly + plugin vs ST 6.1.0 / transformers 5.19.0 bf16
 #   (config_kwargs audio_config=None): min cosine 0.99994 over query, document, the
 #   960×672 PNG and four natural images (4:3, 3:2, ~1:1, 2:3); an image request WITHOUT
 #   add_special_tokens scored 0.913 (negative control).
@@ -48,7 +48,7 @@ set -euo pipefail
 MODEL="${MODEL:-google/embeddinggemma-2}"
 REVISION="${REVISION:-914f7f89142e33e77833254d9c9b90c3cef7303b}"   # also pins the tokenizer
 NAME="${SERVED_NAME:-google/embeddinggemma-2@$REVISION}"           # /v1/models shows the revision
-VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai@sha256:b25e8a046fdbe948987b3dba06ef2cf9ea0f02b36d9482a25113a445ee52ad21}"
+VLLM_IMAGE="${VLLM_IMAGE:-sha256:8d1b08d28ab26fcb6b9fbb821ec227df51df6a3b9f4ab85c55c2785137a54349}"
 MAXLEN="${MAXLEN:-8192}"         # the card's shared text/image window; vLLM caps here anyway
 # MEASURED 2026-10-09 (nvidia-smi, EngineCore process): 3000 MiB idle after warm-up and
 # 3002 MiB after 8 × 2×8109-token text batches + 16 concurrent 280-soft-token images.
@@ -60,7 +60,6 @@ GPU_UTIL="${GPU_UTIL:-0.20}"
 VLLM_HOST_NET=1   # loopback-only, skips docker-proxy — see _vllm-common.sh
 # VLLM_SLEEP deliberately unset: a small pooling model reloads fast enough.
 source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
-PLUGIN_DIR="$(dirname "$(readlink -f "$0")")/vllm-plugins/triton-prefill-smem"
 
 # Overridable so a smoke test / bench runs its OWN container instead of killing the
 # live llama-swap one that shares this name. Default keeps the llama-swap identity.
@@ -68,16 +67,15 @@ PLUGIN_DIR="$(dirname "$(readlink -f "$0")")/vllm-plugins/triton-prefill-smem"
 
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-# --entrypoint bash: install the shared-memory plugin, then exec the normal serve path.
-# Copied to /tmp because the ro mount can't take egg-info; --no-build-isolation keeps
-# the install offline (setuptools ships in the image).
+# Root566 qualified this exact normal image/config for silent temporal visual input.
+# The image already carries the verified SM120 plugin and Transformers audio-position patch;
+# start its normal server directly, with no runtime install or diagnostic observer.
+# Joint audiovisual semantic qualification remains RED; Sift keeps joint registration absent.
 exec docker run --rm --init "${VLLM_GPU_ARGS[@]}" --name "$CONTAINER_NAME" \
   "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
-  -v "$PLUGIN_DIR:/smem-plugin:ro" \
   --ipc=host \
-  --entrypoint bash \
-  "$VLLM_IMAGE" \
-  -c 'cp -r /smem-plugin /tmp/smp && pip install --no-deps --no-build-isolation -q /tmp/smp && exec vllm serve "$@"' _ \
+  --entrypoint vllm \
+  "$VLLM_IMAGE" serve \
   "$MODEL" \
   --revision "$REVISION" \
   --served-model-name "$NAME" \
@@ -87,8 +85,9 @@ exec docker run --rm --init "${VLLM_GPU_ARGS[@]}" --name "$CONTAINER_NAME" \
   --max-model-len "$MAXLEN" \
   --max-num-batched-tokens "$MAXLEN" \
   --max-num-seqs 1 \
-  --limit-mm-per-prompt '{"image":1,"video":1,"audio":1}' \
+  --limit-mm-per-prompt '{"image":4,"video":1,"audio":4}' \
   --mm-processor-kwargs '{"max_soft_tokens":280}' \
   --media-io-kwargs '{"video":{"fps":2,"max_frames":4,"overflow_strategy":"uniform","backend":"opencv"}}' \
   --gpu-memory-utilization "$GPU_UTIL" \
+  --trust-request-mm-kwargs \
   "$@"

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Oracle's text+image embedder. Checkpoint revision is recorded in the served ID;
+# download with hf to the canonical model store before starting this wrapper.
+# The shared vLLM pin must be >=0.32.0 (NVIDIA's tested NVFP4 serving release).
+# Prefer /v2/embed with input_type=query/document for the checkpoint's template.
+set -euo pipefail
+
+: "${PORT:=8018}"
+MODEL="${MODEL:-$HOME/.lmstudio/models/nvidia/Nemotron-3.5-Embed-1B-NVFP4}"
+REVISION="${REVISION:-198164478bd2c4f2d3311d64eb563bc8564e0e6d}"
+NAME="${SERVED_NAME:-nvidia/Nemotron-3.5-Embed-1B-NVFP4@$REVISION}"
+CONTAINER_NAME="${CONTAINER_NAME:-vllm-nemotron35-embed}"
+# shellcheck disable=SC1091
+source "$(dirname "$(readlink -f "$0")")/_vllm-image.sh"
+IMAGE="${VLLM_IMAGE:-$VLLM_IMAGE_PIN}"
+if [[ "$IMAGE" =~ :v([0-9]+)\.([0-9]+)\. ]] &&
+   (( BASH_REMATCH[1] == 0 && BASH_REMATCH[2] < 32 )); then
+  printf 'Nemotron 3.5 requires vLLM >=0.32.0; qualify the shared pin with vllm-update --apply or set VLLM_IMAGE explicitly.\n' >&2
+  exit 2
+fi
+MAXLEN="${MAXLEN:-8192}"
+GPU_UTIL="${GPU_UTIL:-0.16}"
+# These are bounded shared-workstation budgets, not measured quality optima.
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"
+export VLLM_HOST_NET=1 VLLM_HF_CACHE_MODE=none
+# shellcheck disable=SC1091
+source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
+
+exec docker run --rm --pull never --init "${VLLM_GPU_ARGS[@]}" --name "$CONTAINER_NAME" \
+  --security-opt no-new-privileges --ipc=host \
+  "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
+  "$IMAGE" \
+  "$MODEL" \
+  --served-model-name "$NAME" \
+  --runner pooling --dtype bfloat16 \
+  --host 127.0.0.1 --port "$PORT" \
+  --max-model-len "$MAXLEN" \
+  --max-num-batched-tokens "$MAXLEN" \
+  --max-num-seqs "$MAX_NUM_SEQS" \
+  --limit-mm-per-prompt '{"image":1,"video":0,"audio":0}' \
+  --chat-template-content-format openai \
+  --compilation-config '{"compile_mm_encoder":true}' \
+  --max-cudagraph-capture-size 512 \
+  --gpu-memory-utilization "$GPU_UTIL" \
+  "$@"

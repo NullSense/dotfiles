@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Hibernate Linux, boot Windows next, resume Linux on the following boot.
+# Default entry Boot0000 = Windows Boot Manager on GPT part 4 (PARTUUID 636bcb3c, nvme1n1p4 vfat ESP),
+# the same disk as the 1.6T Windows NTFS install (nvme1n1p2); has \EFI\Microsoft\Boot\bootmgfw.efi.
+set -euo pipefail
+
+for m in /mnt/media-2tb /mnt/media-624g /mnt/media-3tb /mnt/windows /mnt/windows-nvme; do
+    # Real fs only; the idle autofs trigger is left in place.
+    if findmnt -rn -t ntfs,ntfs3,fuseblk -M "$m" >/dev/null 2>&1; then
+        if ! sudo umount "$m"; then
+            echo "busy: $m is still in use, not hibernating" >&2
+            fuser -vm "$m" >&2 || true
+            exit 1
+        fi
+    fi
+done
+
+sudo efibootmgr -n "${1:-0000}" >/dev/null
+systemctl hibernate

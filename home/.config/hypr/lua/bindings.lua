@@ -286,9 +286,25 @@ hl.bind(mod .. " + CTRL + f", hl.dsp.window.fullscreen({ mode = "fullscreen", ac
 hl.bind(mod .. " + SHIFT + f", hl.dsp.window.fullscreen_state({ internal = 0, client = 2, action = "toggle" }), { description = "Fake fullscreen (share)" })
 -- Pseudo + pop-out — omarchy convention. SUPER+P = pseudo; SUPER+O = float
 -- AND pin AND raise (omarchy-hyprland-window-pop) which subsumes our old
--- manual Pin combo.
+-- manual Pin combo. Native port of omarchy-hyprland-window-pop: that script uses
+-- hyprlang `hyprctl dispatch togglefloating …`, which the Lua manager rejects.
 hl.bind(mod .. " + p", hl.dsp.window.pseudo(), { description = "Pseudo" })
-hl.bind(mod .. " + o", hl.dsp.exec_cmd("omarchy-hyprland-window-pop"), { description = "Pop window out (float+pin)" })
+hl.bind(mod .. " + o", function()
+    local w = hl.get_active_window()
+    if not w then return end
+    if w.pinned then
+        hl.dispatch(hl.dsp.window.pin({ action = "toggle" }))
+        hl.dispatch(hl.dsp.window.float({ action = "toggle" }))
+        hl.dispatch(hl.dsp.window.tag({ tag = "-pop" }))
+    else
+        hl.dispatch(hl.dsp.window.float({ action = "toggle" }))
+        hl.dispatch(hl.dsp.window.resize({ x = 1300, y = 900 }))
+        hl.dispatch(hl.dsp.window.center())
+        hl.dispatch(hl.dsp.window.pin({ action = "toggle" }))
+        hl.dispatch(hl.dsp.window.alter_zorder({ mode = "top" }))
+        hl.dispatch(hl.dsp.window.tag({ tag = "+pop" }))
+    end
+end, { description = "Pop window out (float+pin)" })
 hl.bind(mod .. " + CTRL + Return", hl.dsp.window.center(), { description = "Center floating window" })
 
 -- ----- Native tab groups (i3 `layout tabbed`) -------------------------------

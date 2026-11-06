@@ -70,7 +70,9 @@ docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 # Root566 qualified this exact normal image/config for silent temporal visual input.
 # The image already carries the verified SM120 plugin and Transformers audio-position patch;
 # start its normal server directly, with no runtime install or diagnostic observer.
-# Joint audiovisual semantic qualification remains RED; Sift keeps joint registration absent.
+# Joint audiovisual: Sift's structural probe qualifies it (joint_audio_max_frames 4) and indexes
+# audio_visual windows (measured 2026-11-06, sift cross_modal_av_live_retrieval); a separate
+# semantic-quality qualification of the joint track has not been re-run.
 exec docker run --rm --init "${VLLM_GPU_ARGS[@]}" --name "$CONTAINER_NAME" \
   "${VLLM_MOUNTS[@]}" "${VLLM_ENV[@]}" "${VLLM_ULIMITS[@]}" "${VLLM_NET[@]}" \
   --ipc=host \

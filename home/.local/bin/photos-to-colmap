@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Prepare photographs for LichtFeld Studio using CUDA-enabled COLMAP 4.2+."""
+
+import argparse
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("photos", type=Path, help="directory containing source photos")
+    parser.add_argument("project", type=Path, help="new output directory")
+    parser.add_argument("--matcher", choices=("exhaustive", "sequential"), default="exhaustive",
+                        help="sequential is faster for ordered video frames")
+    parser.add_argument("--threads", type=int, default=8)
+    parser.add_argument("--feature-size", type=int, default=3200,
+                        help="maximum image edge for feature extraction; output keeps full resolution")
+    args = parser.parse_args()
+    if args.threads < 1 or args.feature_size < 1:
+        parser.error("threads and feature-size must be positive")
+    photos = args.photos.expanduser().resolve()
+    project = args.project.expanduser().resolve()
+    if not photos.is_dir():
+        parser.error(f"photo directory does not exist: {photos}")
+    if project == photos or photos in project.parents:
+        parser.error("project must be outside the source photo directory")
+    if project.exists():
+        parser.error("project already exists; choose a new directory to preserve existing work")
+    colmap = shutil.which("colmap")
+    if not colmap:
+        parser.error("colmap is not installed or is missing from PATH")
+    project.mkdir(parents=True)
+    sparse = project / "sparse"
+    sparse.mkdir()
+    dataset = project / "dataset"
+    database = project / "database.db"
+
+    def run(command, *options):
+        print(f"\nCOLMAP: {command}", flush=True)
+        subprocess.run([colmap, command, *map(str, options)], check=True)
+
+    try:
+        run("feature_extractor", "--database_path", database, "--image_path", photos,
+            "--FeatureExtraction.use_gpu", 1, "--FeatureExtraction.gpu_index", 0,
+            "--FeatureExtraction.num_threads", args.threads,
+            "--FeatureExtraction.max_image_size", args.feature_size,
+            "--SiftExtraction.max_num_features", 16384)
+        matching_options = []
+        if args.matcher == "sequential":
+            # Loop detection needs a separate vocabulary tree. Keep this command self-contained.
+            matching_options = ["--SequentialMatching.loop_detection", 0]
+        run(f"{args.matcher}_matcher", "--database_path", database,
+            "--FeatureMatching.use_gpu", 1, "--FeatureMatching.gpu_index", 0,
+            "--FeatureMatching.num_threads", args.threads,
+            "--FeatureMatching.guided_matching", 1, *matching_options)
+        run("mapper", "--database_path", database, "--image_path", photos,
+            "--output_path", sparse, "--Mapper.num_threads", args.threads,
+            "--Mapper.multiple_models", 0)
+        model = sparse / "0"
+        if not (model / "images.bin").is_file():
+            raise RuntimeError("COLMAP could not reconstruct a connected scene; check photo overlap")
+        run("image_undistorter", "--image_path", photos, "--input_path", model,
+            "--output_path", dataset, "--output_type", "COLMAP",
+            "--num_threads", args.threads)
+        run("model_analyzer", "--path", model)
+    except (subprocess.CalledProcessError, RuntimeError) as error:
+        print(f"\nReconstruction stopped: {error}\nPartial work is preserved in {project}", file=sys.stderr)
+        return 1
+    print(f"\nReady for LichtFeld Studio: {dataset}\nOpen this dataset folder in LichtFeld, then start training.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

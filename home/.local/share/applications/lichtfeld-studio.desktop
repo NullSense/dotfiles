@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=LichtFeld Studio
+Comment=Train and edit 3D Gaussian splats
+Exec=lichtfeld %f
+TryExec=lichtfeld
+Icon=lichtfeld-studio
+Terminal=false
+Type=Application
+Categories=Graphics;3DGraphics;
+MimeType=application/x-ply;

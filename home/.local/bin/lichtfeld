@@ -1,0 +1,11 @@
+#!/bin/sh
+# Launch the private native build without changing the desktop's library paths.
+set -eu
+install_root="$HOME/.local/opt/lichtfeld"
+if [ ! -x "$install_root/bin/LichtFeld-Studio" ]; then
+    printf '%s\n' "LichtFeld Studio is not installed in $install_root" >&2
+    exit 1
+fi
+export LD_LIBRARY_PATH="$install_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LFS_VRAM_RESERVE_MB="${LFS_VRAM_RESERVE_MB:-2048}"
+exec "$install_root/bin/LichtFeld-Studio" "$@"

@@ -57,7 +57,8 @@ hl.env("_JAVA_AWT_WM_NONREPARENTING", "1")
 -- ~/bin/screenshot already defaults to Screenshots/, but the upstream
 -- omarchy-capture-screenshot defaults to $XDG_PICTURES_DIR which is
 -- $HOME/Pictures, leaving 20+ orphaned PNGs there over time.
-hl.env("OMARCHY_SCREENSHOT_DIR", "$HOME/Pictures/Screenshots")
+-- Lua env values are literal; expand HOME here rather than creating a $HOME directory.
+hl.env("OMARCHY_SCREENSHOT_DIR", assert(os.getenv("HOME")) .. "/Pictures/Screenshots")
 
 -- Screen recording — kept on the default KMS path (portal OFF) so the elephant
 -- menu and keybinds both get slurp region-select, the same UX as the screenshot

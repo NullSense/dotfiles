@@ -2,6 +2,13 @@
 # Recurring capture lifecycle/clipboard tests. Opt in to real NVENC with --gpu.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+lua - "$ROOT/home/.config/hypr/lua/env.lua" <<'LUA'
+local env = {}
+hl = { env = function(key, value) env[key] = value end }
+dofile(arg[1])
+assert(env.OMARCHY_SCREENSHOT_DIR == os.getenv("HOME") .. "/Pictures/Screenshots",
+    "screenshot directory must expand HOME before passing it to hl.env")
+LUA
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/agent-tmp/capture-tests"
 mkdir -p "$cache"
 case $(findmnt -n -o FSTYPE -T "$cache") in tmpfs|ramfs) echo 'Disk-backed test storage required' >&2; exit 1 ;; esac

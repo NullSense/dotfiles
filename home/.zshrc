@@ -97,7 +97,9 @@ zstyle ':fzf-tab:complete:(\\|*/|)ls:*' fzf-preview 'eza -1 --color=always --ico
 
 # ─── Tool integrations ──────────────────────────────────────────────────────
 # fzf widgets (Ctrl-T file, Alt-C cd; Ctrl-R is owned by atuin below)
-source /usr/share/fzf/key-bindings.zsh
+# Interactive command shells without a terminal have no line editor; fzf's
+# option restoration tries to enable zle and emits an error in that case.
+[[ -o zle && -t 0 && -t 1 ]] && source /usr/share/fzf/key-bindings.zsh
 # Do NOT source /usr/share/fzf/completion.zsh: it eagerly binds Tab (^I) to
 # fzf-completion at startup, but zicompinit + fzf-tab load later in turbo
 # (wait lucid). So on the first prompt Tab is bound to a completion widget
@@ -149,7 +151,7 @@ fi
 
 command -v atuin    &>/dev/null && eval "$(atuin init zsh)"
 command -v direnv   &>/dev/null && eval "$(direnv hook zsh)"
-command -v starship &>/dev/null && eval "$(starship init zsh)"
+[[ ${TERM:-dumb} != dumb ]] && command -v starship &>/dev/null && eval "$(starship init zsh)"
 
 # ─── Keybindings ────────────────────────────────────────────────────────────
 # Ctrl-Space → accept autosuggestion is bound in the atload hook above, so it

@@ -1,0 +1,10 @@
+[Unit]
+Description=Copy the current omarchy wallpaper to the SDDM login screen
+
+[Service]
+Type=oneshot
+# The SDDM greeter runs as the sddm user and cannot read ~/Pictures, so the
+# wallpaper is copied into the theme. The target file is owned by this user
+# (set up by ~/.dotfiles/arch-install/configure-sddm-wayland.sh); cp writes it
+# in place, so no root is needed. Qt detects PNG/JPEG by content, not suffix.
+ExecStart=/usr/bin/cp -fL %h/.config/omarchy/current/background /usr/local/share/sddm/themes/nullsense-gruvbox/Backgrounds/nullsense-lockscreen.jpg

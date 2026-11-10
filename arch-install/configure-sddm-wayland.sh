@@ -34,6 +34,9 @@ pacman -Q layer-shell-qt >/dev/null 2>&1 || {
 install -d -m 0755 "$theme_dir"
 cp -a "$source_theme"/. "$theme_dir"/
 install -m 0644 "$background" "$theme_dir/Backgrounds/nullsense-lockscreen.jpg"
+# Owned by the desktop user so sddm-background-sync.{path,service} (systemd --user)
+# can keep it in sync with the omarchy wallpaper without root.
+chown "$(stat -c %U "$owner_home"):$(stat -c %G "$owner_home")" "$theme_dir/Backgrounds/nullsense-lockscreen.jpg"
 cp "$theme_dir/Themes/astronaut.conf" "$theme_dir/Themes/nullsense-gruvbox.conf"
 
 sed -i \

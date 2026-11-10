@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync the SDDM login wallpaper when the omarchy wallpaper changes
+
+[Path]
+# Watch the directory: inotify on the symlink itself follows it to the old image,
+# so re-pointing current/background would go unnoticed.
+PathChanged=%h/.config/omarchy/current
+Unit=sddm-background-sync.service
+
+[Install]
+WantedBy=default.target

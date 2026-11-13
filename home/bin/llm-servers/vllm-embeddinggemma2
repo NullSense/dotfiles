@@ -56,6 +56,17 @@ MAXLEN="${MAXLEN:-8192}"         # the card's shared text/image window; vLLM cap
 # The full checkpoint is 1.39 GiB. Reserve 20% for all towers and bounded single-
 # sequence profiling; this is a capacity budget, not a measured all-tower peak.
 GPU_UTIL="${GPU_UTIL:-0.20}"
+# MEASURED 2026-11-13 (side container, RTX 5090, live indexer sharing the GPU; items/s, c=concurrency;
+# guidellm has no embeddings/audio/video dataset, so a stdlib bench drove /v1/embeddings). Text
+# 32x~256-token batches, c4: seqs 2 = 112/s (p50 1.12 s), seqs 4 = 263, seqs 8 = 368, seqs 16 + 16384
+# batched tokens = 655/s (p50 0.17 s). Text 8x256 c8: 142 -> 557/s. 10 s PCM16 audio and 4-frame video
+# (pre-encoded bodies, c8): ~73-80 -> ~91-101 items/s, p95 ~0.11 s. Engine peak 3.6 GiB (seqs <= 8 at
+# 8192 tokens) / 4.95 GiB (16384 tokens), inside the 0.20 reservation (6.5 GiB), so other tenants are
+# unaffected. No errors/OOM in any arm. Vectors vs seqs 2 idle: min cosine 0.99995 (text, audio, video);
+# audio co-batched with text under load drifts to 0.99976 (bf16 batch-shape noise, not a defect).
+# max-num-seqs 2 was the cap on Sift's throughput: it admitted two sequences per step.
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-16}"
+MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-16384}"
 
 VLLM_HOST_NET=1   # loopback-only, skips docker-proxy — see _vllm-common.sh
 # VLLM_SLEEP deliberately unset: a small pooling model reloads fast enough.
@@ -85,10 +96,10 @@ exec docker run --rm --init "${VLLM_GPU_ARGS[@]}" --name "$CONTAINER_NAME" \
   --dtype bfloat16 \
   --host 127.0.0.1 --port "$PORT" \
   --max-model-len "$MAXLEN" \
-  --max-num-batched-tokens "$MAXLEN" \
-  --max-num-seqs 1 \
+  --max-num-batched-tokens "$MAX_BATCHED_TOKENS" \
+  --max-num-seqs "$MAX_NUM_SEQS" \
   --limit-mm-per-prompt '{"image":4,"video":1,"audio":4}' \
-  --mm-processor-kwargs '{"max_soft_tokens":280}' \
+  --mm-processor-kwargs '{"max_soft_tokens":280,"audio_seq_length":8000}' \
   --media-io-kwargs '{"video":{"fps":2,"max_frames":4,"overflow_strategy":"uniform","backend":"opencv"}}' \
   --gpu-memory-utilization "$GPU_UTIL" \
   --trust-request-mm-kwargs \

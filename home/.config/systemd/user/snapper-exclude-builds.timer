@@ -1,0 +1,9 @@
+[Unit]
+Description=Before each hourly snapper snapshot, move new build trees into their own subvolumes
+
+[Timer]
+OnCalendar=*-*-* *:55:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

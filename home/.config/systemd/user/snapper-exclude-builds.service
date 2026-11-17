@@ -1,0 +1,8 @@
+[Unit]
+Description=Keep build output, dependency trees and agent worktrees out of snapper snapshots
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+ExecStart=%h/.local/bin/snapper-exclude-builds

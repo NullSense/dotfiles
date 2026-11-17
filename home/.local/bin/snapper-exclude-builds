@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Keep build output, dependency trees and agent worktrees out of snapper snapshots.
+
+Snapper snapshots a subvolume but never descends into nested subvolumes. This turns
+regenerable directories (Cargo `target/`, `node_modules`, Python venvs, tool caches and
+agent worktree containers) under the scanned roots into their own subvolumes, so an
+hourly /home snapshot never pins gigabytes of build artifacts.
+
+Conversion is unprivileged: create a subvolume beside the directory, reflink-copy the
+contents (metadata only on btrfs), swap the names, then delete the old directory. A
+directory any process is using (cwd, executable, mapped file, open fd) or whose Cargo
+lock is held is skipped and retried on the next run.
+
+Usage: snapper-exclude-builds [--dry-run] [ROOT ...]   (default roots: ~/Programming ~/Documents)
+"""
+import fcntl
+import os
+import shutil
+import subprocess
+import sys
+
+NAMES = {
+    "node_modules", ".venv", ".next", ".turbo", ".parcel-cache", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", ".tox", ".nox", ".gradle",
+}
+WORKTREE_CONTAINERS = ("/.claude/worktrees",)
+
+
+def is_candidate(path: str, name: str) -> bool:
+    if name in NAMES:
+        return True
+    if name == "venv":
+        return os.path.exists(os.path.join(path, "pyvenv.cfg"))
+    if name == "target":
+        return any(os.path.exists(os.path.join(path, f)) for f in ("CACHEDIR.TAG", ".rustc_info.json"))
+    if path.endswith(WORKTREE_CONTAINERS):
+        return True
+    return name.startswith(".") and name.endswith("-worktrees")
+
+
+def is_subvolume(path: str) -> bool:
+    return os.stat(path).st_ino == 256
+
+
+def find_candidates(roots):
+    found = []
+    for root in roots:
+        for dirpath, dirnames, _ in os.walk(root):
+            keep = []
+            for name in dirnames:
+                path = os.path.join(dirpath, name)
+                if os.path.islink(path) or name == ".git" or name.endswith(".snapper-old"):
+                    continue
+                if is_candidate(path, name):
+                    if not is_subvolume(path):
+                        found.append(path)
+                    continue  # a candidate owns its whole subtree
+                if is_subvolume(path):
+                    continue  # already its own subvolume: not ours to walk
+                keep.append(name)
+            dirnames[:] = keep
+    return found
+
+
+def paths_in_use():
+    used = set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        base = f"/proc/{pid}"
+        for link in ("cwd", "exe"):
+            try:
+                used.add(os.readlink(f"{base}/{link}"))
+            except OSError:
+                pass
+        try:
+            for fd in os.listdir(f"{base}/fd"):
+                try:
+                    used.add(os.readlink(f"{base}/fd/{fd}"))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        try:
+            with open(f"{base}/maps") as maps:
+                for line in maps:
+                    parts = line.split(None, 5)
+                    if len(parts) == 6 and parts[5].startswith("/"):
+                        used.add(parts[5].strip())
+        except OSError:
+            pass
+    return used
+
+
+def in_use(path: str, used) -> bool:
+    prefix = path + "/"
+    return any(u == path or u.startswith(prefix) for u in used)
+
+
+def cargo_lock_held(path: str) -> bool:
+    for dirpath, dirnames, filenames in os.walk(path):
+        if dirpath.count(os.sep) - path.count(os.sep) > 2:
+            dirnames[:] = []
+        if ".cargo-lock" in filenames:
+            try:
+                with open(os.path.join(dirpath, ".cargo-lock"), "a") as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+            except OSError:
+                return True
+    return False
+
+
+def convert(path: str) -> str:
+    old = path + ".snapper-old"
+    if os.path.lexists(old):
+        return f"skip (leftover {old})"
+    st = os.stat(path)
+    os.rename(path, old)
+    made = subprocess.run(["btrfs", "subvolume", "create", path], capture_output=True, text=True)
+    if made.returncode != 0:
+        os.rename(old, path)
+        return f"fail create: {made.stderr.strip()}"
+    os.chmod(path, st.st_mode & 0o7777)
+    copied = subprocess.run(["cp", "-a", "--reflink=always", old + "/.", path + "/"],
+                            capture_output=True, text=True)
+    if copied.returncode != 0:
+        shutil.rmtree(path, ignore_errors=True)  # empties the new subvolume ...
+        os.rmdir(path)                           # ... then removes it
+        os.rename(old, path)
+        return f"fail copy (restored): {copied.stderr.strip()[:200]}"
+    shutil.rmtree(old)
+    return "converted"
+
+
+def main(argv):
+    dry = "--dry-run" in argv
+    roots = [a for a in argv if not a.startswith("--")] or [
+        os.path.expanduser("~/Programming"), os.path.expanduser("~/Documents")]
+    roots = [r for r in roots if os.path.isdir(r)]
+    candidates = find_candidates(roots)
+    used = paths_in_use() if candidates else set()
+    converted = skipped = 0
+    for path in candidates:
+        if in_use(path, used) or cargo_lock_held(path):
+            print(f"busy, retry later: {path}")
+            skipped += 1
+            continue
+        if dry:
+            print(f"would convert: {path}")
+            continue
+        result = convert(path)
+        print(f"{result}: {path}")
+        converted += result == "converted"
+    print(f"snapper-exclude-builds: {len(candidates)} candidates, {converted} converted, {skipped} busy")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

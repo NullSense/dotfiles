@@ -1,0 +1,6 @@
+# Web searches go through TinyFish, including when an older skill suggests Parallel.
+prefix_rule(
+    pattern = [["parallel-cli", "/home/nullsense/.local/bin/parallel-cli"]],
+    decision = "forbidden",
+    justification = "Use TinyFish for web research.",
+)

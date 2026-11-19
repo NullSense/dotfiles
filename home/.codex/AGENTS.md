@@ -101,19 +101,11 @@ Fix a bug → write a regression test immediately (TDD preferred).
 - **Known libraries, SDKs, CLIs, and developer tools → Context7 MCP first.** Resolve the library ID,
   verify it against the project-pinned version, then fetch a narrow topic (1–2k tokens; 5k+ for
   overviews). Reuse resolved IDs in-session.
-- **Whenever a web search is needed → `parallel-cli` or Exa first.** Two independent providers.
-  Reach for either, and switch to the other rather than falling through to plain WebSearch.
-  Fetching an already known authoritative URL directly is not a web search.
-  - **`parallel-cli`** (Parallel, `~/.local/bin/parallel-cli`, OAuth-authenticated to the Tensil
-    org — no key to manage). `parallel-cli search "<objective>" --mode fast --max-results N` for
-    discovery; `--mode advanced` when quality matters more than the ~1s latency;
-    `parallel-cli fetch <url>` returns token-efficient markdown. It also has `research`
-    (long-running; poll with `/status <run_id>`), `findall`, `enrich`, and `monitor` — reach past
-    `search` when the question really is a multi-entity or watch-over-time question.
-    Also reachable through the LiteLLM MCP gateway as `mcp__litellm__parallel-web_search` /
-    `-web_fetch`, which uses the anonymous free tier and so has lower rate limits than the CLI.
-  - **Exa** via `mcp__litellm__exa-web_search_exa` / `-web_fetch_exa`. Exa is prepaid: a
-    `402 exceeded your credits limit` is a top-up, not an outage — use `parallel-cli` meanwhile.
+- **Use TinyFish for every web search.** Search through the LiteLLM gateway's
+  `tinyfish-search` tool and read source pages with `tinyfish-fetch_content`.
+  The shell equivalents are `tinyfish search query "<query>"` and
+  `tinyfish fetch content get "<url>" --format markdown`. Report a TinyFish
+  outage if both interfaces fail. Keep Context7 first for known library documentation.
 - **Services/products** (apps, SaaS, hardware, OS features) → use current official documentation as
   evidence; use a search provider to discover the right official page, then current real-world
   fixes/issues.

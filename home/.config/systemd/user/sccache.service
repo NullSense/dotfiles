@@ -6,6 +6,12 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=SCCACHE_IDLE_TIMEOUT=0
 Environment=SCCACHE_CLIENT_SIDE=1
+# The server's own temporary files and startup socket live in one stable,
+# disk-backed directory. Without it the server takes whatever TMPDIR its starter
+# had: a lane that started it could remove that directory under a live server.
+# Compiles still use each client's environment (sccache clears and replaces it).
+Environment=TMPDIR=%h/.cache/agent-tmp/sccache-tmp
+ExecStartPre=/usr/bin/mkdir -p %h/.cache/agent-tmp/sccache-tmp
 # Cache directory and size come only from ~/.config/sccache/config; an
 # Environment= copy here would silently override it.
 # Same binary cargo's rustc-wrapper execs (pacman's /usr/bin/sccache), so the

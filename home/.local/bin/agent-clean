@@ -18,7 +18,8 @@ deletes only inside fixed roots, only things no running process is using:
 
 Allowed path roots: ~/.cache/agent-tmp/<x>, ~/.cache/claude-tmp/<x>, ~/.cache/sift-la/<x>
 (local-acceptance stack data), and generated build/test output of a worktree under
-~/Programming/.sift-worktrees/: a `target/` dir at the worktree root or in a nested cargo project
+~/Programming/.sift-worktrees/ or a checkout's Claude agent worktrees
+(~/Programming/<repo>/.claude/worktrees/<name>/): a `target/` dir at the worktree root or in a nested cargo project
 (e.g. `lints/target/`), and cargo-mutants' `mutants.out/` or `mutants.out.old/`. Those names are
 gitignored and never tracked, so a containing source directory is still refused. Root-owned files
 left by rootful Docker/BuildKit under an allowed path are removed through a throwaway alpine
@@ -40,6 +41,9 @@ from pathlib import Path
 HOME = Path.home()
 TMP_ROOTS = [HOME / ".cache/agent-tmp", HOME / ".cache/claude-tmp", HOME / ".cache/sift-la"]
 WORKTREES = HOME / "Programming/.sift-worktrees"
+# Claude Code agent worktrees live inside each checkout: ~/Programming/<repo>/.claude/worktrees/<name>/.
+PROGRAMMING = HOME / "Programming"
+AGENT_WORKTREES_GLOB = "*/.claude/worktrees"
 # Generated, gitignored build/test output that a worktree may own: cargo's `target` (the workspace
 # root, or a nested cargo project such as `lints/target/`) and cargo-mutants' run output. Tracked
 # trees never use these names, and a containing directory is still refused below.
@@ -86,6 +90,15 @@ def allowed_bytecode(path):
             and info.st_uid == os.getuid())
 
 
+def worktree_roots():
+    """Directories whose children are disposable worktrees: the shared .sift-worktrees home and
+    every checkout's Claude Code agent worktree directory (resolved, so a symlink cannot widen it)."""
+    roots = [WORKTREES]
+    roots += [Path(os.path.realpath(r)) for r in sorted(PROGRAMMING.glob(AGENT_WORKTREES_GLOB))
+              if r.is_dir() and not r.is_symlink()]
+    return roots
+
+
 def allowed_path(raw):
     p = Path(os.path.abspath(os.path.expanduser(raw)))
     # Resolve the parent, never the final component: a symlink is removed as a link and never
@@ -93,8 +106,10 @@ def allowed_path(raw):
     real = Path(os.path.realpath(p.parent)) / p.name
     if any(root in real.parents for root in TMP_ROOTS):
         return real
-    if WORKTREES in real.parents:
-        rel = real.relative_to(WORKTREES)
+    for worktrees in worktree_roots():
+        if worktrees not in real.parents:
+            continue
+        rel = real.relative_to(worktrees)
         # rel.parts[0] is the worktree itself, so only a build-output directory named inside the
         # worktree's own path qualifies; the tracked directory containing it (`lints/`, `web/`) is
         # still refused.

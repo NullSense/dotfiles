@@ -19,6 +19,7 @@ home = Path(os.environ['TMPDIR'])/'home'
 clean.BYTECODE_ROOTS = [home/'bin', home/'.local/bin', home/'.dotfiles/home/bin', home/'.dotfiles/home/.local/bin']
 clean.TMP_ROOTS = [home/'.cache/agent-tmp']
 clean.WORKTREES = home/'Programming/.sift-worktrees'
+clean.PROGRAMMING = home/'Programming'
 clean.users_of = lambda _: []
 clean.containers_mounting = lambda _: []
 def rejected(path):
@@ -97,6 +98,25 @@ rejected(clean.WORKTREES)
 rejected(home/'Programming/sift/target')
 rejected(home/'Programming/sift/lints/target')
 print('PASS: worktree cargo target and cargo-mutants output accepted; containing tracked source, near-miss names and main-checkout build output refused')
+
+# A checkout's Claude Code agent worktrees get the same rule; the checkout itself does not.
+agent_root = home/'Programming/sift/.claude/worktrees'
+agent_wt = agent_root/'agent-abc'
+(agent_wt/'target/debug').mkdir(parents=True)
+(agent_wt/'lints/target').mkdir(parents=True)
+(agent_wt/'src').mkdir(parents=True)
+(agent_wt/'src/lib.rs').write_text('tracked')
+for relative in ['target', 'target/debug', 'lints/target']:
+    assert clean.allowed_path(str(agent_wt/relative)) == agent_wt/relative, relative
+for path in [agent_wt, agent_root, agent_wt/'src', agent_wt/'src/lib.rs', home/'Programming/sift/.claude',
+             home/'Programming/sift/target']:
+    rejected(path)
+# A symlinked .claude/worktrees cannot widen the roots to wherever it points.
+(home/'Programming/evil/.claude').mkdir(parents=True)
+(home/'elsewhere/wt/target').mkdir(parents=True)
+(home/'Programming/evil/.claude/worktrees').symlink_to(home/'elsewhere', target_is_directory=True)
+rejected(home/'Programming/evil/.claude/worktrees/wt/target')
+print('PASS: Claude agent worktree build output accepted; the worktree, its sources, the checkout and symlinked roots refused')
 
 # Packaged acceptance relays are fixtures, never their installation's services.
 import subprocess

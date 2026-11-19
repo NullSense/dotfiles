@@ -52,6 +52,19 @@ assert args[args.index("--max-cudagraph-capture-size") + 1] == "512"
 print("PASS: Nemotron accepts Sift text model name and preserves pinned identity")
 PY
 
+NEMOTRON_TEST_ARGV="$scratch/default.json" VLLM_IMAGE= \
+  VLLM_CACHE_ROOT_HOST="$scratch/cache" VLLM_DRIVER_COMPAT_ROOT="$scratch/no-driver" \
+  PATH="$scratch/fake-bin:$PATH" "$root/home/bin/llm-servers/vllm-nemotron35-embed"
+python3 - "$scratch/default.json" <<'CHECK_IMAGE'
+import json
+import re
+import sys
+from pathlib import Path
+
+args = json.loads(Path(sys.argv[1]).read_text())
+assert any(re.fullmatch(r"vllm/vllm-openai@sha256:[0-9a-f]{64}", arg) for arg in args)
+CHECK_IMAGE
+
 for sleep_mode in 0 1; do
   NEMOTRON_TEST_ARGV="$scratch/old-embed.json" VLLM_SLEEP="$sleep_mode" \
     VLLM_CACHE_ROOT_HOST="$scratch/cache" VLLM_DRIVER_COMPAT_ROOT="$scratch/no-driver" \

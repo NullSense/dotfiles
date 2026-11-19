@@ -63,7 +63,7 @@ models:
   octen-embedding-4b:
     cmd: env PORT=${PORT} /home/nullsense/bin/llm-servers/llama-octen
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300              # evict after 5 min idle (matches globalTTL); no longer pinned in VRAM
+    ttl: 3600             # evict after 1 h idle (user 2026-11-19); no longer pinned in VRAM
     name: "Octen-Embedding-4B (Q8_0)"
     # `embed` alias REMOVED 2026-08-15 — it resolved here (2560-dim) while litellm's
     # logical `embed` at :4000 resolves to nemotron-embed-1b (2048-dim). One name, two
@@ -287,7 +287,7 @@ models:
     cmdStop: docker stop swap-bge
     proxy: http://127.0.0.1:${PORT}
     useModelName: bge-rerank
-    ttl: 300
+    ttl: 3600
     name: "bge-reranker-v2-m3 (Infinity)"
     aliases: [rerank, rerank-legal, "BAAI/bge-reranker-v2-m3"]
     description: "rerank · bge-reranker-v2-m3 cross-encoder via Infinity (/v1/rerank, sigmoid scores). legalkb reranker now; local reranker candidate for sift's RerankerService. ~1.3 GB."
@@ -308,7 +308,7 @@ models:
     # process ~6 GB so it coexists in legal-q; 32k f16 KV (~9 GB total) OOM'd next to rewrite.
     cmd: env PORT=${PORT} llama-server --model /home/nullsense/.lmstudio/models/Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp/Qwen3-Reranker-4B.Q8_0.gguf --reranking --device CUDA0 -ngl 99 --ctx-size 32768 -np 4 --batch-size 8192 --ubatch-size 8192 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --no-mmap --host 127.0.0.1 --port ${PORT} --metrics
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300
+    ttl: 3600
     name: "Qwen3-Reranker-4B (llama.cpp Q8_0)"
     aliases: [rerank-strong, "Qwen/Qwen3-Reranker-4B"]
     description: "rerank · Qwen3-Reranker-4B Q8_0 via llama.cpp native rerank (yes/no head). The legalkb 2026-07-02 merit pick, unblocked from infinity's ST pin. MTEB-R 69.76, MIRACL 67.52. ~4.3 GB."
@@ -321,7 +321,7 @@ models:
     cmd: docker run --rm -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True --name swap-jina --init --gpus all -p 127.0.0.1:${PORT}:7998 -v /home/nullsense/.cache/huggingface:/hf -e RERANK_BACKEND=jina -e SERVED_MODEL_NAME=jina-reranker-v3 rerank-sidecar:local
     cmdStop: docker stop swap-jina
     proxy: http://127.0.0.1:${PORT}
-    ttl: 300
+    ttl: 3600
     name: "jina-reranker-v3 (listwise sidecar, bf16)"
     aliases: [rerank-fast, "jinaai/jina-reranker-v3"]
     description: "rerank · jina-reranker-v3 0.6B listwise (BEIR 61.94 — SOTA at size; 93 languages). Own sidecar (~/Programming/llm-stack/jina-reranker-v3). ~1.5 GB."
@@ -337,7 +337,7 @@ models:
     cmdStop: docker stop swap-zerank
     proxy: http://127.0.0.1:${PORT}
     useModelName: zerank-2
-    ttl: 300
+    ttl: 3600
     name: "zerank-2 (Infinity, CC-BY-NC)"
     aliases: [rerank-max, "zeroentropy/zerank-2-reranker"]
     description: "rerank · zerank-2 4B (Qwen3-4B base, zELO-trained — tops rerank ELO boards; strong on legal/finance). ⚠ CC-BY-NC: personal/eval only. ~8 GB fp16."

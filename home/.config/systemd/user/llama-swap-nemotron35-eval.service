@@ -1,0 +1,9 @@
+[Unit]
+Description=Nemotron 3.5 retrieval evaluation router
+
+[Service]
+ExecStart=/usr/bin/llama-swap --config %h/.config/llama-swap/nemotron35-eval.yaml --listen 127.0.0.1:9293
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

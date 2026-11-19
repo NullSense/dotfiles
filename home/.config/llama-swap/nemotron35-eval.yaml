@@ -1,0 +1,13 @@
+# Isolated retrieval evaluation. The production router on port 9292 owns its own residency.
+# POST /upstream/nemotron35-embed/v2/embed on :9293 with the upstream repository name.
+# Use input_type=query for text queries and document for text, image or combined passages.
+healthCheckTimeout: 600
+globalTTL: 600
+startPort: 9650
+models:
+  nemotron35-embed:
+    cmd: env PORT=${PORT} VLLM_IMAGE=vllm/vllm-openai:v0.32.0 CONTAINER_NAME=vllm-nemotron35-eval /home/nullsense/bin/llm-servers/vllm-nemotron35-embed
+    cmdStop: docker stop -t 5 vllm-nemotron35-eval
+    proxy: http://127.0.0.1:${PORT}
+    useModelName: nvidia/Nemotron-3.5-Embed-1B-NVFP4@198164478bd2c4f2d3311d64eb563bc8564e0e6d
+    name: Nemotron 3.5 Embed 1B NVFP4

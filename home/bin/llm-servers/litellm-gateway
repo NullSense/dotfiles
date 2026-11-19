@@ -12,16 +12,11 @@
 # Env lives HERE (per-binary wrapper), not in the unit or direnv — systemd units
 # never see direnv-scoped env (see memory: agent-vault-env-systemd).
 #
-# Pinned installation (validated 2026-09-17):
-#   uv tool install --force --upgrade 'litellm[proxy,proxy-runtime,caching,extra_proxy]==1.101.0' --with 'fastapi==0.136.3'
-#   stack db-init
-#   systemctl --user restart litellm.service litellm-mcp.service
-# proxy supplies the server; caching supplies diskcache; extra_proxy supplies
-# Prisma; proxy-runtime supplies the configured OpenTelemetry callbacks.
-# FastAPI stays pinned for LiteLLM's OTel 0.49b0 instrumentation. Recheck its
-# instrumented HTTP path before lifting this pin on an upgrade.
-# db-init regenerates Prisma and applies the guarded engine-setter repair
-# still required by 1.101.0. Schema changes fail rather than accepting data loss.
+# Model gateway release verified 2026-11-19:
+#   uv tool install --force 'litellm[proxy,proxy-runtime,extra_proxy]==1.110.1' --with 'fastapi==0.136.3' --with diskcache
+# Generate Prisma's Python client and apply the engine-setter repair in stack db-init.
+# The native release migrator uses the existing _prisma_migrations ledger on startup.
+# The separate MCP environment below uses 1.101.0 with its matching Prisma client.
 set -euo pipefail
 
 # LiteLLM invokes the Prisma CLI as a subprocess when DATABASE_URL is set.

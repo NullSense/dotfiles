@@ -141,6 +141,11 @@ line changes the answer.
   output quality does not justify it. The *retrieval* underneath is good; the paraphrase written
   over it is not, and a fluent wrong summary of correct hits costs more than it saves. Use the
   retrieval-only tools and synthesize yourself — you see the same hits `get_answer` would.
+- **Freshness:** sift's repowise index refreshes about 60 s after a commit, at most every 5 min
+  (`.moon/hooks/repowise-debounced-update.sh`, user timer). No analysis is disabled; only the
+  incremental-graph patch cache is off (`REPOWISE_INCREMENTAL_GRAPH=0`). If a response has
+  `_meta.index_behind: true`, catch up with `repowise update --index-only --defer-docs`
+  (`--working-tree` for uncommitted work). Wiki pages are on demand only: `repowise update --docs`.
 - **graphify** (`~/.claude/skills/graphify/SKILL.md`, trigger `/graphify`) is no longer the default
   and should not be reached for on a repo repowise has indexed. It stays installed for two reasons:
   the `/graphify` command when you explicitly ask for it, and because some projects consume

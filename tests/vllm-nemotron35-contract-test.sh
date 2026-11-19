@@ -25,7 +25,7 @@ chmod +x "$scratch/fake-bin/docker"
 repository=nvidia/Nemotron-3.5-Embed-1B-NVFP4
 revision=198164478bd2c4f2d3311d64eb563bc8564e0e6d
 NEMOTRON_TEST_ARGV="$scratch/argv.json" \
-  VLLM_IMAGE=vllm/vllm-openai:v0.32.0 \
+  MAX_NUM_SEQS= MAXLEN= VLLM_IMAGE=vllm/vllm-openai:v0.32.0 \
   SERVED_NAME="$repository@$revision" REVISION="$revision" \
   VLLM_CACHE_ROOT_HOST="$scratch/cache" VLLM_DRIVER_COMPAT_ROOT="$scratch/no-driver" \
   PATH="$scratch/fake-bin:$PATH" \
@@ -46,5 +46,22 @@ assert names[0] == f"{repository}@{revision}", names
 assert repository in names, f"Sift's repository-only model request would be rejected: {names}"
 assert len(names) == len(set(names)), names
 assert args[args.index("--runner") + 1] == "pooling"
+assert args[args.index("--max-num-seqs") + 1] == "8"
+assert args[args.index("--max-num-batched-tokens") + 1] == "8192"
+assert args[args.index("--max-cudagraph-capture-size") + 1] == "512"
 print("PASS: Nemotron accepts Sift text model name and preserves pinned identity")
 PY
+
+for sleep_mode in 0 1; do
+  NEMOTRON_TEST_ARGV="$scratch/old-embed.json" VLLM_SLEEP="$sleep_mode" \
+    VLLM_CACHE_ROOT_HOST="$scratch/cache" VLLM_DRIVER_COMPAT_ROOT="$scratch/no-driver" \
+    PATH="$scratch/fake-bin:$PATH" "$root/home/bin/llm-servers/vllm-nemotron-embed"
+  python3 - "$scratch/old-embed.json" "$sleep_mode" <<'CHECK_SLEEP'
+import json
+import sys
+from pathlib import Path
+
+args = json.loads(Path(sys.argv[1]).read_text())
+assert ("--enable-sleep-mode" in args) == (sys.argv[2] == "1")
+CHECK_SLEEP
+done

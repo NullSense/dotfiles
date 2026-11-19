@@ -28,7 +28,8 @@ fi
 MAXLEN="${MAXLEN:-8192}"
 GPU_UTIL="${GPU_UTIL:-0.16}"
 # These are bounded shared-workstation budgets, not measured quality optima.
-MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"
+# Allow more short inputs to share the existing 8192-token step.
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-8}"
 export VLLM_HOST_NET=1 VLLM_HF_CACHE_MODE=none
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"

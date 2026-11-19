@@ -40,6 +40,8 @@ GPU_UTIL="${GPU_UTIL:-0.12}"   # ×31.4 GB ≈ 3.8 GB reserved
 
 VLLM_HOST_NET=1   # loopback-only, skips docker-proxy — see _vllm-common.sh
 VLLM_SLEEP="${VLLM_SLEEP:-1}"   # /sleep + /wake_up instead of a ~60s cold restart
+SLEEP_ARGS=()
+[[ "$VLLM_SLEEP" == 1 ]] && SLEEP_ARGS=(--enable-sleep-mode)
 source "$(dirname "$(readlink -f "$0")")/_vllm-common.sh"
 
 # Overridable so a smoke test / bench can run its OWN container instead of
@@ -59,6 +61,6 @@ exec docker run --rm --gpus all --name "$CONTAINER_NAME" \
   --max-model-len "$MAXLEN" \
   --max-num-batched-tokens "$MAXLEN" \
   --max-cudagraph-capture-size "$MAXLEN" \
-  ${VLLM_SLEEP:+--enable-sleep-mode} \
+  "${SLEEP_ARGS[@]}" \
   --gpu-memory-utilization "$GPU_UTIL" \
   "$@"

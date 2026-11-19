@@ -21,7 +21,7 @@
 #            purely to report when the upstream break is fixed and they can rejoin
 #            the leading tier. Their result NEVER blocks the leading bump — that
 #            was the whole point of splitting the tiers.
-#   DIGEST   wrappers hardcoding a content digest (currently vllm-qwen38). These
+#   DIGEST   wrappers pinning a registry digest or a local Docker image ID. These
 #            are request-tested against the candidate and reported as pending;
 #            this updater does not rewrite independently owned pins.
 #
@@ -112,7 +112,7 @@ for f in "${WRAPPERS[@]}"; do
   grep -Eq '\$\{VLLM_IMAGE:-\$VLLM_IMAGE_PIN\}' "$f" && leading_match=1 || true
   # shellcheck disable=SC2016
   grep -Eq '\$\{VLLM_IMAGE:-\$VLLM_IMAGE_PIN_HELD\}' "$f" && held_match=1 || true
-  grep -Eq '^[[:space:]]*VLLM_IMAGE=.*vllm/vllm-openai@sha256:[[:xdigit:]]{64}' "$f" \
+  grep -Eq '^[[:space:]]*VLLM_IMAGE="\$\{VLLM_IMAGE:-(vllm/vllm-openai@)?sha256:[[:xdigit:]]{64}\}"([[:space:]]*(#.*)?)$' "$f" \
     && digest_match=1 || true
   owners=$((leading_match + held_match + digest_match))
   [ "$owners" -eq 1 ] || {

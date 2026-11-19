@@ -170,6 +170,15 @@ if grep -Fq 'leading pin up to date' "$current_output"; then
     fail 'check-only inventory retained the false all-current message'
 fi
 
+# Local Docker image IDs and registry digests are both explicit immutable owners.
+cp "$current_root/bin/llm-servers/vllm-qwen38" "$current_root/bin/llm-servers/vllm-embeddinggemma2"
+sed -i 's|vllm/vllm-openai@sha256:|sha256:|' "$current_root/bin/llm-servers/vllm-embeddinggemma2"
+PATH="$current_root/fake-bin:$PATH" VLLM_TEST_DIR="$current_root" \
+    "$updater" --servers-dir "$current_root/bin/llm-servers" >"$current_output" 2>&1 \
+    || fail 'local Docker image ID stopped the version check'
+grep -Fq 'digest pins : [vllm-embeddinggemma2 vllm-qwen38]' "$current_output" \
+    || fail 'local Docker image ID lost its independent owner'
+
 # Regression 4: the live pin file annotates the leading pin with a trailing
 # rollback comment. The parser must accept trailing comments and surrounding
 # whitespace; the former updater exited "could not parse VLLM_IMAGE_PIN" in both

@@ -73,7 +73,8 @@ Fix a bug → write a regression test immediately (TDD preferred).
   or `TMPDIR` may itself be RAM-backed.
 - Use `/tmp`, tmpfs/ramfs, and runtime directories only for small, short-lived scratch, sockets, or
   control metadata—not bulk data. Keep fixture/build data on disk even when a Unix socket needs
-  a short path.
+  a short path. One exception: a disposable test database cluster may run on the bounded tmpfs its
+  project's test-infra owner provisions (measured faster and zero disk writes; user 2026-11-19).
 - **Clean up after yourself before reporting done.** Every lane or sub-agent removes what it
   created: its `TMPDIR`/scratch directories, test stacks and containers (never their volumes),
   builder containers, throwaway databases, and `target/` dirs of its own disposable worktrees.

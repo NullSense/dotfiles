@@ -28,7 +28,15 @@ set -euo pipefail
 # uv exposes the main `litellm` entry point globally but keeps dependency
 # executables inside the tool environment, so systemd's minimal PATH otherwise
 # makes an installed Prisma look missing and silently disables DB setup.
-export PATH="$HOME/.local/share/uv/tools/litellm/bin:$PATH"
+tool_bin="$HOME/.local/share/uv/tools/litellm/bin"
+# Local MCP clients currently use the loopback-only passwordless profile. Its
+# separate runtime keeps that contract until those clients use gateway keys.
+mcp_bin="$HOME/.local/share/llm-stack/litellm-mcp-1.101.0/bin"
+if [[ "${LITELLM_UNSET_MASTER_KEY:-0}" == 1 && "${LITELLM_HOST:-}" == 127.0.0.1 && -x "$mcp_bin/litellm" ]]; then
+  tool_bin="$mcp_bin"
+  export DISABLE_SCHEMA_UPDATE=true  # The model gateway owns shared schema migrations.
+fi
+export PATH="$tool_bin:$PATH"
 
 PORT="${LITELLM_PORT:-4000}"
 HOST="${LITELLM_HOST:-0.0.0.0}"

@@ -101,7 +101,7 @@ exec -a "gemma4-e4b@${PORT}.llama-server" llama-server \
   --cache-type-v f16 \
   --threads 8 \
   --threads-batch 8 \
-  --no-mmap \
+  --load-mode none \
   --temp "$TEMP" \
   --top-p "$TOPP" \
   --top-k "$TOPK" \
